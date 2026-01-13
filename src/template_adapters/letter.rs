@@ -30,6 +30,7 @@ pub fn maybe_convert_letter(input: &str) -> Option<String> {
             number_equations: equation_numbering_enabled(&hints),
             two_column: is_two_column(&hints),
             inline_wide_tables: false,
+            table_grid: false,
             bibliography_style_default: hints.bibliography_style.clone(),
         },
     );

@@ -48,6 +48,7 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
                 number_equations,
                 two_column: is_two_column(&hints),
                 inline_wide_tables: false,
+                table_grid: false,
                 bibliography_style_default: hints.bibliography_style.clone(),
             },
         );
@@ -69,6 +70,7 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
             number_equations: equation_numbering_enabled(&hints),
             two_column: is_two_column(&hints),
             inline_wide_tables: false,
+            table_grid: false,
             bibliography_style_default: hints.bibliography_style.clone(),
         },
     )

@@ -53,7 +53,9 @@ pub fn extract_preamble_hints(input: &str) -> PreambleHints {
                         "text" => parse_text_set(&node, &mut hints),
                         "par" => parse_par_set(&node, &mut hints),
                         "math.equation" => parse_math_equation_set(&node, &mut hints),
-                        "std.bibliography" => parse_bibliography_set(&node, &mut hints),
+                        "bibliography" | "std.bibliography" => {
+                            parse_bibliography_set(&node, &mut hints)
+                        }
                         _ => {}
                     }
                 }
@@ -68,6 +70,9 @@ pub fn extract_preamble_hints(input: &str) -> PreambleHints {
                 if let Some(name) = get_func_call_name(&node) {
                     if name == "cite" && cite_uses_natbib(&node) {
                         hints.uses_natbib = true;
+                    }
+                    if name == "bibliography" {
+                        parse_bibliography_call(&node, &mut hints);
                     }
                     if is_theorem_like(&name) {
                         hints.uses_amsthm = true;
@@ -336,6 +341,31 @@ fn parse_bibliography_set(node: &SyntaxNode, hints: &mut PreambleHints) {
         if key == "style" {
             if let Some(text) = extract_literal_string(&value) {
                 hints.bibliography_style = Some(text.clone());
+                if bibliography_style_needs_natbib(&text) {
+                    hints.uses_natbib = true;
+                }
+            }
+        }
+    }
+}
+
+fn parse_bibliography_call(node: &SyntaxNode, hints: &mut PreambleHints) {
+    let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) else {
+        return;
+    };
+    for child in args.children() {
+        if child.kind() != SyntaxKind::Named {
+            continue;
+        }
+        let key = extract_named_key(&child).unwrap_or_default();
+        let Some(value) = extract_named_value_node(&child) else {
+            continue;
+        };
+        if key == "style" {
+            if let Some(text) = extract_literal_string(&value) {
+                if hints.bibliography_style.is_none() {
+                    hints.bibliography_style = Some(text.clone());
+                }
                 if bibliography_style_needs_natbib(&text) {
                     hints.uses_natbib = true;
                 }

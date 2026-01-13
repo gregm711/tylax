@@ -120,11 +120,16 @@ Our method consists of three main components:
 \begingroup
 \setlength{\tabcolsep}{8pt}
 \setlength{\arrayrulewidth}{0.5pt}
-\begin{tabular}{ccc}
+\begin{tabular}{|c|c|c|}
+\hline
 \textbf{Hyperparameter} & \textbf{Value} & \textbf{Description} \\
+\hline
 Learning rate & $10^(-3)$ & Initial learning rate \\
+\hline
 Batch size & 64 & Training batch size \\
+\hline
 Epochs & 100 & Maximum training epochs \\
+\hline
 \end{tabular}
 \endgroup
 \caption{Hyperparameter settings for our experiments.}
@@ -166,12 +171,18 @@ square
 \begingroup
 \setlength{\tabcolsep}{8pt}
 \setlength{\arrayrulewidth}{0.5pt}
-\begin{tabular}{ccccc}
+\begin{tabular}{|c|c|c|c|c|}
+\hline
 \textbf{Method} & \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} \\
+\hline
 Baseline 1 & 72.3 & 70.1 & 74.5 & 72.2 \\
+\hline
 Baseline 2 & 75.8 & 73.2 & 78.1 & 75.6 \\
+\hline
 Baseline 3 & 77.2 & 75.8 & 78.3 & 77.0 \\
+\hline
 \textbf{Ours} & \textbf{83.5} & \textbf{81.2} & \textbf{85.1} & \textbf{83.1} \\
+\hline
 \end{tabular}
 \endgroup
 \caption{Performance comparison on Dataset A. Best results in bold.}
@@ -212,7 +223,6 @@ We presented [summary of contribution]. Our experiments demonstrate [key finding
 
 \textbf{Acknowledgments.} We thank [collaborators, funding agencies, compute providers]. This work was supported by [grant numbers].
 
-\section*{References}
 \begin{thebibliography}{99}
 \bibitem{ref1} Smith, A., Johnson, B., and Williams, C. "Title of the first paper." In \textit{Proceedings of Conference Name}, pages 1-10, 2023.
 \bibitem{ref2} Jones, D. and Lee, E. "Title of the second paper." \textit{Journal Name}, 42(3):123-145, 2023.

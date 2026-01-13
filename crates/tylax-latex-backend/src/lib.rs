@@ -11,6 +11,7 @@ pub struct LatexRenderOptions {
     pub number_equations: bool,
     pub two_column: bool,
     pub inline_wide_tables: bool,
+    pub table_grid: bool,
     pub bibliography_style_default: Option<String>,
 }
 
@@ -21,6 +22,7 @@ impl Default for LatexRenderOptions {
             number_equations: false,
             two_column: false,
             inline_wide_tables: false,
+            table_grid: false,
             bibliography_style_default: None,
         }
     }
@@ -147,7 +149,6 @@ fn render_references_block(blocks: &[Block], idx: usize) -> Option<String> {
     }
 
     let mut out = String::new();
-    out.push_str("\\section*{References}\n");
     out.push_str("\\begin{thebibliography}{99}\n");
     for (i, entry) in entries.iter().enumerate() {
         let rendered = normalize_inline_whitespace(&render_inlines(entry));
@@ -273,7 +274,7 @@ fn render_block(block: &Block, options: &LatexRenderOptions) -> String {
             out.push_str(&format!("\n\\end{{{}}}", env));
             out
         }
-        Block::Table(table) => render_table(table),
+        Block::Table(table) => render_table(table, Some(options)),
         Block::Figure(figure) => render_figure(figure, options),
         Block::Environment(env) => render_environment(env, options),
         Block::Bibliography { file, style } => {
@@ -1240,9 +1241,15 @@ fn render_inlines(inlines: &[Inline]) -> String {
                 out.push('}');
             }
             Inline::Ref(label) => {
-                out.push_str("\\ref{");
-                out.push_str(&escape_latex(label));
-                out.push('}');
+                if is_equation_label(label) {
+                    out.push_str("\\eqref{");
+                    out.push_str(&escape_latex(label));
+                    out.push('}');
+                } else {
+                    out.push_str("\\ref{");
+                    out.push_str(&escape_latex(label));
+                    out.push('}');
+                }
             }
             Inline::Label(label) => {
                 out.push_str("\\label{");
@@ -1295,6 +1302,11 @@ fn render_inlines(inlines: &[Inline]) -> String {
     out
 }
 
+fn is_equation_label(label: &str) -> bool {
+    let lowered = label.trim().to_lowercase();
+    lowered.starts_with("eq:")
+}
+
 fn escape_latex(input: &str) -> String {
     let mut out = String::new();
     for ch in input.chars() {
@@ -1340,18 +1352,23 @@ fn normalize_inline_whitespace(input: &str) -> String {
     out.trim().to_string()
 }
 
-fn render_table(table: &Table) -> String {
+fn render_table(table: &Table, options: Option<&LatexRenderOptions>) -> String {
     let mut out = String::new();
     let mut has_style = false;
     if table.inset.is_some() || table.stroke.is_some() || table.fill.is_some() {
         has_style = true;
     }
+    let stroke = table
+        .stroke
+        .as_deref()
+        .filter(|value| !stroke_is_none(value));
+    let grid_lines = options.map_or(false, |opts| opts.table_grid) || stroke.is_some();
     if has_style {
         out.push_str("\\begingroup\n");
         if let Some(inset) = table.inset.as_deref() {
             out.push_str(&format!("\\setlength{{\\tabcolsep}}{{{}}}\n", inset));
         }
-        if let Some(stroke) = table.stroke.as_deref() {
+        if let Some(stroke) = stroke {
             out.push_str(&format!("\\setlength{{\\arrayrulewidth}}{{{}}}\n", stroke));
         }
         if let Some(fill) = table.fill.as_deref() {
@@ -1390,8 +1407,11 @@ fn render_table(table: &Table) -> String {
             }
         }
     }
-    let col_spec = build_column_spec(table);
+    let col_spec = build_column_spec(table, grid_lines);
     out.push_str(&format!("\\begin{{tabular}}{{{}}}\n", col_spec));
+    if grid_lines {
+        out.push_str("\\hline\n");
+    }
 
     let columns = table.columns.max(1);
     let mut col_idx = 0usize;
@@ -1453,8 +1473,13 @@ fn render_table(table: &Table) -> String {
                 *first = format!("\\rowcolor{{\\tylaxHeaderRowColor}} {}", first);
             }
         }
-        out.push_str(&rows.join(" \\\\\n"));
-        out.push_str(" \\\\\n");
+        for row in rows {
+            out.push_str(&row);
+            out.push_str(" \\\\\n");
+            if grid_lines {
+                out.push_str("\\hline\n");
+            }
+        }
     }
 
     if has_style {
@@ -1474,10 +1499,18 @@ fn render_table(table: &Table) -> String {
     out
 }
 
-fn build_column_spec(table: &Table) -> String {
+fn stroke_is_none(value: &str) -> bool {
+    let trimmed = value.trim().trim_matches('"').to_lowercase();
+    trimmed == "none" || trimmed == "0" || trimmed == "0pt"
+}
+
+fn build_column_spec(table: &Table, grid_lines: bool) -> String {
     let mut spec = String::new();
     let columns = table.columns.max(1);
     let align = table.align.clone().unwrap_or_default();
+    if grid_lines {
+        spec.push('|');
+    }
     for i in 0..columns {
         let a = align.get(i).copied().unwrap_or(Alignment::Center);
         spec.push(match a {
@@ -1485,6 +1518,9 @@ fn build_column_spec(table: &Table) -> String {
             Alignment::Right => 'r',
             Alignment::Center => 'c',
         });
+        if grid_lines {
+            spec.push('|');
+        }
     }
     spec
 }
@@ -1548,7 +1584,7 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
             if is_wide_table(table) {
                 let mut out = String::new();
                 out.push_str("\\begin{center}\n");
-                out.push_str(&render_table(table));
+                out.push_str(&render_table(table, Some(options)));
                 if let Some(caption) = &figure.caption {
                     out.push_str("\n\\captionof{table}{");
                     out.push_str(&normalize_inline_whitespace(&render_inlines(caption)));
@@ -1594,7 +1630,7 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
 
     match &figure.content {
         FigureContent::Table(table) => {
-            out.push_str(&render_table(table));
+            out.push_str(&render_table(table, Some(options)));
         }
         FigureContent::Image(image) => {
             out.push_str(&render_image(image));

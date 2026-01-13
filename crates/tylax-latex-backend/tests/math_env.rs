@@ -14,6 +14,7 @@ fn math_block_uses_gather_without_alignment() {
             number_equations: true,
             two_column: false,
             inline_wide_tables: false,
+            table_grid: false,
             bibliography_style_default: None,
         },
     );
@@ -34,6 +35,7 @@ fn math_block_uses_align_with_alignment_points() {
             number_equations: true,
             two_column: false,
             inline_wide_tables: false,
+            table_grid: false,
             bibliography_style_default: None,
         },
     );
