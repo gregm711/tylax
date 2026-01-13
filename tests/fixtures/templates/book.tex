@@ -1,0 +1,152 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[top=1in,bottom=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[table]{xcolor}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{multicol}
+\usepackage{array}
+\usepackage{textcomp}
+\usepackage{titlesec}
+\titleformat{\section}{\bfseries\fontsize{14.0pt}{16.8pt}\selectfont}{\thesection}{1em}{}
+\titlespacing*{\section}{0pt}{1.5em}{0.5em}
+\titleformat{\subsection}{\bfseries\fontsize{12.0pt}{14.4pt}\selectfont}{\thesubsection}{1em}{}
+\titlespacing*{\subsection}{0pt}{1em}{0.3em}
+\usepackage{newcomputermodern}
+\usepackage{setspace}
+\setstretch{1.81}
+\definecolor{accent}{HTML}{C9A227}
+\definecolor{primary}{HTML}{1E3A5F}
+\setlength{\parindent}{1.5em}
+\providecommand{\textsubscript}[1]{$_{\text{#1}}$}
+\begin{document}
+
+\par\vspace{3in}
+
+\begin{center}
+\textcolor{primary}{\textbf{The Art of Problem Solving}}
+\end{center}
+
+\par\vspace{2in}
+
+\begin{center}
+\textcolor{primary}{\textbf{The Art of Problem Solving}} \textcolor{primary}{A Practical Guide to Creative Thinking} Your Name Publisher Name \\ City, Year
+\end{center}
+
+\par\vspace{1fr}
+
+Copyright © 2024 by Your Name
+
+All rights reserved. No part of this publication may be reproduced, distributed, or transmitted in any form or by any means, including photocopying, recording, or other electronic or mechanical methods, without the prior written permission of the publisher.
+
+First Edition: November 2024
+
+ISBN: 978-0-000-00000-0
+
+Published by Publisher Name \\ 123 Publishing Street \\ City, State 12345
+
+Printed in the United States of America
+
+10 9 8 7 6 5 4 3 2 1
+
+\par\vspace{1in}
+
+\begin{center}
+\textcolor{primary}{\textbf{Contents}}
+\end{center}
+
+\par\vspace{1em}
+
+\begingroup
+\setlength{\extrarowheight}{0.8em}
+\begin{tabular}{cc}
+\textbf{Preface} & vii \\
+\textbf{Acknowledgments} & ix \\
+ &  \\
+\textbf{Chapter 1: The Nature of Problems} & 1 \\
+What Is a Problem? & 3 \\
+Types of Problems & 8 \\
+The Problem-Solving Mindset & 15 \\
+ &  \\
+\textbf{Chapter 2: Tools for Thinking} & 23 \\
+Mental Models & 25 \\
+Frameworks and Heuristics & 34 \\
+When Tools Fail & 42 \\
+ &  \\
+\textbf{Chapter 3: Practice and Mastery} & 51 \\
+Deliberate Practice & 53 \\
+Learning from Failure & 61 \\
+Building Expertise & 68 \\
+ &  \\
+\textbf{Bibliography} & 75 \\
+\textbf{Index} & 79 \\
+\end{tabular}
+\endgroup
+
+\par\vspace{1in}
+
+\begin{center}
+\textcolor{primary}{\textbf{Preface}}
+\end{center}
+
+\par\vspace{1em}
+
+This book began as a series of notes I kept while learning to solve problems—not just mathematical puzzles, but the everyday challenges that require clear thinking and creative approaches. Over the years, those notes grew into lectures, then workshops, and finally this volume.
+
+The goal of this book is not to provide answers, but to develop the capacity for finding them. Problem-solving is a skill, and like any skill, it can be learned and improved through practice and reflection.
+
+I have tried to keep the examples diverse, drawing from mathematics, science, business, and daily life. The principles, I believe, are universal. A good problem-solver in one domain tends to be a good problem-solver in others, not because the problems are the same, but because the habits of mind transfer.
+
+\par\vspace{1em}
+
+\begin{flushright}
+\textit{Your Name} \\ \textit{November 2024}
+\end{flushright}
+
+1 1 The Nature of Problems
+
+The formulation of a problem is often more essential than its solution. Albert Einstein
+
+E very day, we encounter problems. Some are trivial—where did I put my keys?—while others are profound and shape the course of our lives. Yet despite this constant exposure, few of us receive any formal training in how to think about problems systematically.
+
+What distinguishes an expert problem-solver from a novice is not necessarily intelligence or knowledge, though both help. It is a certain way of approaching difficulties: a willingness to sit with uncertainty, to explore multiple paths, and to recognize patterns that connect seemingly unrelated situations.
+
+\section{What Is a Problem?}
+
+At its most basic, a problem is a gap between where we are and where we want to be, combined with uncertainty about how to close that gap. If we knew exactly what to do, it wouldn't be a problem—it would be a task.
+
+This definition has several important implications. First, problems are subjective. What is a problem for one person may be routine for another. A chess grandmaster sees patterns that beginners cannot; what seems like an impossible position to the novice is merely "complicated" to the expert.
+
+\subsection{The Structure of Problems}
+
+Problems have structure, even when that structure is not immediately apparent. Understanding this structure is the first step toward solving them. Most problems contain:
+
+\begin{itemize}
+  \item \textbf{Initial state}: Where we are now
+  \item \textbf{Goal state}: Where we want to be
+  \item \textbf{Operators}: Actions we can take
+  \item \textbf{Constraints}: Limitations on what we can do
+\end{itemize}
+
+The art of problem-solving often lies in recognizing which of these elements can be changed. Sometimes the best solution involves redefining the goal. Other times, it means finding operators we didn't know existed.
+
+\section{The Problem-Solving Mindset}
+
+Beyond techniques and frameworks, effective problem-solving requires a particular orientation toward difficulty. This mindset includes:
+
+\textbf{Tolerance for ambiguity.} Real problems rarely come with clear instructions. The ability to function effectively while uncertain is perhaps the most valuable problem-solving skill.
+
+\textbf{Comfort with failure.} Most approaches to most problems don't work. This is not a bug but a feature—it's how we learn what doesn't work and narrow in on what does.
+
+\textbf{Persistent curiosity.} Good problem-solvers keep asking questions long after others have accepted the obvious answer. They probe assumptions and explore alternatives.
+
+In the chapters that follow, we will develop both the techniques and the mindset needed to tackle problems of increasing complexity. The journey begins with understanding what we're up against.
+
+\par\vspace{1fr}
+
+\begin{center}
+\textcolor[HTML]{999}{Made with TypeTeX · typetex.com}
+\end{center}
+\end{document}

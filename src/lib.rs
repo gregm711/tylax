@@ -66,6 +66,11 @@ pub mod utils;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
+/// IR-based pipeline (new architecture)
+pub mod ir_pipeline;
+mod template_adapters;
+mod preamble_hints;
+
 // Re-export core conversion functions
 pub use core::typst2latex;
 pub use core::typst2latex::T2LOptions;
@@ -100,6 +105,9 @@ pub use data::symbols;
 pub use utils::diagnostics;
 pub use utils::error::{ConversionError, ConversionOutput, ConversionResult, ConversionWarning};
 pub use utils::files;
+
+// Re-export IR pipeline function
+pub use ir_pipeline::typst_to_latex_ir;
 
 /// Convert LaTeX math code to Typst math code
 ///

@@ -493,13 +493,30 @@ fn check_environment_balance(input: &str, result: &mut CheckResult) {
     let mut env_stack: Vec<(String, usize)> = Vec::new();
     let line_offsets = compute_line_offsets(input);
 
-    // Find \begin{...} and \end{...}
     let mut pos = 0;
     while pos < input.len() {
-        if let Some(begin_pos) = input[pos..].find(r"\begin{") {
-            let abs_pos = pos + begin_pos;
-            let after = &input[abs_pos + 7..];
+        let next_begin = input[pos..].find(r"\begin{").map(|p| pos + p);
+        let next_end = input[pos..].find(r"\end{").map(|p| pos + p);
 
+        let next_pos = match (next_begin, next_end) {
+            (Some(b), Some(e)) => {
+                if b <= e {
+                    Some((b, true))
+                } else {
+                    Some((e, false))
+                }
+            }
+            (Some(b), None) => Some((b, true)),
+            (None, Some(e)) => Some((e, false)),
+            (None, None) => None,
+        };
+
+        let Some((abs_pos, is_begin)) = next_pos else {
+            break;
+        };
+
+        if is_begin {
+            let after = &input[abs_pos + 7..];
             if let Some(close) = after.find('}') {
                 let env_name = &after[..close];
                 let (line, _) = offset_to_location(abs_pos, &line_offsets);
@@ -507,12 +524,8 @@ fn check_environment_balance(input: &str, result: &mut CheckResult) {
                 pos = abs_pos + 7 + close + 1;
                 continue;
             }
-        }
-
-        if let Some(end_pos) = input[pos..].find(r"\end{") {
-            let abs_pos = pos + end_pos;
+        } else {
             let after = &input[abs_pos + 5..];
-
             if let Some(close) = after.find('}') {
                 let env_name = &after[..close];
                 let (line, col) = offset_to_location(abs_pos, &line_offsets);
@@ -545,7 +558,7 @@ fn check_environment_balance(input: &str, result: &mut CheckResult) {
             }
         }
 
-        // Move forward
+        // Move forward if malformed sequence
         if let Some(next_backslash) = input[pos + 1..].find('\\') {
             pos = pos + 1 + next_backslash;
         } else {
@@ -644,6 +657,23 @@ mod tests {
         assert!(
             result.has_errors(),
             "Should fail for mismatched environments"
+        );
+    }
+
+    #[test]
+    fn test_environment_ordering() {
+        let input = r"\begin{document}
+\begin{itemize}
+\item A
+\end{itemize}
+\begin{tabular}{c}
+x
+\end{tabular}
+\end{document}";
+        let result = check_latex(input);
+        assert!(
+            !result.has_errors(),
+            "Should pass for properly nested environments with later begins"
         );
     }
 

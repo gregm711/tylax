@@ -1,0 +1,348 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[table]{xcolor}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{multicol}
+\usepackage{array}
+\usepackage{textcomp}
+\usepackage{newcomputermodern}
+\usepackage{setspace}
+\setstretch{1.81}
+\providecommand{\textsubscript}[1]{$_{\text{#1}}$}
+\begin{document}
+
+\begin{center}
+\\\textbf{ Laboratory Report: \\ Determination of the Acceleration Due to Gravity \\ Using a Simple Pendulum }\\ Course: PHYS 101 - Introduction to Physics \\ Lab Section: Tuesday 2:00 PM \\ \textbf{Submitted by:} \\ Your Name \\ Student ID: 123456789 \\ \textbf{Lab Partner(s):} \\ Partner Name \\ \textbf{Instructor:} \\ Dr. Professor Name \\ \textbf{Date Performed:} November 15, 2024 \\ \textbf{Date Submitted:} November 22, 2024
+\end{center}
+
+\section{Abstract}
+
+This experiment investigated the relationship between the period of a simple pendulum and the acceleration due to gravity. By measuring the period of oscillation for various pendulum lengths, we determined the local gravitational acceleration to be
+
+\begin{equation}
+g = 9.72 plus.minus 0.15 "m/s"^2
+\end{equation}
+
+. This value agrees with the accepted value of
+
+\begin{equation}
+9.81 "m/s"^2
+\end{equation}
+
+within experimental uncertainty. The primary sources of error include timing precision and small-angle approximation limitations.
+
+\section{Introduction}
+
+\subsection{Background}
+
+The simple pendulum is a classic system in physics that demonstrates periodic motion. For small angular displacements, the period
+
+\begin{equation}
+T
+\end{equation}
+
+of a simple pendulum is given by:
+
+\begin{equation}
+T = 2 \pi sqrt(L / g)
+\label{eq:period}
+\end{equation}
+
+where
+
+\begin{equation}
+L
+\end{equation}
+
+is the length of the pendulum and
+
+\begin{equation}
+g
+\end{equation}
+
+is the acceleration due to gravity.
+
+\subsection{Objectives}
+
+The objectives of this experiment were to:
+
+\begin{enumerate}
+  \item Verify the relationship between pendulum length and period
+  \item Determine the local value of gravitational acceleration
+  \item Analyze sources of experimental uncertainty
+\end{enumerate}
+
+\subsection{Hypothesis}
+
+Based on \ref{eq:period}, we hypothesize that the period squared (
+
+\begin{equation}
+T^2
+\end{equation}
+
+) will be linearly proportional to the pendulum length (
+
+\begin{equation}
+L
+\end{equation}
+
+), with the slope related to the gravitational acceleration.
+
+\section{Materials and Methods}
+
+\subsection{Apparatus}
+
+The following equipment was used:
+
+\begin{itemize}
+  \item Metal bob (mass: 50 g)
+  \item String (low stretch, length: 1.5 m)
+  \item Meter stick (precision: 1 mm)
+  \item Digital stopwatch (precision: 0.01 s)
+  \item Protractor
+  \item Ring stand and clamp
+\end{itemize}
+
+\subsection{Procedure}
+
+\begin{enumerate}
+  \item The pendulum was assembled by attaching the metal bob to the string and securing it to the ring stand.
+  \item The length $L$ was measured from the pivot point to the center of mass of the bob.
+  \item The pendulum was displaced by approximately 10° from vertical.
+  \item The time for 10 complete oscillations was measured three times for each length.
+  \item Steps 2-4 were repeated for lengths of 0.30, 0.50, 0.70, 0.90, and 1.10 m.
+\end{enumerate}
+
+\begin{table}[h]
+\centering
+\begingroup
+\setlength{\tabcolsep}{8pt}
+\setlength{\arrayrulewidth}{0.5pt}
+\begin{tabular}{ccccc}
+\textbf{Length (m)} & \textbf{Trial 1 (s)} & \textbf{Trial 2 (s)} & \textbf{Trial 3 (s)} & \textbf{Mean (s)} \\
+0.30 & 10.92 & 10.98 & 10.95 & 10.95 \\
+0.50 & 14.18 & 14.22 & 14.15 & 14.18 \\
+0.70 & 16.75 & 16.82 & 16.78 & 16.78 \\
+0.90 & 19.02 & 18.98 & 19.05 & 19.02 \\
+1.10 & 21.05 & 21.12 & 21.08 & 21.08 \\
+\end{tabular}
+\endgroup
+\caption{Time measurements for 10 oscillations at various pendulum lengths.}
+\label{tab:raw-data}
+\end{table}
+
+\section{Results}
+
+\subsection{Data Processing}
+
+The period for each length was calculated by dividing the mean time by 10. The results are summarized in \ref{tab:processed}.
+
+\begin{table}[h]
+\centering
+\begingroup
+\setlength{\tabcolsep}{8pt}
+\setlength{\arrayrulewidth}{0.5pt}
+\begin{tabular}{cccc}
+\textbf{$L$ (m)} & \textbf{$T$ (s)} & \textbf{$T^2$ (s²)} & \textbf{$\delta T^2$ (s²)} \\
+0.30 & 1.095 & 1.199 & 0.022 \\
+0.50 & 1.418 & 2.011 & 0.028 \\
+0.70 & 1.678 & 2.816 & 0.034 \\
+0.90 & 1.902 & 3.618 & 0.038 \\
+1.10 & 2.108 & 4.444 & 0.042 \\
+\end{tabular}
+\endgroup
+\caption{Processed data showing period and period squared.}
+\label{tab:processed}
+\end{table}
+
+\subsection{Analysis}
+
+From \ref{eq:period}, we can derive:
+
+\begin{equation}
+T^2 = (4 \pi^2) / g L
+\label{eq:linear}
+\end{equation}
+
+This predicts a linear relationship between
+
+\begin{equation}
+T^2
+\end{equation}
+
+and
+
+\begin{equation}
+L
+\end{equation}
+
+with slope
+
+\begin{equation}
+m = 4 \pi^2 / g
+\end{equation}
+
+.
+
+Performing a linear regression on our data yields:
+
+\begin{itemize}
+  \item Slope: $m = 4.06 plus.minus 0.12 "s"^2"/""m"$
+  \item Y-intercept: $b = -0.02 plus.minus 0.08 "s"^2$
+  \item Correlation coefficient: $R^2 = 0.998$
+\end{itemize}
+
+\subsection{Calculated Gravitational Acceleration}
+
+Solving for
+
+\begin{equation}
+g
+\end{equation}
+
+:
+
+\begin{equation}
+g = (4 \pi^2) / m = (4 \pi^2) / 4.06 = 9.72 "m/s"^2
+\end{equation}
+
+The uncertainty in
+
+\begin{equation}
+g
+\end{equation}
+
+is calculated using error propagation:
+
+\begin{equation}
+\delta g = g (\delta m) / m = 9.72 times (0.12 / 4.06) = 0.29 "m/s"^2
+\end{equation}
+
+Therefore, our experimental value is:
+
+\begin{equation}
+g = 9.72 plus.minus 0.29 "m/s"^2
+\end{equation}
+
+\section{Discussion}
+
+\subsection{Comparison with Accepted Value}
+
+The accepted value of gravitational acceleration at sea level is
+
+\begin{equation}
+g = 9.81 "m/s"^2
+\end{equation}
+
+. Our experimental value of
+
+\begin{equation}
+9.72 plus.minus 0.29 "m/s"^2
+\end{equation}
+
+agrees with the accepted value within experimental uncertainty.
+
+The percent error is:
+
+\begin{equation}
+"Percent Error" = (|9.81 - 9.72|) / 9.81 times 100% = 0.92%
+\end{equation}
+
+\subsection{Sources of Error}
+
+Several factors contributed to experimental uncertainty:
+
+\textbf{Systematic Errors:}
+
+\begin{itemize}
+  \item The small-angle approximation ($sin \theta \approx \theta$) is only valid for angles less than \nobreakspace{}15°
+  \item Air resistance was neglected
+  \item The string was assumed to be massless
+\end{itemize}
+
+\textbf{Random Errors:}
+
+\begin{itemize}
+  \item Reaction time in starting/stopping the stopwatch
+  \item Determining the exact endpoint of oscillations
+  \item Slight variations in release angle
+\end{itemize}
+
+\subsection{Improvements}
+
+Future experiments could be improved by:
+
+\begin{enumerate}
+  \item Using a photogate timer to reduce timing uncertainty
+  \item Conducting measurements in a vacuum chamber to eliminate air resistance
+  \item Using smaller initial displacements to better satisfy the small-angle approximation
+\end{enumerate}
+
+\section{Conclusion}
+
+This experiment successfully determined the acceleration due to gravity using a simple pendulum. The measured value of
+
+\begin{equation}
+g = 9.72 plus.minus 0.29 "m/s"^2
+\end{equation}
+
+agrees with the accepted value of
+
+\begin{equation}
+9.81 "m/s"^2
+\end{equation}
+
+within experimental uncertainty (0.92\% error). The linear relationship between
+
+\begin{equation}
+T^2
+\end{equation}
+
+and
+
+\begin{equation}
+L
+\end{equation}
+
+was confirmed with a correlation coefficient of
+
+\begin{equation}
+R^2 = 0.998
+\end{equation}
+
+, supporting the theoretical model.
+
+\section{References}
+
+[1] Halliday, D., Resnick, R., and Walker, J. \textit{Fundamentals of Physics}, 11th ed. Wiley, 2018.\\[2] Taylor, J. R. \textit{An Introduction to Error Analysis}, 2nd ed. University Science Books, 1997.\\[3] PHYS 101 Laboratory Manual, Fall 2024.
+
+\section{Appendix: Sample Calculations}
+
+\textbf{Calculation of Period:}
+
+\begin{equation}
+T = (10.95 "s") / 10 = 1.095 "s"
+\end{equation}
+
+\textbf{Calculation of $T^2$:}
+
+\begin{equation}
+T^2 = (1.095)^2 = 1.199 "s"^2
+\end{equation}
+
+\textbf{Uncertainty in $T^2$:}
+
+\begin{equation}
+\delta(T^2) = 2 T dot \delta T = 2(1.095)(0.01) = 0.022 "s"^2
+\end{equation}
+
+\textbf{Slope from Linear Regression:}
+
+\begin{equation}
+m = (n \sum x_i y_i - \sum x_i \sum y_i) / (n \sum x_i^2 - (\sum x_i)^2)
+\end{equation}
+\end{document}

@@ -44,6 +44,11 @@ phf = { version = "0.11", features = ["macros"] }
 regex = "1.10"
 rowan = "0.15"
 
+# IR pipeline (new architecture)
+tylax-ir = { path = "crates/tylax-ir" }
+tylax-typst-frontend = { path = "crates/tylax-typst-frontend" }
+tylax-latex-backend = { path = "crates/tylax-latex-backend" }
+
 # WASM dependencies
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }

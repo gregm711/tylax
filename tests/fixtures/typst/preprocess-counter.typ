@@ -1,0 +1,5 @@
+#let c = counter("t")
+#c.step()
+#c.display()
+#c.step()
+#c.display()

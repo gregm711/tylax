@@ -1,0 +1,38 @@
+use tylax_latex_backend::{render_document, LatexRenderOptions};
+use tylax_typst_frontend::typst_to_ir;
+
+use crate::preamble_hints::{
+    equation_numbering_enabled, extract_preamble_hints, is_two_column, render_article_preamble,
+};
+
+pub fn maybe_convert_arxiv(input: &str) -> Option<String> {
+    if !input.contains("arXiv Preprint Template") {
+        return None;
+    }
+
+    let doc = typst_to_ir(input);
+    let hints = extract_preamble_hints(input);
+    let body = render_document(
+        &doc,
+        LatexRenderOptions {
+            full_document: false,
+            number_equations: equation_numbering_enabled(&hints),
+            two_column: is_two_column(&hints),
+            inline_wide_tables: false,
+            bibliography_style_default: hints.bibliography_style.clone(),
+        },
+    );
+    let preamble = render_article_preamble(&hints);
+
+    let mut out = String::new();
+    out.push_str(&preamble);
+    out.push_str("\\begin{document}\n\n");
+
+    if !body.trim().is_empty() {
+        out.push_str(&body);
+        out.push('\n');
+    }
+
+    out.push_str("\\end{document}\n");
+    Some(out)
+}

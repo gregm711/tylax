@@ -1,0 +1,127 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[left=1in,right=1in,top=0.75in,bottom=0.75in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[table]{xcolor}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{multicol}
+\usepackage{array}
+\usepackage{textcomp}
+\usepackage{newcomputermodern}
+\usepackage{setspace}
+\setstretch{1.76}
+\definecolor{accent}{HTML}{14B8A6}
+\definecolor{gray}{HTML}{6B7280}
+\definecolor{light}{HTML}{F0FDFA}
+\definecolor{primary}{HTML}{0F766E}
+\AtBeginDocument{\raggedright}
+\providecommand{\textsubscript}[1]{$_{\text{#1}}$}
+\begin{document}
+
+Q4 Product Planning Meeting November 28, 2024 2:00 PM - 3:30 PM Conference Room B / Zoom Sarah Chen
+
+Agenda
+
+\begin{enumerate}
+  \item Review Q3 metrics and outcomes
+  \item Discuss Q4 priorities and roadmap
+  \item Resource allocation and timeline
+  \item Open discussion and questions
+\end{enumerate}
+
+Discussion Notes
+
+\subsection{Q3 Review}
+
+Sarah presented the Q3 results:
+
+\begin{itemize}
+  \item User acquisition up 23\% vs. target of 20\%
+  \item Feature adoption for new dashboard at 67\%
+  \item Customer satisfaction score: 4.2/5.0
+\end{itemize}
+
+Key learnings from the quarter:
+
+\begin{itemize}
+  \item Mobile users engaging 2x more than desktop
+  \item Onboarding flow improvements reduced drop-off by 15\%
+  \item Support ticket volume down 30\% after help center launch\\The mobile engagement data suggests we should prioritize mobile-first features in Q4.
+\end{itemize}
+
+\subsection{Q4 Priorities}
+
+The team discussed three major initiatives:
+
+\textbf{1. Mobile App v2.0}
+
+\begin{itemize}
+  \item Complete redesign based on user research
+  \item Offline mode support
+  \item Push notification improvements
+  \item Target: December 15 launch
+\end{itemize}
+
+\textbf{2. API Platform}
+
+\begin{itemize}
+  \item Public API for third-party integrations
+  \item Developer documentation and sandbox
+  \item Partner onboarding program
+  \item Target: January 31 beta
+\end{itemize}
+
+\textbf{3. Enterprise Features}
+
+\begin{itemize}
+  \item SSO integration (SAML, OIDC)
+  \item Advanced admin controls
+  \item Audit logging
+  \item Target: February 15\\Mobile App v2.0 is the priority for Q4. API Platform will run in parallel with a smaller team. Enterprise features will begin planning now for Q1 execution.
+\end{itemize}
+
+\subsection{Resource Discussion}
+
+Current team capacity:
+
+\begin{itemize}
+  \item Engineering: 8 developers (2 on maintenance)
+  \item Design: 2 designers
+  \item QA: 2 testers
+\end{itemize}
+
+Alex raised concern about timeline for mobile launch given holiday schedules. Team agreed to:
+
+\begin{itemize}
+  \item Front-load critical work before Dec 20
+  \item Skeleton crew Dec 23-Jan 2
+  \item Buffer week built into January\\Hire one contract developer for Nov-Dec to support mobile push. Jordan to coordinate with recruiting.
+\end{itemize}
+
+Action Items Draft mobile v2.0 PRD with detailed requirements Sarah Dec 2 Create mobile UI mockups for team review Jordan Dec 5 Spike on offline sync architecture Alex Dec 3 Prepare Q4 marketing calendar Taylor Dec 4 Set up mobile testing environment Morgan Dec 2 Post contract developer job listing Jordan Nov 29
+
+Decisions Summary
+
+\begingroup
+\setlength{\tabcolsep}{6pt}
+\setlength{\arrayrulewidth}{none}
+\definecolor{tylaxOddRow}{HTML}{F8FAFC}
+\rowcolors{1}{tylaxOddRow}{white}
+\begin{tabular}{cccc}
+\textbf{} & Mobile App v2.0 is top priority for Q4 & \textbf{} & API Platform runs parallel with reduced scope \\
+\textbf{} & Enterprise features move to Q1 & \textbf{} & Hire contract developer for mobile support \\
+\textbf{} & Holiday buffer week added to schedule \\
+\end{tabular}
+\endgroup
+
+Next Meeting \textbf{Date:} December 5, 2024 \\ \textbf{Time:} 2:00 PM - 3:00 PM \\ \textbf{Topic:} Mobile v2.0 Design Review \\ \textbf{Pre-work:} Review Jordan's mockups (will be shared Dec 4)
+
+\par\vspace{1fr}
+
+\par\vspace{0.3em}
+
+\begin{tabular}{cc}
+\end{tabular}
+\end{document}

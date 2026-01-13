@@ -935,8 +935,30 @@ dependencies = [
  "rowan",
  "serde",
  "serde-wasm-bindgen",
+ "tylax-ir",
+ "tylax-latex-backend",
+ "tylax-typst-frontend",
  "typst-syntax",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "tylax-ir"
+version = "0.1.0"
+
+[[package]]
+name = "tylax-latex-backend"
+version = "0.1.0"
+dependencies = [
+ "tylax-ir",
+]
+
+[[package]]
+name = "tylax-typst-frontend"
+version = "0.1.0"
+dependencies = [
+ "tylax-ir",
+ "typst-syntax",
 ]
 
 [[package]]

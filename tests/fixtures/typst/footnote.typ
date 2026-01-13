@@ -1,0 +1,3 @@
+= Footnote
+
+Note with #footnote[Important note].

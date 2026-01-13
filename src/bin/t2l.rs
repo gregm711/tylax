@@ -10,7 +10,7 @@ use tylax::{
     diagnostics::{check_latex, format_diagnostics},
     latex_document_to_typst, latex_to_typst,
     tikz::{convert_cetz_to_tikz, convert_tikz_to_cetz, is_cetz_code},
-    typst_document_to_latex, typst_to_latex,
+    typst_document_to_latex, typst_to_latex, typst_to_latex_ir,
 };
 
 #[cfg(feature = "cli")]
@@ -42,6 +42,10 @@ struct Cli {
     /// Pretty print the output
     #[arg(short, long)]
     pretty: bool,
+
+    /// Use the IR-based Typst → LaTeX pipeline
+    #[arg(long)]
+    ir: bool,
 
     /// Detect and print the input format without converting
     #[arg(long)]
@@ -85,6 +89,10 @@ enum Commands {
         /// Full document mode
         #[arg(short = 'f', long)]
         full_document: bool,
+
+        /// Use the IR-based Typst → LaTeX pipeline
+        #[arg(long)]
+        ir: bool,
     },
 
     /// Convert TikZ to CeTZ or vice versa
@@ -121,6 +129,10 @@ enum Commands {
         /// File extension for output files
         #[arg(short, long)]
         extension: Option<String>,
+
+        /// Use the IR-based Typst → LaTeX pipeline
+        #[arg(long)]
+        ir: bool,
     },
 
     /// Show version and feature info
@@ -222,13 +234,25 @@ fn main() -> io::Result<()> {
     let result = if cli.full_document {
         match direction {
             Direction::L2t => latex_document_to_typst(&input),
-            Direction::T2l => typst_document_to_latex(&input),
+            Direction::T2l => {
+                if cli.ir {
+                    typst_to_latex_ir(&input, true)
+                } else {
+                    typst_document_to_latex(&input)
+                }
+            }
             Direction::Auto => convert_auto_document(&input).0,
         }
     } else {
         match direction {
             Direction::L2t => latex_to_typst(&input),
-            Direction::T2l => typst_to_latex(&input),
+            Direction::T2l => {
+                if cli.ir {
+                    typst_to_latex_ir(&input, false)
+                } else {
+                    typst_to_latex(&input)
+                }
+            }
             Direction::Auto => convert_auto(&input).0,
         }
     };
@@ -282,6 +306,7 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
             output,
             direction,
             full_document,
+            ir,
         } => {
             let (content, filename) = match input {
                 Some(ref path) => (fs::read_to_string(path)?, Some(path.clone())),
@@ -322,13 +347,25 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
             let result = if full_document {
                 match direction {
                     Direction::L2t => latex_document_to_typst(&content),
-                    Direction::T2l => typst_document_to_latex(&content),
+                    Direction::T2l => {
+                        if ir {
+                            typst_to_latex_ir(&content, true)
+                        } else {
+                            typst_document_to_latex(&content)
+                        }
+                    }
                     Direction::Auto => convert_auto_document(&content).0,
                 }
             } else {
                 match direction {
                     Direction::L2t => latex_to_typst(&content),
-                    Direction::T2l => typst_to_latex(&content),
+                    Direction::T2l => {
+                        if ir {
+                            typst_to_latex_ir(&content, false)
+                        } else {
+                            typst_to_latex(&content)
+                        }
+                    }
                     Direction::Auto => convert_auto(&content).0,
                 }
             };
@@ -394,6 +431,7 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
             direction,
             full_document,
             extension,
+            ir,
         } => {
             // Create output directory if it doesn't exist
             fs::create_dir_all(&output_dir)?;
@@ -441,13 +479,25 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                         let result = if full_document {
                             match direction {
                                 Direction::L2t => latex_document_to_typst(&content),
-                                Direction::T2l => typst_document_to_latex(&content),
+                                Direction::T2l => {
+                                    if ir {
+                                        typst_to_latex_ir(&content, true)
+                                    } else {
+                                        typst_document_to_latex(&content)
+                                    }
+                                }
                                 Direction::Auto => convert_auto_document(&content).0,
                             }
                         } else {
                             match direction {
                                 Direction::L2t => latex_to_typst(&content),
-                                Direction::T2l => typst_to_latex(&content),
+                                Direction::T2l => {
+                                    if ir {
+                                        typst_to_latex_ir(&content, false)
+                                    } else {
+                                        typst_to_latex(&content)
+                                    }
+                                }
                                 Direction::Auto => convert_auto(&content).0,
                             }
                         };

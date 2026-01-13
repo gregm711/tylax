@@ -1,0 +1,156 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[left=1in,right=1in,top=0.75in,bottom=0.75in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[table]{xcolor}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{multicol}
+\usepackage{array}
+\usepackage{textcomp}
+\usepackage{titlesec}
+\titleformat{\section}{\bfseries\fontsize{11.0pt}{13.2pt}\selectfont}{\thesection}{1em}{}
+\titlespacing*{\section}{0pt}{0.8em}{0.3em}
+\titleformat{\subsection}{\bfseries\fontsize{10.0pt}{12.0pt}\selectfont}{\thesubsection}{1em}{}
+\titlespacing*{\subsection}{0pt}{0.5em}{0.2em}
+\usepackage{newcomputermodern}
+\usepackage{setspace}
+\setstretch{1.76}
+\definecolor{accent}{HTML}{EA580C}
+\definecolor{gray}{HTML}{6B7280}
+\definecolor{light}{HTML}{FFF7ED}
+\definecolor{primary}{HTML}{7C2D12}
+\providecommand{\textsubscript}[1]{$_{\text{#1}}$}
+\begin{document}
+
+\begin{center}
+\textcolor{white}{University Name · Department of Computer Science} \textcolor{white}{\textbf{CS 301: Data Structures and Algorithms}} \textcolor{white}{Fall 2024 · 3 Credit Hours}
+\end{center}
+
+\par\vspace{1em}
+
+\begingroup
+\setlength{\tabcolsep}{2em}
+\begin{tabular}{cc}
+Instructor Information \textbf{Instructor:} Dr. Jane Smith \\ \textbf{Email:} jsmith@university.edu \\ \textbf{Office:} Engineering Building, Room 312 \\ \textbf{Office Hours:} Mon/Wed 2:00-4:00 PM \\ or by appointment \\ \textbf{Phone:} (555) 123-4567 & Course Details \textbf{Lecture:} MWF 10:00-10:50 AM \\ \textbf{Location:} Science Hall 101 \\ \textbf{Lab:} Thursday 2:00-4:00 PM \\ \textbf{Lab Location:} CS Lab 205 \\ \textbf{Course Website:} canvas.university.edu \\ \textbf{Prerequisites:} CS 201, MATH 220 \\
+\end{tabular}
+\endgroup
+
+\par\vspace{0.5em}
+
+\section{Course Description}
+
+This course provides a comprehensive introduction to data structures and algorithms, fundamental topics for any computer scientist or software engineer. Students will learn to analyze algorithm efficiency, implement classic data structures, and apply algorithmic problem-solving techniques.
+
+Topics include: algorithm analysis (Big-O notation), arrays, linked lists, stacks, queues, trees, heaps, hash tables, graphs, sorting algorithms, searching algorithms, and introduction to algorithm design paradigms (divide-and-conquer, dynamic programming, greedy algorithms).
+
+\section{Learning Objectives}
+
+Upon successful completion of this course, students will be able to:
+
+\begin{enumerate}
+  \item Analyze the time and space complexity of algorithms using Big-O notation
+  \item Implement fundamental data structures from scratch in a programming language
+  \item Choose appropriate data structures for specific problem requirements
+  \item Apply classic algorithms for sorting, searching, and graph traversal
+  \item Design efficient algorithms using established paradigms
+  \item Debug and test data structure implementations
+  \item Communicate algorithmic ideas clearly in written and oral form
+\end{enumerate}
+
+\section{Required Materials}
+
+\subsection{Textbook}
+
+\textbf{Introduction to Algorithms} (4th Edition) \\ by Cormen, Leiserson, Rivest, and Stein \\ MIT Press, 2022 · ISBN: 978-0262046305
+
+\textit{Note: The 3rd edition is also acceptable. Page numbers may differ.}
+
+\subsection{Software}
+
+\begin{itemize}
+  \item Python 3.10+ or Java 17+ (student's choice)
+  \item Git version control
+  \item VS Code or preferred IDE
+\end{itemize}
+
+\section{Grading}
+
+\begingroup
+\setlength{\tabcolsep}{6pt}
+\setlength{\arrayrulewidth}{none}
+\rowcolors{2}{light}{white}
+\def\tylaxHeaderRowColor{primary}
+\begin{tabular}{ccccc}
+\rowcolor{\tylaxHeaderRowColor} \textcolor{white}{\textbf{Component}} & \textcolor{white}{\textbf{Weight}} & \textcolor{white}{\textbf{Details}} & Programming Assignments & 35\% \\
+6 assignments, lowest dropped & Lab Exercises & 15\% & Weekly lab work and participation & Midterm Exam \\
+20\% & October 15, in class & Final Exam & 25\% & December 12, 8:00-10:00 AM \\
+Participation & 5\% & In-class activities and discussions \\
+\end{tabular}
+\endgroup
+
+\par\vspace{0.5em}
+
+\subsection{Grading Scale}
+
+\begingroup
+\setlength{\tabcolsep}{1em}
+\begin{tabular}{ccccc}
+A: 93-100 & A-: 90-92 & B+: 87-89 & B: 83-86 & B-: 80-82 \\
+C+: 77-79 & C: 73-76 & C-: 70-72 & D: 60-69 & F: <60 \\
+\end{tabular}
+\endgroup
+
+\section{Course Schedule}
+
+\begingroup
+\setlength{\tabcolsep}{6pt}
+\setlength{\arrayrulewidth}{0.5pt + gray}
+\rowcolors{2}{white}{white}
+\def\tylaxHeaderRowColor{primary}
+\begin{tabular}{ccccccccc}
+\rowcolor{\tylaxHeaderRowColor} \textcolor{white}{\textbf{Week}} & \textcolor{white}{\textbf{Date}} & \textcolor{white}{\textbf{Topics}} & \textcolor{white}{\textbf{Assignments}} & 1 & Aug 26 & Introduction, Algorithm Analysis &  & 2 \\
+Sep 2 & Big-O, Arrays, Dynamic Arrays & HW1 out & 3 & Sep 9 & Linked Lists, Stacks &  & 4 & Sep 16 \\
+Queues, Deques & HW1 due, HW2 out & 5 & Sep 23 & Recursion, Binary Trees &  & 6 & Sep 30 & BST, Tree Traversals \\
+HW2 due, HW3 out & 7 & Oct 7 & Balanced Trees (AVL, Red-Black) &  & 8 & Oct 14 & \textbf{Midterm Review \& Exam} & HW3 due \\
+9 & Oct 21 & Heaps, Priority Queues & HW4 out & 10 & Oct 28 & Hash Tables, Collision Resolution &  & 11 \\
+Nov 4 & Graphs: Representation, BFS, DFS & HW4 due, HW5 out & 12 & Nov 11 & Shortest Paths (Dijkstra, Bellman-Ford) &  & 13 & Nov 18 \\
+MST, Sorting Algorithms & HW5 due, HW6 out & 14 & Nov 25 & \textit{Thanksgiving Break - No Class} &  & 15 & Dec 2 & Dynamic Programming, Review \\
+HW6 due & 16 & Dec 9 & \textbf{Final Exam (Dec 12)} &  \\
+\end{tabular}
+\endgroup
+
+\section{Course Policies}
+
+Attendance Regular attendance is expected. More than 3 unexcused absences may result in a lowered participation grade. If you must miss class, please notify me in advance when possible.
+
+Late Work Assignments are due at 11:59 PM on the due date. Late submissions receive a 10\% penalty per day, up to 3 days. After 3 days, late work is not accepted. Extensions may be granted for documented emergencies.
+
+Academic Integrity All submitted work must be your own. You may discuss concepts with classmates, but code and written answers must be individual work. Use of AI assistants (ChatGPT, Copilot, etc.) must be disclosed. Violations will be reported to the Dean of Students.
+
+Copying code from the internet, other students, or previous semesters is considered academic dishonesty and will result in a zero on the assignment and possible course failure.
+
+Accommodations Students with disabilities should contact the Office of Disability Services to arrange appropriate accommodations. Please provide your accommodation letter within the first two weeks of class.
+
+\section{University Resources}
+
+\begin{itemize}
+  \item \textbf{Tutoring Center:} Library 2nd Floor, free drop-in tutoring
+  \item \textbf{Writing Center:} Student Union 150, help with technical writing
+  \item \textbf{Counseling Services:} Health Center, (555) 123-7890
+  \item \textbf{IT Help Desk:} help@university.edu, 24/7 support
+\end{itemize}
+
+\section{Communication}
+
+The best way to reach me is via email. I typically respond within 24 hours on weekdays. For urgent matters, include "CS301 URGENT" in your subject line.
+
+Course announcements will be posted on Canvas. Please check the course website regularly and ensure your notification settings are configured to receive updates.
+
+\par\vspace{1fr}
+
+\begin{center}
+\textcolor{gray}{ \textit{This syllabus is subject to change. Students will be notified of any modifications.} \\ Last updated: November 28, 2024 · Made with TypeTeX · typetex.com }
+\end{center}
+\end{document}

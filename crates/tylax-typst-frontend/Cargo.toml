@@ -1,0 +1,12 @@
+[package]
+name = "tylax-typst-frontend"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "tylax_typst_frontend"
+path = "src/lib.rs"
+
+[dependencies]
+typst-syntax = "0.11"
+tylax-ir = { path = "../tylax-ir" }
