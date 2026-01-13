@@ -1674,7 +1674,8 @@ fn parse_width_ratio(raw: &str) -> Option<f64> {
 }
 
 fn is_wide_table(table: &Table) -> bool {
-    table.columns >= 4
+    // Be conservative: only force table* when the column count is clearly wide.
+    table.columns >= 6
 }
 
 fn render_image(image: &Image) -> String {
