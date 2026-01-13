@@ -1160,7 +1160,8 @@ fn maybe_inline_func(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<In
         "cite" => {
             let mut keys: Vec<String> = Vec::new();
             let mut style: Option<String> = None;
-            let mut note_parts: Vec<String> = Vec::new();
+            let mut pre_note: Option<String> = None;
+            let mut post_note: Option<String> = None;
             if let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) {
                 for child in args.children() {
                     match child.kind() {
@@ -1172,12 +1173,23 @@ fn maybe_inline_func(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<In
                                 let cleaned = val.trim_matches('"').to_string();
                                 if matches!(key.as_str(), "style" | "form" | "mode") {
                                     style = Some(cleaned);
-                                } else if matches!(
-                                    key.as_str(),
-                                    "supplement" | "page" | "pages" | "note"
-                                ) {
+                                } else if key == "supplement" {
                                     if !cleaned.is_empty() {
-                                        note_parts.push(cleaned);
+                                        pre_note = Some(cleaned);
+                                    }
+                                } else if key == "page" {
+                                    if !cleaned.is_empty() {
+                                        let note = format_page_note(&cleaned, false);
+                                        push_note(&mut post_note, &note);
+                                    }
+                                } else if key == "pages" {
+                                    if !cleaned.is_empty() {
+                                        let note = format_page_note(&cleaned, true);
+                                        push_note(&mut post_note, &note);
+                                    }
+                                } else if key == "note" {
+                                    if !cleaned.is_empty() {
+                                        push_note(&mut post_note, &cleaned);
                                     }
                                 }
                             }
@@ -1190,17 +1202,12 @@ fn maybe_inline_func(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<In
             }
 
             if !keys.is_empty() {
-                let note = if note_parts.is_empty() {
-                    None
-                } else {
-                    Some(note_parts.join(", "))
-                };
                 let command = if let Some(style) = style.as_deref() {
                     let lowered = style.to_lowercase();
                     if lowered.contains("author") || lowered.contains("text") {
                         "citet"
                     } else if lowered.contains("year") {
-                        if note.is_some() {
+                        if pre_note.is_some() || post_note.is_some() {
                             "citep"
                         } else {
                             "citeyearpar"
@@ -1210,18 +1217,21 @@ fn maybe_inline_func(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<In
                     } else {
                         "cite"
                     }
-                } else if note.is_some() {
+                } else if pre_note.is_some() || post_note.is_some() {
                     "citep"
                 } else {
                     "cite"
                 };
 
-                if note.is_some() || command != "cite" {
-                    let note_text = note.unwrap_or_default();
-                    let cite = if note_text.is_empty() {
-                        format!("\\{}{{{}}}", command, keys.join(","))
-                    } else {
-                        format!("\\{}[{}]{{{}}}", command, note_text, keys.join(","))
+                if pre_note.is_some() || post_note.is_some() || command != "cite" {
+                    let cite = match (pre_note.as_deref(), post_note.as_deref()) {
+                        (Some(pre), Some(post)) => {
+                            format!("\\{}[{}][{}]{{{}}}", command, pre, post, keys.join(","))
+                        }
+                        (Some(note), None) | (None, Some(note)) => {
+                            format!("\\{}[{}]{{{}}}", command, note, keys.join(","))
+                        }
+                        (None, None) => format!("\\{}{{{}}}", command, keys.join(",")),
                     };
                     return Some(vec![Inline::RawLatex(cite)]);
                 }
@@ -1595,6 +1605,36 @@ fn extract_ref_label(args: &SyntaxNode) -> Option<String> {
         }
     }
     None
+}
+
+fn format_page_note(raw: &str, plural: bool) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let lowered = trimmed.to_lowercase();
+    if lowered.starts_with('p') {
+        return trimmed.to_string();
+    }
+    let prefix = if plural { "pp.~" } else { "p.~" };
+    format!("{}{}", prefix, trimmed)
+}
+
+fn push_note(note: &mut Option<String>, value: &str) {
+    if value.trim().is_empty() {
+        return;
+    }
+    match note {
+        Some(existing) => {
+            if !existing.is_empty() {
+                existing.push_str(", ");
+            }
+            existing.push_str(value.trim());
+        }
+        None => {
+            *note = Some(value.trim().to_string());
+        }
+    }
 }
 
 fn collect_cite_keys(node: &SyntaxNode, keys: &mut Vec<String>) {
