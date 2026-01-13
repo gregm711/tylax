@@ -1240,8 +1240,29 @@ fn maybe_inline_func(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<In
             }
         }
         "ref" => {
-            if let Some(arg) = first_arg_string(node) {
-                return Some(vec![Inline::Ref(arg)]);
+            let mut supplement: Option<Vec<Inline>> = None;
+            if let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) {
+                for child in args.children() {
+                    if child.kind() == SyntaxKind::Named {
+                        let key = extract_named_key(&child).unwrap_or_default();
+                        if key == "supplement" {
+                            if let Some(value) = extract_named_value_node(&child) {
+                                let inlines = collect_inlines(&value, losses);
+                                if !inlines.is_empty() {
+                                    supplement = Some(inlines);
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(label) = extract_ref_label(&args) {
+                    if let Some(mut supplement) = supplement {
+                        supplement.push(Inline::RawLatex("\\nobreakspace{}".to_string()));
+                        supplement.push(Inline::Ref(label));
+                        return Some(supplement);
+                    }
+                    return Some(vec![Inline::Ref(label)]);
+                }
             }
         }
         "label" => {
@@ -1513,7 +1534,10 @@ fn sym_inline_from_parts(parts: &[String]) -> Option<Inline> {
 
 fn is_cross_ref_label(label: &str) -> bool {
     let lower = label.to_lowercase();
-    for prefix in ["fig:", "tab:", "sec:", "eq:", "lst:", "alg:"] {
+    for prefix in [
+        "fig:", "tab:", "sec:", "eq:", "lst:", "alg:", "thm:", "lemma:", "lem:", "prop:",
+        "def:", "cor:", "ex:", "remark:", "rem:", "app:", "appendix:",
+    ] {
         if lower.starts_with(prefix) {
             return true;
         }
@@ -1539,6 +1563,35 @@ fn first_arg_text(node: &SyntaxNode) -> Option<String> {
             SyntaxKind::Str | SyntaxKind::Text | SyntaxKind::Numeric | SyntaxKind::Ident
         ) {
             return Some(child.text().trim_matches('"').to_string());
+        }
+    }
+    None
+}
+
+fn extract_ref_label(args: &SyntaxNode) -> Option<String> {
+    for child in args.children() {
+        if child.kind() == SyntaxKind::Named {
+            continue;
+        }
+        match child.kind() {
+            SyntaxKind::Label | SyntaxKind::Ref => {
+                let text = node_full_text(&child);
+                let cleaned = text
+                    .trim()
+                    .trim_start_matches('@')
+                    .trim_start_matches('<')
+                    .trim_end_matches('>');
+                if !cleaned.is_empty() {
+                    return Some(cleaned.to_string());
+                }
+            }
+            SyntaxKind::Str | SyntaxKind::Text | SyntaxKind::Ident => {
+                let text = child.text().trim_matches('"').to_string();
+                if !text.is_empty() {
+                    return Some(text);
+                }
+            }
+            _ => {}
         }
     }
     None
