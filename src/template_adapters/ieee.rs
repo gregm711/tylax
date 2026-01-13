@@ -38,7 +38,7 @@ pub fn maybe_convert_ieee(input: &str) -> Option<String> {
             full_document: false,
             number_equations: equation_numbering_enabled(&hints),
             two_column: is_two_column(&hints),
-            inline_wide_tables: true,
+            inline_wide_tables: false,
             bibliography_style_default: hints.bibliography_style.clone(),
         },
     );
@@ -55,19 +55,6 @@ pub fn maybe_convert_ieee(input: &str) -> Option<String> {
     out.push_str("\\usepackage{graphicx}\n");
     out.push_str("\\usepackage{textcomp}\n");
     out.push_str("\\usepackage{xcolor}\n");
-    out.push_str("\\usepackage{caption}\n");
-    if let Some(font) = hints.font.as_deref() {
-        if is_new_computer_modern(font) {
-            out.push_str("\\usepackage{newcomputermodern}\n");
-        } else {
-            out.push_str("\\usepackage{iftex}\n");
-            out.push_str("\\ifPDFTeX\n");
-            out.push_str("\\else\n");
-            out.push_str("\\usepackage{fontspec}\n");
-            out.push_str(&format!("\\setmainfont{{{}}}\n", escape_latex(font)));
-            out.push_str("\\fi\n");
-        }
-    }
     if hints.uses_amsthm {
         out.push_str("\\usepackage{amsthm}\n");
         out.push_str(&render_amsthm_definitions(&hints));
@@ -75,7 +62,6 @@ pub fn maybe_convert_ieee(input: &str) -> Option<String> {
     if let Some(within) = equation_number_within(&hints) {
         out.push_str(&format!("\\numberwithin{{equation}}{{{}}}\n", within));
     }
-    out.push_str(&render_ieee_heading_overrides());
     out.push_str("\\providecommand{\\textsubscript}[1]{$_{\\text{#1}}$}\n");
     for (name, hex) in &hints.colors {
         out.push_str(&format!(
@@ -84,21 +70,37 @@ pub fn maybe_convert_ieee(input: &str) -> Option<String> {
             escape_latex(hex)
         ));
     }
+    if let Some(title) = meta.title.as_deref() {
+        out.push_str(&format!("\\title{{{}}}\n", escape_latex(title)));
+    }
+    if !meta.authors.is_empty() {
+        out.push_str("\\author{\n");
+        out.push_str(&render_ieee_authors(&meta.authors));
+        out.push_str("}\n");
+    }
     out.push_str("\\begin{document}\n");
-    out.push_str("\\setlength{\\parindent}{1em}\n");
-
-    out.push_str("\\makeatletter\n");
-    out.push_str("\\twocolumn[{\\begin{@twocolumnfalse}\n");
-    out.push_str(&render_ieee_title_block(&meta));
-    out.push_str("\\end{@twocolumnfalse}}]\n");
-    out.push_str("\\makeatother\n");
-
+    if meta.title.is_some() || !meta.authors.is_empty() {
+        out.push_str("\\maketitle\n");
+    }
+    if let Some(abstract_text) = meta.abstract_text.as_deref() {
+        out.push_str("\\begin{abstract}\n");
+        out.push_str(&escape_latex(abstract_text));
+        out.push_str("\n\\end{abstract}\n");
+    }
+    if !meta.index_terms.is_empty() {
+        out.push_str("\\begin{IEEEkeywords}\n");
+        let terms: Vec<String> = meta
+            .index_terms
+            .iter()
+            .map(|t| escape_latex(t.trim()))
+            .collect();
+        out.push_str(&terms.join(", "));
+        out.push_str("\n\\end{IEEEkeywords}\n");
+    }
     if !body.trim().is_empty() {
-        let body = wrap_bibliography_size(&body, "9pt", "10.8pt");
         out.push_str(&body);
         out.push('\n');
     }
-
     out.push_str("\\end{document}\n");
     Some(out)
 }
@@ -318,146 +320,41 @@ fn node_full_text(node: &SyntaxNode) -> String {
     node.clone().into_text().to_string()
 }
 
-fn is_new_computer_modern(value: &str) -> bool {
-    let lowered = value.trim().trim_matches('"').to_lowercase();
-    lowered.contains("new computer modern")
-}
-
-fn render_ieee_heading_overrides() -> String {
+fn render_ieee_authors(authors: &[IeeeAuthor]) -> String {
     let mut out = String::new();
-    out.push_str("\\makeatletter\n");
-    out.push_str("\\renewcommand\\section{\\@startsection{section}{1}{\\z@}{0.5em}{0.3em}{\\centering\\normalfont\\bfseries\\MakeUppercase}}\n");
-    out.push_str("\\renewcommand\\subsection{\\@startsection{subsection}{2}{\\z@}{0.5em}{0.3em}{\\normalfont\\bfseries}}\n");
-    out.push_str("\\renewcommand\\subsubsection{\\@startsection{subsubsection}{3}{\\z@}{0pt}{0pt}{\\normalfont\\bfseries}}\n");
-    out.push_str("\\makeatother\n");
-    out
-}
-
-fn render_ieee_title_block(meta: &IeeeMetadata) -> String {
-    let mut out = String::new();
-    out.push_str("\\begin{center}\n");
-    if let Some(title) = meta.title.as_deref() {
-        out.push_str("{\\fontsize{24pt}{28pt}\\selectfont\\bfseries ");
-        out.push_str(&escape_latex(title));
-        out.push_str("}\n");
-        out.push_str("\\vspace{1em}\n");
-    }
-
-    if !meta.authors.is_empty() {
-        out.push_str(&render_ieee_authors_grid(&meta.authors));
-    }
-
-    if meta.abstract_text.is_some() || !meta.index_terms.is_empty() {
-        out.push_str("\\vspace{1.5em}\n");
-        out.push_str("\\begin{minipage}{\\linewidth}\n");
-        out.push_str("\\raggedright\n");
-        if let Some(abstract_text) = meta.abstract_text.as_deref() {
-            out.push_str("\\textbf{Abstract---}");
-            out.push_str("\\textit{");
-            out.push_str(&escape_latex(abstract_text.trim()));
-            out.push_str("}\n");
-            if !meta.index_terms.is_empty() {
-                out.push_str("\\vspace{0.5em}\n");
-            }
-        }
-        if !meta.index_terms.is_empty() {
-            out.push_str("\\textbf{Index Terms---}");
-            let terms: Vec<String> = meta
-                .index_terms
-                .iter()
-                .map(|t| escape_latex(t.trim()))
-                .collect();
-            out.push_str(&terms.join(", "));
-            out.push('\n');
-        }
-        out.push_str("\\end{minipage}\n");
-    }
-
-    out.push_str("\\end{center}\n");
-    out
-}
-
-fn render_ieee_authors_grid(authors: &[IeeeAuthor]) -> String {
-    if authors.is_empty() {
-        return String::new();
-    }
-    let cols = authors.len().min(3);
-    let mut col_spec = String::new();
-    for idx in 0..cols {
+    for (idx, author) in authors.iter().enumerate() {
         if idx > 0 {
-            col_spec.push_str("@{\\hspace{1.5em}}");
+            out.push_str("\\and\n");
         }
-        col_spec.push('c');
+        out.push_str(&render_ieee_author(author));
     }
-    let mut out = String::new();
-    out.push_str(&format!("\\begin{{tabular}}{{{}}}\n", col_spec));
-    for row in authors.chunks(cols) {
-        let mut cells: Vec<String> = row
-            .iter()
-            .map(render_ieee_author_cell)
-            .collect();
-        while cells.len() < cols {
-            cells.push(String::new());
-        }
-        out.push_str(&cells.join(" & "));
-        out.push_str(" \\\\\n");
-    }
-    out.push_str("\\end{tabular}\n");
     out
 }
 
-fn render_ieee_author_cell(author: &IeeeAuthor) -> String {
+fn render_ieee_author(author: &IeeeAuthor) -> String {
+    let mut out = String::new();
+    out.push_str("\\IEEEauthorblockN{");
+    out.push_str(&escape_latex(&author.name));
+    out.push_str("}\n");
+
     let mut lines = Vec::new();
-    lines.push(format!(
-        "{{\\fontsize{{11pt}}{{13.2pt}}\\selectfont {}}}",
-        escape_latex(&author.name)
-    ));
     if let Some(dep) = author.department.as_deref() {
-        lines.push(format!(
-            "{{\\fontsize{{9pt}}{{10.8pt}}\\selectfont\\textit{{{}}}}}",
-            escape_latex(dep)
-        ));
+        lines.push(format!("\\textit{{{}}}", escape_latex(dep)));
     }
     if let Some(org) = author.organization.as_deref() {
-        lines.push(format!(
-            "{{\\fontsize{{9pt}}{{10.8pt}}\\selectfont {}}}",
-            escape_latex(org)
-        ));
+        lines.push(escape_latex(org));
     }
     if let Some(loc) = author.location.as_deref() {
-        lines.push(format!(
-            "{{\\fontsize{{9pt}}{{10.8pt}}\\selectfont {}}}",
-            escape_latex(loc)
-        ));
+        lines.push(escape_latex(loc));
     }
     if let Some(email) = author.email.as_deref() {
-        lines.push(format!(
-            "{{\\fontsize{{9pt}}{{10.8pt}}\\selectfont {}}}",
-            escape_latex(email)
-        ));
+        lines.push(escape_latex(email));
     }
-    format!(
-        "\\begin{{tabular}}{{@{{}}c@{{}}}}{}\\end{{tabular}}",
-        lines.join(" \\\\ ")
-    )
-}
-
-fn wrap_bibliography_size(body: &str, size: &str, baseline: &str) -> String {
-    let begin = "\\begin{thebibliography}";
-    let end = "\\end{thebibliography}";
-    let Some(start) = body.find(begin) else {
-        return body.to_string();
-    };
-    let Some(end_rel) = body[start..].find(end) else {
-        return body.to_string();
-    };
-    let end_idx = start + end_rel + end.len();
-    let mut out = String::new();
-    out.push_str(&body[..start]);
-    out.push_str(&format!("{{\\fontsize{{{}}}{{{}}}\\selectfont\n", size, baseline));
-    out.push_str(&body[start..end_idx]);
-    out.push_str("\n}\n");
-    out.push_str(&body[end_idx..]);
+    if !lines.is_empty() {
+        out.push_str("\\IEEEauthorblockA{");
+        out.push_str(&lines.join(" \\\\ "));
+        out.push_str("}\n");
+    }
     out
 }
 

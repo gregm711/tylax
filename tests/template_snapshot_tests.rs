@@ -140,11 +140,19 @@ fn ieee_adapter_structure() {
         "IEEE adapter should emit IEEEtran class"
     );
     assert!(
-        output.contains("\\twocolumn[{\\begin{@twocolumnfalse}"),
-        "IEEE adapter should emit full-width title block"
+        output.contains("\\title{"),
+        "IEEE adapter should emit standard IEEE title command"
     );
     assert!(
-        output.contains("\\textbf{Abstract---}"),
-        "IEEE adapter should emit IEEE-style abstract label"
+        output.contains("\\IEEEauthorblockN"),
+        "IEEE adapter should emit IEEE author blocks"
+    );
+    assert!(
+        output.contains("\\maketitle"),
+        "IEEE adapter should call maketitle"
+    );
+    assert!(
+        output.contains("\\begin{abstract}"),
+        "IEEE adapter should emit abstract environment"
     );
 }

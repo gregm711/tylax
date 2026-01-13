@@ -5,34 +5,23 @@
 \usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{xcolor}
-\usepackage{caption}
-\usepackage{newcomputermodern}
-\makeatletter
-\renewcommand\section{\@startsection{section}{1}{\z@}{0.5em}{0.3em}{\centering\normalfont\bfseries\MakeUppercase}}
-\renewcommand\subsection{\@startsection{subsection}{2}{\z@}{0.5em}{0.3em}{\normalfont\bfseries}}
-\renewcommand\subsubsection{\@startsection{subsubsection}{3}{\z@}{0pt}{0pt}{\normalfont\bfseries}}
-\makeatother
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
+\title{A Typesetting System to Untangle the Scientific Writing Process}
+\author{
+\IEEEauthorblockN{First Author}
+\IEEEauthorblockA{\textit{Department of Computer Science} \\ University Name \\ City, Country \\ author@university.edu}
+\and
+\IEEEauthorblockN{Second Author}
+\IEEEauthorblockA{\textit{Department of Engineering} \\ Another University \\ City, Country \\ coauthor@university.edu}
+}
 \begin{document}
-\setlength{\parindent}{1em}
-\makeatletter
-\twocolumn[{\begin{@twocolumnfalse}
-\begin{center}
-{\fontsize{24pt}{28pt}\selectfont\bfseries A Typesetting System to Untangle the Scientific Writing Process}
-\vspace{1em}
-\begin{tabular}{c@{\hspace{1.5em}}c}
-\begin{tabular}{@{}c@{}}{\fontsize{11pt}{13.2pt}\selectfont First Author} \\ {\fontsize{9pt}{10.8pt}\selectfont\textit{Department of Computer Science}} \\ {\fontsize{9pt}{10.8pt}\selectfont University Name} \\ {\fontsize{9pt}{10.8pt}\selectfont City, Country} \\ {\fontsize{9pt}{10.8pt}\selectfont author@university.edu}\end{tabular} & \begin{tabular}{@{}c@{}}{\fontsize{11pt}{13.2pt}\selectfont Second Author} \\ {\fontsize{9pt}{10.8pt}\selectfont\textit{Department of Engineering}} \\ {\fontsize{9pt}{10.8pt}\selectfont Another University} \\ {\fontsize{9pt}{10.8pt}\selectfont City, Country} \\ {\fontsize{9pt}{10.8pt}\selectfont coauthor@university.edu}\end{tabular} \\
-\end{tabular}
-\vspace{1.5em}
-\begin{minipage}{\linewidth}
-\raggedright
-\textbf{Abstract---}\textit{The process of scientific writing is often tangled up with the intricacies of typesetting, leading to frustration and wasted time for researchers. In this paper, we introduce Typst, a new typesetting system designed specifically for scientific writing. Typst untangles the typesetting process, allowing researchers to compose papers faster. In a series of experiments we demonstrate that Typst offers several advantages, including faster document creation, simplified syntax, and increased ease-of-use.}
-\vspace{0.5em}
-\textbf{Index Terms---}Scientific writing, Typesetting, Document creation, Syntax
-\end{minipage}
-\end{center}
-\end{@twocolumnfalse}}]
-\makeatother
+\maketitle
+\begin{abstract}
+ The process of scientific writing is often tangled up with the intricacies of typesetting, leading to frustration and wasted time for researchers. In this paper, we introduce Typst, a new typesetting system designed specifically for scientific writing. Typst untangles the typesetting process, allowing researchers to compose papers faster. In a series of experiments we demonstrate that Typst offers several advantages, including faster document creation, simplified syntax, and increased ease-of-use. 
+\end{abstract}
+\begin{IEEEkeywords}
+Scientific writing, Typesetting, Document creation, Syntax
+\end{IEEEkeywords}
 \section{Introduction}
 
 The introduction establishes the context and motivation for your research. Explain the problem you're addressing and why it matters.
@@ -79,14 +68,15 @@ We conducted experiments on...
 
 \subsection{Results}
 
-\begin{center}
+\begin{table*}[t]
+\centering
 \begin{tabular}{cccc}
 \textbf{Method} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} \\
 Baseline & 0.72 & 0.68 & 0.70 \\
 Ours & \textbf{0.89} & \textbf{0.85} & \textbf{0.87} \\
 \end{tabular}
-\captionof{table}{Comparison of methods on the benchmark dataset.}
-\end{center}
+\caption{Comparison of methods on the benchmark dataset.}
+\end{table*}
 
 Our method outperforms the baseline by 17\% on F1 score.
 
@@ -97,11 +87,8 @@ Summarize your contributions and suggest directions for future work.
 In this paper, we presented... Future work includes...
 
 \section*{References}
-{\fontsize{9pt}{10.8pt}\selectfont
 \begin{thebibliography}{99}
 \bibitem{ref1} J. Smith, "Example paper title," in \textit{Proc. IEEE Conference}, 2023, pp. 1-10.
 \bibitem{ref2} A. Jones and B. Williams, "Another example paper," \textit{IEEE Trans. on Computing}, vol. 42, no. 3, pp. 123-135, 2024.
 \end{thebibliography}
-}
-
 \end{document}
