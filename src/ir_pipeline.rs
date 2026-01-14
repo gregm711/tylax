@@ -41,6 +41,11 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
         let hints = extract_preamble_hints(input);
         let preamble = render_article_preamble(&hints);
         let number_equations = equation_numbering_enabled(&hints);
+        let cite_command = if hints.uses_natbib {
+            Some("citep".to_string())
+        } else {
+            None
+        };
         let body = render_document(
             &doc,
             LatexRenderOptions {
@@ -48,8 +53,12 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
                 number_equations,
                 two_column: is_two_column(&hints),
                 inline_wide_tables: false,
+                force_here: true,
                 table_grid: false,
+                table_style: tylax_latex_backend::TableStyle::Plain,
+                table_caption_position: tylax_latex_backend::TableCaptionPosition::Bottom,
                 bibliography_style_default: hints.bibliography_style.clone(),
+                cite_command,
             },
         );
         let mut out = String::new();
@@ -63,6 +72,11 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
         return out;
     }
     let hints = extract_preamble_hints(input);
+    let cite_command = if hints.uses_natbib {
+        Some("citep".to_string())
+    } else {
+        None
+    };
     render_document(
         &doc,
         LatexRenderOptions {
@@ -70,8 +84,12 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
             number_equations: equation_numbering_enabled(&hints),
             two_column: is_two_column(&hints),
             inline_wide_tables: false,
+            force_here: false,
             table_grid: false,
+            table_style: tylax_latex_backend::TableStyle::Plain,
+            table_caption_position: tylax_latex_backend::TableCaptionPosition::Bottom,
             bibliography_style_default: hints.bibliography_style.clone(),
+            cite_command,
         },
     )
 }

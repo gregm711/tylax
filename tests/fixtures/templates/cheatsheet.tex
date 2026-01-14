@@ -9,6 +9,7 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
 \usepackage{titlesec}
 \titleformat{\section}{\bfseries\fontsize{9.0pt}{10.8pt}\selectfont}{\thesection}{1em}{}
 \titlespacing*{\section}{0pt}{0.3em}{0.2em}
@@ -16,13 +17,15 @@
 \titlespacing*{\subsection}{0pt}{0.2em}{0.1em}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
-\setstretch{1.54}
+\setstretch{1.17}
 \AtBeginDocument{\raggedright}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
 
 \begin{center}
-\textbf{Calculus I - Final Exam Cheat Sheet} \textcolor[HTML]{666}{MATH 101 · Fall 2024 · Your Name}
+\textbf{Calculus I - Final Exam Cheat Sheet}
+\par\vspace{0.1em}
+\textcolor[HTML]{666}{MATH 101 · Fall 2024 · Your Name}
 \end{center}
 
 \par\vspace{0.3em}
@@ -31,46 +34,28 @@
 
 \section{Limits}
 
-\[
-\lim_(x \to a) f(x) = L
-\]
-
-means
-
-\[
-\forall \epsilon > 0, \exists \delta > 0
-\]
-
-s.t.
-
-\[
-|x - a| < \delta \Rightarrow |f(x) - L| < \epsilon
-\]
+$\lim_(x \to a) f(x) = L$ means $\forall \epsilon > 0, \exists \delta > 0$ s.t. $|x - a| < \delta \Rightarrow |f(x) - L| < \epsilon$
 
 \subsection{Key Limits}
 
 \begin{itemize}
-  \item $\lim_(x \to 0) (sin x)/x = 1$
-  \item $\lim_(x \to 0) (1 - cos x)/x = 0$
-  \item $\lim_(x \to infinity) (1 + 1/n)^n = e$
-  \item $\lim_(x \to 0) (e^x - 1)/x = 1$
+  \item  \[
+\lim_(x \to 0) (sin x)/x = 1
+\]
+  \item  \[
+\lim_(x \to 0) (1 - cos x)/x = 0
+\]
+  \item  \[
+\lim_(x \to infinity) (1 + 1/n)^n = e
+\]
+  \item  \[
+\lim_(x \to 0) (e^x - 1)/x = 1
+\]
 \end{itemize}
 
 \subsection{L'Hôpital's Rule}
 
-If
-
-\[
-\lim f(x)/g(x) = 0/0
-\]
-
-or
-
-\[
-infinity/infinity
-\]
-
-:
+If $\lim f(x)/g(x) = 0/0$ or $infinity/infinity$:
 
 \[
 \lim_(x \to a) f(x)/g(x) = \lim_(x \to a) (f'(x))/(g'(x))
@@ -80,21 +65,7 @@ infinity/infinity
 
 \subsection{Basic Rules}
 
-\[
-(f g)' = f' g + f g'
-\]
-
-\\
-
-\[
-(f/g)' = (f' g - f g')/g^2
-\]
-
-\\
-
-\[
-(f compose g)' = f'(g(x)) dot g'(x)
-\]
+$(f g)' = f' g + f g'$ \\ $(f/g)' = (f' g - f g')/g^2$ \\ $(f compose g)' = f'(g(x)) dot g'(x)$
 
 \subsection{Common Derivatives}
 
@@ -112,27 +83,7 @@ $d/(d x) x^n = n x^(n-1)$ $d/(d x) e^x = e^x$ $d/(d x) ln x = 1/x$ $d/(d x) a^x 
 
 \subsection{Basic Forms}
 
-\[
-\int x^n d x = x^(n+1)/(n+1) + C
-\]
-
-(for
-
-\[
-n eq.not -1
-\]
-
-) \\
-
-\[
-\int 1/x d x = ln|x| + C
-\]
-
-\\
-
-\[
-\int e^x d x = e^x + C
-\]
+$\int x^n d x = x^(n+1)/(n+1) + C$ (for $n eq.not -1$) \\ $\int 1/x d x = ln|x| + C$ \\ $\int e^x d x = e^x + C$
 
 \subsection{Trig Integrals}
 
@@ -140,25 +91,11 @@ $\int sin x d x = -cos x + C$ $\int cos x d x = sin x + C$ $\int sec^2 x d x = t
 
 \subsection{Integration Techniques}
 
-\textbf{u-Substitution:}
+\textbf{u-Substitution:} $\int f(g(x)) g'(x) d x = \int f(u) d u$
 
-\[
-\int f(g(x)) g'(x) d x = \int f(u) d u
-\]
+\textbf{By Parts:} $\int u d v = u v - \int v d u$
 
-\textbf{By Parts:}
-
-\[
-\int u d v = u v - \int v d u
-\]
-
-\textbf{LIATE Rule:} Choose
-
-\[
-u
-\]
-
-in order: Log, Inverse trig, Algebraic, Trig, Exponential
+\textbf{LIATE Rule:} Choose $u$ in order: Log, Inverse trig, Algebraic, Trig, Exponential
 
 \subsection{Definite Integrals}
 
@@ -169,9 +106,15 @@ in order: Log, Inverse trig, Algebraic, Trig, Exponential
 \textbf{Properties:}
 
 \begin{itemize}
-  \item $\int_a^b f + g = \int_a^b f + \int_a^b g$
-  \item $\int_a^b c f = c \int_a^b f$
-  \item $\int_a^b f = -\int_b^a f$
+  \item  \[
+\int_a^b f + g = \int_a^b f + \int_a^b g
+\]
+  \item  \[
+\int_a^b c f = c \int_a^b f
+\]
+  \item  \[
+\int_a^b f = -\int_b^a f
+\]
 \end{itemize}
 
 \section{Applications}
@@ -184,23 +127,11 @@ A = \int_a^b |f(x) - g(x)| d x
 
 \subsection{Volume of Revolution}
 
-\textbf{Disk Method:}
+\textbf{Disk Method:} $V = \pi \int_a^b [f(x)]^2 d x$
 
-\[
-V = \pi \int_a^b [f(x)]^2 d x
-\]
+\textbf{Washer:} $V = \pi \int_a^b ([R(x)]^2 - [r(x)]^2) d x$
 
-\textbf{Washer:}
-
-\[
-V = \pi \int_a^b ([R(x)]^2 - [r(x)]^2) d x
-\]
-
-\textbf{Shell:}
-
-\[
-V = 2 \pi \int_a^b x f(x) d x
-\]
+\textbf{Shell:} $V = 2 \pi \int_a^b x f(x) d x$
 
 \subsection{Arc Length}
 
@@ -212,15 +143,7 @@ L = \int_a^b sqrt(1 + [f'(x)]^2) d x
 
 \subsection{Geometric Series}
 
-\[
-\sum_(n=0)^infinity a r^n = a/(1-r)
-\]
-
-for
-
-\[
-|r| < 1
-\]
+$\sum_(n=0)^infinity a r^n = a/(1-r)$ for $|r| < 1$
 
 \subsection{Taylor Series}
 
@@ -231,9 +154,15 @@ f(x) = \sum_(n=0)^infinity (f^((n))(a))/(n!) (x-a)^n
 \subsection{Common Series}
 
 \begin{itemize}
-  \item $e^x = \sum_(n=0)^infinity x^n / n!$
-  \item $sin x = \sum_(n=0)^infinity (-1)^n x^(2n+1) / (2n+1)!$
-  \item $cos x = \sum_(n=0)^infinity (-1)^n x^(2n) / (2n)!$
+  \item  \[
+e^x = \sum_(n=0)^infinity x^n / n!
+\]
+  \item  \[
+sin x = \sum_(n=0)^infinity (-1)^n x^(2n+1) / (2n+1)!
+\]
+  \item  \[
+cos x = \sum_(n=0)^infinity (-1)^n x^(2n) / (2n)!
+\]
   \item $1/(1-x) = \sum_(n=0)^infinity x^n$ for $|x| < 1$
 \end{itemize}
 
@@ -252,10 +181,18 @@ f(x) = \sum_(n=0)^infinity (f^((n))(a))/(n!) (x-a)^n
 \subsection{Trig Identities}
 
 \begin{itemize}
-  \item $sin^2 x + cos^2 x = 1$
-  \item $1 + tan^2 x = sec^2 x$
-  \item $sin 2x = 2 sin x cos x$
-  \item $cos 2x = cos^2 x - sin^2 x$
+  \item  \[
+sin^2 x + cos^2 x = 1
+\]
+  \item  \[
+1 + tan^2 x = sec^2 x
+\]
+  \item  \[
+sin 2x = 2 sin x cos x
+\]
+  \item  \[
+cos 2x = cos^2 x - sin^2 x
+\]
 \end{itemize}
 
 \subsection{Useful Values}

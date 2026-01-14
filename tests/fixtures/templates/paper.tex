@@ -9,20 +9,32 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{1em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.8em}{0.3em}
+\titlespacing*{\subsubsection}{0pt}{0.6em}{0.2em}
+\titlespacing*{\paragraph}{0pt}{0.5em}{0.1em}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
-\setstretch{1.81}
+\setstretch{1.38}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
 
 \begin{center}
-\textbf{Your Paper Title}\\ Author Name\textsuperscript{1}, Co-Author Name\textsuperscript{2} \\\textit{ \textsuperscript{1}Department of Computer Science, University Name \\ \textsuperscript{2}Department of Mathematics, Another University }\\ \href{mailto:author@university.edu}{author@university.edu}
+\textbf{Your Paper Title}
+\par\vspace{0.5em}
+Author Name\textsuperscript{1}, Co-Author Name\textsuperscript{2}
+\par\vspace{0.3em}
+\textit{ \textsuperscript{1}Department of Computer Science, University Name \\ \textsuperscript{2}Department of Mathematics, Another University }
+\par\vspace{0.5em}
+\href{mailto:author@university.edu}{author@university.edu}
 \end{center}
 
 \par\vspace{1em}
 
 \begin{center}
-\textbf{Abstract.} This paper presents... Write your abstract here. The abstract should provide a brief summary of your research, including the problem statement, methodology, key findings, and conclusions. Keep it concise, typically 150-300 words.
+ \textbf{Abstract.} This paper presents... Write your abstract here. The abstract should provide a brief summary of your research, including the problem statement, methodology, key findings, and conclusions. Keep it concise, typically 150-300 words. 
 \end{center}
 
 \par\vspace{1em}
@@ -51,7 +63,10 @@ Interpret your results and discuss their implications.
 
 Summarize your contributions and suggest directions for future work.
 
-\section{References}
+\newpage
 
-[1] Author, A. "Paper Title." \textit{Journal Name}, vol. X, no. Y, pp. 1-10, 2024.\\[2] Researcher, B. and Collaborator, C. "Another Paper." In \textit{Proceedings of Conference}, 2023.
+\begin{thebibliography}{99}
+\bibitem{ref1} Author, A. "Paper Title." \textit{Journal Name}, vol. X, no. Y, pp. 1-10, 2024.
+\bibitem{ref2} Researcher, B. and Collaborator, C. "Another Paper." In \textit{Proceedings of Conference}, 2023.
+\end{thebibliography}
 \end{document}

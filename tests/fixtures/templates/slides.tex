@@ -9,9 +9,10 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
-\setstretch{1.65}
+\setstretch{1.25}
 \AtBeginDocument{\raggedright}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
@@ -43,7 +44,7 @@ Motivation Motivation
 \par\vspace{0.5cm}
 
 \begin{center}
-"\#f3f4f6" \textit{"A compelling quote or key insight"}
+ \textit{"A compelling quote or key insight"} 
 \end{center}
 
 Problem Statement Problem Statement
@@ -76,7 +77,15 @@ Related Work Related Work
 \setlength{\tabcolsep}{1cm}
 \setlength{\extrarowheight}{1cm}
 \begin{tabular}{cc}
-\textbf{Approach A} (Smith et al., 2023) Key feature 1 Key feature 2 Limitation & \textbf{Approach B} (Jones et al., 2024) Key feature 1 Key feature 2 Limitation \\
+\textbf{Approach A} (Smith et al., 2023) \begin{itemize}
+  \item Key feature 1
+  \item Key feature 2
+  \item Limitation
+\end{itemize} & \textbf{Approach B} (Jones et al., 2024) \begin{itemize}
+  \item Key feature 1
+  \item Key feature 2
+  \item Limitation
+\end{itemize} \\
 \end{tabular}
 \endgroup
 
@@ -91,7 +100,7 @@ Method Overview Method Overview
 \par\vspace{0.3cm}
 
 \begin{center}
-"\#e0f2fe" \textbf{Input} → \textbf{Process} → \textbf{Output}
+ \textbf{Input} → \textbf{Process} → \textbf{Output} 
 \end{center}
 
 \par\vspace{0.5cm}
@@ -113,7 +122,7 @@ Technical Details Technical Details
 \par\vspace{0.3cm}
 
 \begin{center}
-$f(x) = \int_0^infinity g(t) e^(-t x) dif t$
+$f(x) = \int_0^infinity g(t) e^(-t x) \mathrm{d} t$
 \end{center}
 
 \par\vspace{0.5cm}
@@ -160,7 +169,21 @@ Main Results Main Results
 \par\vspace{0.3cm}
 
 \begin{center}
-"\#d1d5db" \textbf{Method} \textbf{Precision} \textbf{Recall} \textbf{F1} Baseline 1 0.72 0.68 0.70 Baseline 2 0.75 0.71 0.73 \textbf{Ours} \textbf{0.89} \textbf{0.85} \textbf{0.87}
+ \begingroup
+\setlength{\tabcolsep}{0.6cm}
+\setlength{\arrayrulewidth}{0.5pt}
+\begin{tabular}{|c|c|c|c|}
+\hline
+\textbf{Method} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} \\
+\hline
+Baseline 1 & 0.72 & 0.68 & 0.70 \\
+\hline
+Baseline 2 & 0.75 & 0.71 & 0.73 \\
+\hline
+\textbf{Ours} & \textbf{0.89} & \textbf{0.85} & \textbf{0.87} \\
+\hline
+\end{tabular}
+\endgroup 
 \end{center}
 
 \par\vspace{0.5cm}
@@ -195,6 +218,10 @@ Summary Summary
 Thank You! Thank You!
 
 \begin{center}
-\\Questions?\\\textcolor[HTML]{6B7280}{ Your Name \\ your.email@university.edu \\ yourwebsite.com }\\\textcolor[HTML]{9CA3AF}{ Code \& Data: github.com/yourusername/project }
+ Questions?
+\par\vspace{1cm}
+\textcolor[HTML]{6B7280}{ Your Name \\ your.email@university.edu \\ yourwebsite.com }
+\par\vspace{1cm}
+\textcolor[HTML]{9CA3AF}{ Code \& Data: github.com/yourusername/project }
 \end{center}
 \end{document}

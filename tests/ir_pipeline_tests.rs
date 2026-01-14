@@ -84,9 +84,33 @@ fn ir_pipeline_math_operators() {
 }
 
 #[test]
+fn ir_pipeline_math_symbols() {
+    let input = read_fixture("tests/fixtures/typst/math-symbols.typ");
+    let expected = read_fixture("tests/fixtures/latex/math-symbols.tex");
+    let output = typst_to_latex_ir(&input, false);
+    assert_eq!(normalize(&output), normalize(&expected));
+}
+
+#[test]
 fn ir_pipeline_table() {
     let input = read_fixture("tests/fixtures/typst/table.typ");
     let expected = read_fixture("tests/fixtures/latex/table.tex");
+    let output = typst_to_latex_ir(&input, false);
+    assert_eq!(normalize(&output), normalize(&expected));
+}
+
+#[test]
+fn ir_pipeline_table_label() {
+    let input = read_fixture("tests/fixtures/typst/table-label.typ");
+    let expected = read_fixture("tests/fixtures/latex/table-label.tex");
+    let output = typst_to_latex_ir(&input, false);
+    assert_eq!(normalize(&output), normalize(&expected));
+}
+
+#[test]
+fn ir_pipeline_table_header() {
+    let input = read_fixture("tests/fixtures/typst/table-header.typ");
+    let expected = read_fixture("tests/fixtures/latex/table-header.tex");
     let output = typst_to_latex_ir(&input, false);
     assert_eq!(normalize(&output), normalize(&expected));
 }
@@ -127,6 +151,14 @@ fn ir_pipeline_references_block() {
 fn ir_pipeline_theorem_env() {
     let input = read_fixture("tests/fixtures/typst/theorem.typ");
     let expected = read_fixture("tests/fixtures/latex/theorem.tex");
+    let output = typst_to_latex_ir(&input, false);
+    assert_eq!(normalize(&output), normalize(&expected));
+}
+
+#[test]
+fn ir_pipeline_theorem_label() {
+    let input = read_fixture("tests/fixtures/typst/theorem-label.typ");
+    let expected = read_fixture("tests/fixtures/latex/theorem-label.tex");
     let output = typst_to_latex_ir(&input, false);
     assert_eq!(normalize(&output), normalize(&expected));
 }
@@ -224,6 +256,14 @@ fn ir_pipeline_bibliography_style() {
 fn ir_pipeline_bibliography_default_style() {
     let input = read_fixture("tests/fixtures/typst/bibliography-default-style.typ");
     let expected = read_fixture("tests/fixtures/latex/bibliography-default-style.tex");
+    let output = typst_to_latex_ir(&input, false);
+    assert_eq!(normalize(&output), normalize(&expected));
+}
+
+#[test]
+fn ir_pipeline_bibliography_multi() {
+    let input = read_fixture("tests/fixtures/typst/bibliography-multi.typ");
+    let expected = read_fixture("tests/fixtures/latex/bibliography-multi.tex");
     let output = typst_to_latex_ir(&input, false);
     assert_eq!(normalize(&output), normalize(&expected));
 }

@@ -9,6 +9,7 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
 \usepackage{titlesec}
 \titleformat{\section}{\bfseries\fontsize{14.0pt}{16.8pt}\selectfont}{\thesection}{1em}{}
 \titlespacing*{\section}{0pt}{1em}{0.5em}
@@ -16,18 +17,28 @@
 \titlespacing*{\subsection}{0pt}{0.8em}{0.3em}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
-\setstretch{1.71}
+\setstretch{1.29}
 \setlength{\parindent}{1.5em}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
 
 \begin{center}
-\textbf{ Your Paper Title: A Comprehensive Study of \\ Something Important in Your Field }\\ First Author\textsuperscript{1}*, Second Author\textsuperscript{2}, Third Author\textsuperscript{1,3} \\ \textsuperscript{1}Department of Computer Science, University Name, City, Country \\ \textsuperscript{2}Research Lab, Tech Company, City, Country \\ \textsuperscript{3}Institute for Advanced Study, City, Country \\\textit{ \textsuperscript{*}Corresponding author: first.author@university.edu }\\\textcolor[HTML]{666666}{ Preprint. Under review. }
+\textbf{ Your Paper Title: A Comprehensive Study of \\ Something Important in Your Field }
+\par\vspace{1em}
+First Author\textsuperscript{1}*, Second Author\textsuperscript{2}, Third Author\textsuperscript{1,3}
+\par\vspace{0.5em}
+\textsuperscript{1}Department of Computer Science, University Name, City, Country \\ \textsuperscript{2}Research Lab, Tech Company, City, Country \\ \textsuperscript{3}Institute for Advanced Study, City, Country
+\par\vspace{0.3em}
+\textit{ \textsuperscript{*}Corresponding author: first.author@university.edu }
+\par\vspace{1em}
+\textcolor[HTML]{666666}{ Preprint. Under review. }
 \end{center}
 
 \par\vspace{1.5em}
 
-\textbf{Abstract} Write your abstract here. The abstract should provide a self-contained summary of your work, including the motivation, approach, key results, and conclusions. Most venues expect 150-300 words. Avoid citations in the abstract and ensure it can stand alone without the main text. This template follows the standard single-column format preferred by arXiv and many journals for initial submissions.
+\textbf{Abstract}
+\par\vspace{0.3em}
+Write your abstract here. The abstract should provide a self-contained summary of your work, including the motivation, approach, key results, and conclusions. Most venues expect 150-300 words. Avoid citations in the abstract and ensure it can stand alone without the main text. This template follows the standard single-column format preferred by arXiv and many journals for initial submissions.
 
 \par\vspace{1em}
 
@@ -73,37 +84,13 @@ The theoretical underpinnings of our work draw from [foundational work]. Key res
 
 \subsection{Problem Formulation}
 
-Let
-
-\begin{equation}
-x \in \mathbb{R}^n
-\end{equation}
-
-denote the input and
-
-\begin{equation}
-y \in {0, 1}
-\end{equation}
-
-the target label. We seek a function
-
-\begin{equation}
-f: \mathbb{R}^n \to {0, 1}
-\end{equation}
-
-that minimizes the expected loss:
+Let $x \in \mathbb{R}^n$ denote the input and $y \in {0, 1}$ the target label. We seek a function $f: \mathbb{R}^n \to {0, 1}$ that minimizes the expected loss:
 
 \begin{equation}
 \min_f \mathbb{E}_(x,y) [\mathcal{L}(f(x), y)]
 \end{equation}
 
-where
-
-\begin{equation}
-\mathcal{L}
-\end{equation}
-
-is a suitable loss function.
+where $\mathcal{L}$ is a suitable loss function.
 
 \subsection{Proposed Approach}
 
@@ -115,7 +102,7 @@ Our method consists of three main components:
 
 \textbf{Component 3: Training Procedure.} We optimize the model using...
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \begingroup
 \setlength{\tabcolsep}{8pt}
@@ -142,11 +129,7 @@ We now provide theoretical justification for our approach.
 
 \textbf{Theorem 1.} \textit{Under assumptions A1-A3, the proposed algorithm converges to a stationary point at rate $O(1/\sqrt{T})$.}
 
-\textbf{Proof.} The proof proceeds in three steps. First, we establish...
-
-\begin{equation}
-square
-\end{equation}
+\textbf{Proof.} The proof proceeds in three steps. First, we establish... $square$
 
 \section{Experiments}
 
@@ -166,7 +149,7 @@ square
 
 \subsection{Main Results}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \begingroup
 \setlength{\tabcolsep}{8pt}
@@ -223,6 +206,8 @@ We presented [summary of contribution]. Our experiments demonstrate [key finding
 
 \textbf{Acknowledgments.} We thank [collaborators, funding agencies, compute providers]. This work was supported by [grant numbers].
 
+\newpage
+
 \begin{thebibliography}{99}
 \bibitem{ref1} Smith, A., Johnson, B., and Williams, C. "Title of the first paper." In \textit{Proceedings of Conference Name}, pages 1-10, 2023.
 \bibitem{ref2} Jones, D. and Lee, E. "Title of the second paper." \textit{Journal Name}, 42(3):123-145, 2023.
@@ -230,6 +215,8 @@ We presented [summary of contribution]. Our experiments demonstrate [key finding
 \bibitem{ref4} Garcia, G. and Martinez, H. "Baseline method paper." In \textit{ICML}, pages 500-510, 2023.
 \bibitem{ref5} Brown, I., et al. "Another baseline paper." \textit{JMLR}, 24:1-25, 2024.
 \end{thebibliography}
+
+\newpage
 
 \section{Appendix}
 

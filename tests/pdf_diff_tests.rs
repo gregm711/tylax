@@ -23,6 +23,10 @@ fn pdf_diff_templates() {
     let templates = vec![
         ("ieee", PathBuf::from("../public/templates/ieee.typ")),
         ("arxiv", PathBuf::from("../public/templates/arxiv.typ")),
+        ("paper", PathBuf::from("../public/templates/paper.typ")),
+        ("report", PathBuf::from("../public/templates/report.typ")),
+        ("thesis", PathBuf::from("../public/templates/thesis.typ")),
+        ("lab-report", PathBuf::from("../public/templates/lab-report.typ")),
     ];
 
     let thresholds = load_thresholds(Path::new("tests/pdf_diff_thresholds.txt"));

@@ -16,14 +16,26 @@ pub fn typst_to_ir(input: &str) -> Document {
     Document::with_losses(blocks, losses)
 }
 
+struct PageBlock {
+    blocks: Vec<Block>,
+    numbering_none: bool,
+}
+
 fn collect_blocks(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut current_inline: Vec<Inline> = Vec::new();
 
-    let children: Vec<_> = node.children().collect();
+    let mut children: Vec<SyntaxNode> = Vec::new();
+    for child in node.children() {
+        if child.kind() == SyntaxKind::Markup {
+            flatten_markup_children(&child, &mut children);
+        } else {
+            children.push(child.clone());
+        }
+    }
     let mut i = 0;
     while i < children.len() {
-        let child = children[i];
+        let child = &children[i];
         match child.kind() {
             SyntaxKind::Heading => {
                 flush_paragraph(&mut blocks, &mut current_inline);
@@ -54,8 +66,63 @@ fn collect_blocks(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Block> {
                 i += consumed;
             }
             SyntaxKind::Equation => {
+                let mut prev = i as isize - 1;
+                while prev >= 0 && matches!(children[prev as usize].kind(), SyntaxKind::Space) {
+                    prev -= 1;
+                }
+                let mut next = i + 1;
+                while next < children.len()
+                    && matches!(children[next].kind(), SyntaxKind::Space)
+                {
+                    next += 1;
+                }
+                let next_kind = if next < children.len() {
+                    Some(children[next].kind())
+                } else {
+                    None
+                };
+
+                let mut has_label = false;
+                if next_kind == Some(SyntaxKind::Label) {
+                    has_label = true;
+                }
+
+                let math = extract_math(&child);
+                let needs_block = has_label
+                    || math.as_deref().map_or(false, |expr| {
+                        expr.contains('&') || expr.contains("\\\\") || expr.contains('\n')
+                    });
+
+                let has_inline_next = matches!(
+                    next_kind,
+                    Some(SyntaxKind::Text)
+                        | Some(SyntaxKind::Str)
+                        | Some(SyntaxKind::Strong)
+                        | Some(SyntaxKind::Emph)
+                        | Some(SyntaxKind::Link)
+                        | Some(SyntaxKind::Code)
+                        | Some(SyntaxKind::SmartQuote)
+                        | Some(SyntaxKind::Shorthand)
+                        | Some(SyntaxKind::Escape)
+                        | Some(SyntaxKind::Linebreak)
+                );
+                let has_inline_content = current_inline.iter().any(|inline| match inline {
+                    Inline::Text(text) => !text.trim().is_empty(),
+                    Inline::LineBreak => true,
+                    _ => true,
+                });
+                let inline_context = has_inline_content || has_inline_next;
+
+                if inline_context && !needs_block {
+                    if let Some(math) = math {
+                        current_inline.push(Inline::Math(math));
+                    }
+                    i += 1;
+                    continue;
+                }
+
                 flush_paragraph(&mut blocks, &mut current_inline);
-                if let Some(math) = extract_math(&child) {
+                if let Some(math) = math {
                     let mut label: Option<String> = None;
                     let mut lookahead = i + 1;
                     while lookahead < children.len()
@@ -76,7 +143,28 @@ fn collect_blocks(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Block> {
                 i += 1;
             }
             SyntaxKind::FuncCall => {
-                if let Some(block) = maybe_heading_block(&child, losses) {
+                if let Some(page) = maybe_page_block(&child, losses) {
+                    flush_paragraph(&mut blocks, &mut current_inline);
+                    if !blocks.is_empty() && !last_is_pagebreak(&blocks) {
+                        blocks.push(Block::Paragraph(vec![Inline::RawLatex(
+                            "\\newpage".to_string(),
+                        )]));
+                    }
+                    if page.numbering_none {
+                        blocks.push(Block::Paragraph(vec![Inline::RawLatex(
+                            "\\thispagestyle{empty}".to_string(),
+                        )]));
+                    }
+                    blocks.extend(page.blocks);
+                    if has_more_content(&children, i + 1) && !last_is_pagebreak(&blocks) {
+                        blocks.push(Block::Paragraph(vec![Inline::RawLatex(
+                            "\\newpage".to_string(),
+                        )]));
+                    }
+                } else if let Some(block) = maybe_pagebreak_block(&child) {
+                    flush_paragraph(&mut blocks, &mut current_inline);
+                    blocks.push(block);
+                } else if let Some(block) = maybe_heading_block(&child, losses) {
                     flush_paragraph(&mut blocks, &mut current_inline);
                     blocks.push(block);
                 } else if let Some(block) = maybe_environment_block(&child, losses) {
@@ -156,6 +244,38 @@ fn collect_blocks(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Block> {
 
     flush_paragraph(&mut blocks, &mut current_inline);
     blocks
+}
+
+fn last_is_pagebreak(blocks: &[Block]) -> bool {
+    matches!(
+        blocks.last(),
+        Some(Block::Paragraph(inlines))
+            if inlines.len() == 1
+                && matches!(&inlines[0], Inline::RawLatex(raw) if raw.trim() == "\\newpage")
+    )
+}
+
+fn has_more_content(children: &[SyntaxNode], start: usize) -> bool {
+    let mut idx = start;
+    while idx < children.len() {
+        let kind = children[idx].kind();
+        if matches!(kind, SyntaxKind::Space | SyntaxKind::Parbreak) {
+            idx += 1;
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+fn flatten_markup_children(node: &SyntaxNode, out: &mut Vec<SyntaxNode>) {
+    for child in node.children() {
+        if child.kind() == SyntaxKind::Markup {
+            flatten_markup_children(&child, out);
+        } else {
+            out.push(child.clone());
+        }
+    }
 }
 
 fn maybe_named_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Block> {
@@ -261,13 +381,13 @@ fn maybe_heading_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Bloc
     })
 }
 
-fn collect_list(nodes: &[&SyntaxNode], kind: ListKind, losses: &mut Vec<Loss>) -> (Block, usize) {
+fn collect_list(nodes: &[SyntaxNode], kind: ListKind, losses: &mut Vec<Loss>) -> (Block, usize) {
     let mut items: Vec<Vec<Block>> = Vec::new();
     let mut consumed = 0;
 
     let mut idx = 0;
     while idx < nodes.len() {
-        let node = nodes[idx];
+        let node = &nodes[idx];
         let is_item = match kind {
             ListKind::Unordered => node.kind() == SyntaxKind::ListItem,
             ListKind::Ordered => node.kind() == SyntaxKind::EnumItem,
@@ -308,7 +428,7 @@ fn collect_inlines(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Inline> {
         SyntaxKind::Space => {
             out.push(Inline::Text(" ".to_string()));
         }
-        SyntaxKind::Parbreak => {
+        SyntaxKind::Parbreak | SyntaxKind::Linebreak => {
             out.push(Inline::LineBreak);
         }
         SyntaxKind::SmartQuote => {
@@ -407,9 +527,6 @@ fn collect_inlines(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Inline> {
             for child in node.children() {
                 out.extend(collect_inlines(&child, losses));
             }
-        }
-        SyntaxKind::Linebreak => {
-            out.push(Inline::LineBreak);
         }
         _ => {
             for child in node.children() {
@@ -655,30 +772,46 @@ fn maybe_bibliography_block(node: &SyntaxNode, _losses: &mut Vec<Loss>) -> Optio
     if func_name != "bibliography" {
         return None;
     }
-    let mut file: Option<String> = None;
+    let mut files: Vec<String> = Vec::new();
     let mut style: Option<String> = None;
     if let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) {
         for child in args.children() {
             match child.kind() {
-                SyntaxKind::Str => {
-                    if file.is_none() {
-                        file = Some(child.text().trim_matches('"').to_string());
-                    }
-                }
                 SyntaxKind::Named => {
                     let key = extract_named_key(&child).unwrap_or_default();
                     if let Some(value) = extract_named_value_node(&child) {
                         if key == "style" {
                             style = Some(value.text().trim_matches('"').to_string());
+                        } else if key == "file" || key == "files" {
+                            collect_bibliography_files(&value, &mut files);
                         }
                     }
                 }
-                _ => {}
+                _ => {
+                    collect_bibliography_files(&child, &mut files);
+                }
             }
         }
     }
-    let file = file?;
+    if files.is_empty() {
+        return None;
+    }
+    let file = files.join(",");
     Some(Block::Bibliography { file, style })
+}
+
+fn collect_bibliography_files(node: &SyntaxNode, files: &mut Vec<String>) {
+    match node.kind() {
+        SyntaxKind::Named => {}
+        SyntaxKind::Str => {
+            files.push(node.text().trim_matches('"').to_string());
+        }
+        _ => {
+            for child in node.children() {
+                collect_bibliography_files(&child, files);
+            }
+        }
+    }
 }
 
 fn parse_image_from_func_call(node: &SyntaxNode) -> Option<Image> {
@@ -917,7 +1050,9 @@ fn parse_table_from_func_call(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Opti
             }
             SyntaxKind::FuncCall => {
                 // If it's table.cell(...) just capture its content block as a cell.
-                if let Some(cell) = extract_cell_from_table_cell(&child, losses) {
+                if let Some(header_cells) = extract_table_header_cells(&child, losses) {
+                    cells.extend(header_cells);
+                } else if let Some(cell) = extract_cell_from_table_cell(&child, losses) {
                     cells.push(cell);
                 } else {
                     let content = collect_inlines(&child, losses);
@@ -1060,6 +1195,53 @@ fn extract_cell_from_table_cell(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Op
     })
 }
 
+fn extract_table_header_cells(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<TableCell>> {
+    let name = get_func_call_name(node)?;
+    if name != "table.header" {
+        return None;
+    }
+    let mut cells = Vec::new();
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::Args => {
+                for arg in child.children() {
+                    if matches!(arg.kind(), SyntaxKind::ContentBlock | SyntaxKind::Markup) {
+                        let content = collect_inlines(&arg, losses);
+                        cells.push(TableCell {
+                            content,
+                            colspan: 1,
+                            rowspan: 1,
+                            align: None,
+                            is_header: true,
+                            fill: None,
+                            stroke: None,
+                            inset: None,
+                        });
+                    }
+                }
+            }
+            SyntaxKind::ContentBlock | SyntaxKind::Markup => {
+                let content = collect_inlines(&child, losses);
+                cells.push(TableCell {
+                    content,
+                    colspan: 1,
+                    rowspan: 1,
+                    align: None,
+                    is_header: true,
+                    fill: None,
+                    stroke: None,
+                    inset: None,
+                });
+            }
+            _ => {}
+        }
+    }
+    if cells.is_empty() {
+        return None;
+    }
+    Some(cells)
+}
+
 fn infer_columns_from_cells(cell_count: usize) -> usize {
     if cell_count == 0 {
         return 1;
@@ -1111,10 +1293,18 @@ fn parse_typst_align(value: &str) -> Vec<Alignment> {
     }
     inner
         .split(',')
-        .map(|s| match s.trim() {
-            "left" | "start" => Alignment::Left,
-            "right" | "end" => Alignment::Right,
-            _ => Alignment::Center,
+        .map(|s| {
+            let trimmed = s.trim();
+            let lowered = trimmed.to_lowercase();
+            if lowered.contains("left") || lowered.contains("start") {
+                Alignment::Left
+            } else if lowered.contains("right") || lowered.contains("end") {
+                Alignment::Right
+            } else if lowered.contains("center") {
+                Alignment::Center
+            } else {
+                Alignment::Center
+            }
         })
         .collect()
 }
@@ -1143,6 +1333,56 @@ fn maybe_outline_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Bloc
         }
     }
     Some(Block::Outline { title })
+}
+
+fn maybe_page_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<PageBlock> {
+    let func_name = get_func_call_name(node)?;
+    if func_name != "page" {
+        return None;
+    }
+    let mut numbering_none = false;
+    let mut content_blocks: Vec<Block> = Vec::new();
+
+    if let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) {
+        for child in args.children() {
+            if child.kind() == SyntaxKind::Named {
+                let key = extract_named_key(&child).unwrap_or_default();
+                if key == "numbering" {
+                    if let Some(value) = extract_named_value_node(&child) {
+                        if value.kind() == SyntaxKind::None {
+                            numbering_none = true;
+                        } else if let Some(text) = parse_string_literal(&value) {
+                            if text.trim() == "none" {
+                                numbering_none = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if child.kind() == SyntaxKind::ContentBlock || child.kind() == SyntaxKind::Markup {
+                content_blocks = collect_blocks(&child, losses);
+            }
+        }
+    }
+
+    if content_blocks.is_empty() {
+        content_blocks = vec![Block::Paragraph(collect_inlines(node, losses))];
+    }
+
+    Some(PageBlock {
+        blocks: content_blocks,
+        numbering_none,
+    })
+}
+
+fn maybe_pagebreak_block(node: &SyntaxNode) -> Option<Block> {
+    let func_name = get_func_call_name(node)?;
+    if func_name != "pagebreak" {
+        return None;
+    }
+    Some(Block::Paragraph(vec![Inline::RawLatex(
+        "\\newpage".to_string(),
+    )]))
 }
 
 fn maybe_vspace_block(node: &SyntaxNode, _losses: &mut Vec<Loss>) -> Option<Block> {

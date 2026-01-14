@@ -14,8 +14,12 @@ fn math_block_uses_gather_without_alignment() {
             number_equations: true,
             two_column: false,
             inline_wide_tables: false,
+            force_here: false,
             table_grid: false,
+            table_style: tylax_latex_backend::TableStyle::Plain,
+            table_caption_position: tylax_latex_backend::TableCaptionPosition::Bottom,
             bibliography_style_default: None,
+            cite_command: None,
         },
     );
     assert!(out.contains("\\begin{gather}"));
@@ -35,8 +39,12 @@ fn math_block_uses_align_with_alignment_points() {
             number_equations: true,
             two_column: false,
             inline_wide_tables: false,
+            force_here: false,
             table_grid: false,
+            table_style: tylax_latex_backend::TableStyle::Plain,
+            table_caption_position: tylax_latex_backend::TableCaptionPosition::Bottom,
             bibliography_style_default: None,
+            cite_command: None,
         },
     );
     assert!(out.contains("\\begin{align}"));

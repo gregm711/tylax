@@ -9,62 +9,52 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{1em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.8em}{0.3em}
+\titlespacing*{\subsubsection}{0pt}{0.6em}{0.2em}
+\titlespacing*{\paragraph}{0pt}{0.5em}{0.1em}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
-\setstretch{1.81}
+\setstretch{1.38}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
 
 \begin{center}
-\\\textbf{ Laboratory Report: \\ Determination of the Acceleration Due to Gravity \\ Using a Simple Pendulum }\\ Course: PHYS 101 - Introduction to Physics \\ Lab Section: Tuesday 2:00 PM \\ \textbf{Submitted by:} \\ Your Name \\ Student ID: 123456789 \\ \textbf{Lab Partner(s):} \\ Partner Name \\ \textbf{Instructor:} \\ Dr. Professor Name \\ \textbf{Date Performed:} November 15, 2024 \\ \textbf{Date Submitted:} November 22, 2024
+
+\par\vspace{2cm}
+\textbf{ Laboratory Report: \\ Determination of the Acceleration Due to Gravity \\ Using a Simple Pendulum }
+\par\vspace{2cm}
+Course: PHYS 101 - Introduction to Physics \\ Lab Section: Tuesday 2:00 PM
+\par\vspace{1.5cm}
+\textbf{Submitted by:} \\ Your Name \\ Student ID: 123456789
+\par\vspace{1cm}
+\textbf{Lab Partner(s):} \\ Partner Name
+\par\vspace{1cm}
+\textbf{Instructor:} \\ Dr. Professor Name
+\par\vspace{1.5cm}
+\textbf{Date Performed:} November 15, 2024 \\ \textbf{Date Submitted:} November 22, 2024
 \end{center}
+
+\newpage
 
 \section{Abstract}
 
-This experiment investigated the relationship between the period of a simple pendulum and the acceleration due to gravity. By measuring the period of oscillation for various pendulum lengths, we determined the local gravitational acceleration to be
-
-\begin{equation}
-g = 9.72 plus.minus 0.15 "m/s"^2
-\end{equation}
-
-. This value agrees with the accepted value of
-
-\begin{equation}
-9.81 "m/s"^2
-\end{equation}
-
-within experimental uncertainty. The primary sources of error include timing precision and small-angle approximation limitations.
+This experiment investigated the relationship between the period of a simple pendulum and the acceleration due to gravity. By measuring the period of oscillation for various pendulum lengths, we determined the local gravitational acceleration to be $g = 9.72 plus.minus 0.15 "m/s"^2$. This value agrees with the accepted value of $9.81 "m/s"^2$ within experimental uncertainty. The primary sources of error include timing precision and small-angle approximation limitations.
 
 \section{Introduction}
 
 \subsection{Background}
 
-The simple pendulum is a classic system in physics that demonstrates periodic motion. For small angular displacements, the period
-
-\begin{equation}
-T
-\end{equation}
-
-of a simple pendulum is given by:
+The simple pendulum is a classic system in physics that demonstrates periodic motion. For small angular displacements, the period $T$ of a simple pendulum is given by:
 
 \begin{equation}
 T = 2 \pi sqrt(L / g)
 \label{eq:period}
 \end{equation}
 
-where
-
-\begin{equation}
-L
-\end{equation}
-
-is the length of the pendulum and
-
-\begin{equation}
-g
-\end{equation}
-
-is the acceleration due to gravity.
+where $L$ is the length of the pendulum and $g$ is the acceleration due to gravity.
 
 \subsection{Objectives}
 
@@ -78,19 +68,7 @@ The objectives of this experiment were to:
 
 \subsection{Hypothesis}
 
-Based on \eqref{eq:period}, we hypothesize that the period squared (
-
-\begin{equation}
-T^2
-\end{equation}
-
-) will be linearly proportional to the pendulum length (
-
-\begin{equation}
-L
-\end{equation}
-
-), with the slope related to the gravitational acceleration.
+Based on \eqref{eq:period}, we hypothesize that the period squared ($T^2$) will be linearly proportional to the pendulum length ($L$), with the slope related to the gravitational acceleration.
 
 \section{Materials and Methods}
 
@@ -117,7 +95,7 @@ The following equipment was used:
   \item Steps 2-4 were repeated for lengths of 0.30, 0.50, 0.70, 0.90, and 1.10 m.
 \end{enumerate}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \begingroup
 \setlength{\tabcolsep}{8pt}
@@ -146,9 +124,9 @@ The following equipment was used:
 
 \subsection{Data Processing}
 
-The period for each length was calculated by dividing the mean time by 10. The results are summarized in \ref{tab:processed}.
+The period for each length was calculated by dividing the mean time by 10. The results are summarized in Table~\ref{tab:processed}.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \begingroup
 \setlength{\tabcolsep}{8pt}
@@ -182,25 +160,7 @@ T^2 = (4 \pi^2) / g L
 \label{eq:linear}
 \end{equation}
 
-This predicts a linear relationship between
-
-\begin{equation}
-T^2
-\end{equation}
-
-and
-
-\begin{equation}
-L
-\end{equation}
-
-with slope
-
-\begin{equation}
-m = 4 \pi^2 / g
-\end{equation}
-
-.
+This predicts a linear relationship between $T^2$ and $L$ with slope $m = 4 \pi^2 / g$.
 
 Performing a linear regression on our data yields:
 
@@ -212,25 +172,13 @@ Performing a linear regression on our data yields:
 
 \subsection{Calculated Gravitational Acceleration}
 
-Solving for
-
-\begin{equation}
-g
-\end{equation}
-
-:
+Solving for $g$:
 
 \begin{equation}
 g = (4 \pi^2) / m = (4 \pi^2) / 4.06 = 9.72 "m/s"^2
 \end{equation}
 
-The uncertainty in
-
-\begin{equation}
-g
-\end{equation}
-
-is calculated using error propagation:
+The uncertainty in $g$ is calculated using error propagation:
 
 \begin{equation}
 \delta g = g (\delta m) / m = 9.72 times (0.12 / 4.06) = 0.29 "m/s"^2
@@ -246,19 +194,7 @@ g = 9.72 plus.minus 0.29 "m/s"^2
 
 \subsection{Comparison with Accepted Value}
 
-The accepted value of gravitational acceleration at sea level is
-
-\begin{equation}
-g = 9.81 "m/s"^2
-\end{equation}
-
-. Our experimental value of
-
-\begin{equation}
-9.72 plus.minus 0.29 "m/s"^2
-\end{equation}
-
-agrees with the accepted value within experimental uncertainty.
+The accepted value of gravitational acceleration at sea level is $g = 9.81 "m/s"^2$. Our experimental value of $9.72 plus.minus 0.29 "m/s"^2$ agrees with the accepted value within experimental uncertainty.
 
 The percent error is:
 
@@ -298,65 +234,23 @@ Future experiments could be improved by:
 
 \section{Conclusion}
 
-This experiment successfully determined the acceleration due to gravity using a simple pendulum. The measured value of
+This experiment successfully determined the acceleration due to gravity using a simple pendulum. The measured value of $g = 9.72 plus.minus 0.29 "m/s"^2$ agrees with the accepted value of $9.81 "m/s"^2$ within experimental uncertainty (0.92\% error). The linear relationship between $T^2$ and $L$ was confirmed with a correlation coefficient of $R^2 = 0.998$, supporting the theoretical model.
 
-\begin{equation}
-g = 9.72 plus.minus 0.29 "m/s"^2
-\end{equation}
+\begin{thebibliography}{99}
+\bibitem{ref1} Halliday, D., Resnick, R., and Walker, J. \textit{Fundamentals of Physics}, 11th ed. Wiley, 2018.
+\bibitem{ref2} Taylor, J. R. \textit{An Introduction to Error Analysis}, 2nd ed. University Science Books, 1997.
+\bibitem{ref3} PHYS 101 Laboratory Manual, Fall 2024.
+\end{thebibliography}
 
-agrees with the accepted value of
-
-\begin{equation}
-9.81 "m/s"^2
-\end{equation}
-
-within experimental uncertainty (0.92\% error). The linear relationship between
-
-\begin{equation}
-T^2
-\end{equation}
-
-and
-
-\begin{equation}
-L
-\end{equation}
-
-was confirmed with a correlation coefficient of
-
-\begin{equation}
-R^2 = 0.998
-\end{equation}
-
-, supporting the theoretical model.
-
-\section{References}
-
-[1] Halliday, D., Resnick, R., and Walker, J. \textit{Fundamentals of Physics}, 11th ed. Wiley, 2018.\\[2] Taylor, J. R. \textit{An Introduction to Error Analysis}, 2nd ed. University Science Books, 1997.\\[3] PHYS 101 Laboratory Manual, Fall 2024.
+\newpage
 
 \section{Appendix: Sample Calculations}
 
-\textbf{Calculation of Period:}
+\textbf{Calculation of Period:} $T = (10.95 "s") / 10 = 1.095 "s"$
 
-\begin{equation}
-T = (10.95 "s") / 10 = 1.095 "s"
-\end{equation}
+\textbf{Calculation of $T^2$:} $T^2 = (1.095)^2 = 1.199 "s"^2$
 
-\textbf{Calculation of $T^2$:}
+\textbf{Uncertainty in $T^2$:} $\delta(T^2) = 2 T dot \delta T = 2(1.095)(0.01) = 0.022 "s"^2$
 
-\begin{equation}
-T^2 = (1.095)^2 = 1.199 "s"^2
-\end{equation}
-
-\textbf{Uncertainty in $T^2$:}
-
-\begin{equation}
-\delta(T^2) = 2 T dot \delta T = 2(1.095)(0.01) = 0.022 "s"^2
-\end{equation}
-
-\textbf{Slope from Linear Regression:}
-
-\begin{equation}
-m = (n \sum x_i y_i - \sum x_i \sum y_i) / (n \sum x_i^2 - (\sum x_i)^2)
-\end{equation}
+\textbf{Slope from Linear Regression:} $m = (n \sum x_i y_i - \sum x_i \sum y_i) / (n \sum x_i^2 - (\sum x_i)^2)$
 \end{document}

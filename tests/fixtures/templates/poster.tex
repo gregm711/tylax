@@ -9,9 +9,10 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
-\setstretch{1.82}
+\setstretch{1.38}
 \definecolor{accent}{HTML}{F59E0B}
 \definecolor{light-bg}{HTML}{F8FAFC}
 \definecolor{primary}{HTML}{1E40AF}
@@ -19,7 +20,12 @@
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
 
-\textcolor{primary}{University \\ Logo} \textcolor{white}{\textbf{ Your Research Poster Title Goes Here }} \textcolor{white}{ First Author\textsuperscript{1}, Second Author\textsuperscript{2}, Third Author\textsuperscript{1} } \textcolor[HTML]{BFDBFE}{ \textsuperscript{1}Department of Computer Science, University Name \\ \textsuperscript{2}Department of Mathematics, Another University } \textcolor[HTML]{93C5FD}{ contact@email.edu · github.com/project } \textcolor{primary}{Conference \\ Logo}
+ \begingroup
+\setlength{\tabcolsep}{2cm}
+\setlength{\extrarowheight}{2cm}
+\begin{tabular}{cc}
+\end{tabular}
+\endgroup 
 
 \par\vspace{1.5cm}
 
@@ -27,8 +33,32 @@
 \setlength{\tabcolsep}{1.5cm}
 \setlength{\extrarowheight}{1.5cm}
 \begin{tabular}{cc}
-Introduction This research addresses the important problem of [topic]. Understanding this is crucial because:\\ First reason why this matters Second reason for importance Potential impact on the field\\\textbf{Research Question:} How can we effectively [main question]? \\Background Previous approaches have limitations:\\\textbf{Method A} (Smith, 2023) Limited by assumption X Poor scalability\\\textbf{Method B} (Jones, 2024) Requires expensive resources Not generalizable\\Our approach addresses these gaps by... \\Methods \textbf{Our Framework:}\\ Input → Process A → Process B → Output \\\textbf{Key Innovation:}\\We introduce a novel approach that combines [technique 1] with [technique 2] to achieve [benefit]. & Key Results "\#d1d5db" \textcolor{white}{\textbf{Method}} \textcolor{white}{\textbf{Acc.}} \textcolor{white}{\textbf{F1}} \textcolor{white}{\textbf{Time}} Baseline 1 72.3\% 0.70 45s Baseline 2 75.1\% 0.73 38s \textbf{Ours} \textbf{89.2\%} \textbf{0.87} \textbf{12s} \\ "\#d1fae5" \textcolor[HTML]{065F46}{\textbf{ +14\% accuracy improvement \\ 3× faster than baselines }} \\Analysis \textbf{Why does our method work better?}\\ \textbf{Reason 1:} Explanation of first key factor contributing to improvements.\\ \textbf{Reason 2:} Explanation of second key factor.\\ \textbf{Reason 3:} Explanation of third key factor.\\\textbf{Ablation Study:} Removing component X decreases performance by 8\%, confirming its importance. \\
-Discussion \textbf{Implications:}\\ Finding 1 suggests that... Finding 2 indicates potential for... These results open new directions for...\\\textbf{Limitations:}\\ Current approach assumes... May not generalize to... Requires further validation on... \\Conclusion \textbf{Key Contributions:}\\ ✓ Contribution 1: Novel method for...\\✓ Contribution 2: Comprehensive evaluation...\\✓ Contribution 3: Open-source implementation... \\\textbf{Future Work:} Extension to [new domain], integration with [other methods]. \\References [1] Smith et al. "Paper title." \textit{Conference}, 2023.\\[2] Jones \& Lee. "Another paper." \textit{Journal}, 2024.\\[3] Chen et al. "Third reference." \textit{Venue}, 2024. \\ QR Code \textbf{Scan for:} Paper PDF Code \& Data Demo \\
+Introduction This research addresses the important problem of [topic]. Understanding this is crucial because:\\ First reason why this matters Second reason for importance Potential impact on the field\\ \textbf{Research Question:} How can we effectively [main question]?
+\par\vspace{1cm}
+Background Previous approaches have limitations:\\ \textbf{Method A} (Smith, 2023) Limited by assumption X Poor scalability\\ \textbf{Method B} (Jones, 2024) Requires expensive resources Not generalizable\\ Our approach addresses these gaps by...
+\par\vspace{1cm}
+Methods \textbf{Our Framework:}\\ Input → Process A → Process B → Output \\ \textbf{Key Innovation:}\\ We introduce a novel approach that combines [technique 1] with [technique 2] to achieve [benefit]. & Key Results "\#d1d5db" \textcolor{white}{\textbf{Method}} \textcolor{white}{\textbf{Acc.}} \textcolor{white}{\textbf{F1}} \textcolor{white}{\textbf{Time}} Baseline 1 72.3\% 0.70 45s Baseline 2 75.1\% 0.73 38s \textbf{Ours} \textbf{89.2\%} \textbf{0.87} \textbf{12s} \\ "\#d1fae5" \textcolor[HTML]{065F46}{\textbf{ +14\% accuracy improvement \\ 3× faster than baselines }}
+\par\vspace{1cm}
+Analysis \textbf{Why does our method work better?}\\ \textbf{Reason 1:} Explanation of first key factor contributing to improvements.\\ \textbf{Reason 2:} Explanation of second key factor.\\ \textbf{Reason 3:} Explanation of third key factor.\\ \textbf{Ablation Study:} Removing component X decreases performance by 8\%, confirming its importance. \\
+Discussion \textbf{Implications:}\\ Finding 1 suggests that... Finding 2 indicates potential for... These results open new directions for...\\ \textbf{Limitations:}\\ Current approach assumes... May not generalize to... Requires further validation on...
+\par\vspace{1cm}
+Conclusion \textbf{Key Contributions:}\\ ✓ Contribution 1: Novel method for...\\ ✓ Contribution 2: Comprehensive evaluation...\\ ✓ Contribution 3: Open-source implementation... \\ \textbf{Future Work:} Extension to [new domain], integration with [other methods].
+\par\vspace{1cm}
+References [1] Smith et al. "Paper title." \textit{Conference}, 2023.\\ [2] Jones \& Lee. "Another paper." \textit{Journal}, 2024.\\ [3] Chen et al. "Third reference." \textit{Venue}, 2024.
+\par\vspace{1cm}
+ \begin{center}
+  \begingroup
+\setlength{\tabcolsep}{1cm}
+\setlength{\extrarowheight}{1cm}
+\begin{tabular}{cc}
+\textbf{Scan for:} \begin{itemize}
+  \item Paper PDF
+  \item Code \& Data
+  \item Demo
+\end{itemize} \\
+\end{tabular}
+\endgroup  
+\end{center}  \\
 \end{tabular}
 \endgroup
 \end{document}

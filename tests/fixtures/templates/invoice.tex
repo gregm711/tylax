@@ -9,9 +9,10 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
-\setstretch{1.65}
+\setstretch{1.25}
 \definecolor{gray}{HTML}{6B7280}
 \definecolor{light-gray}{HTML}{F3F4F6}
 \definecolor{primary}{HTML}{1E40AF}
@@ -20,7 +21,11 @@
 \begin{document}
 
 \begin{tabular}{cc}
-\textcolor{primary}{\textbf{INVOICE}} \textbf{Your Company Name} \textcolor{gray}{ 123 Business Street \\ City, State 12345 \\ United States \\ Phone: (555) 123-4567 \\ Email: billing@yourcompany.com \\ Website: yourcompany.com } \\
+\textcolor{primary}{\textbf{INVOICE}}
+\par\vspace{0.5em}
+\textbf{Your Company Name}
+\par\vspace{0.2em}
+\textcolor{gray}{ 123 Business Street \\ City, State 12345 \\ United States \\ Phone: (555) 123-4567 \\ Email: billing@yourcompany.com \\ Website: yourcompany.com } \\
 \end{tabular}
 
 \par\vspace{1.5em}
@@ -28,7 +33,9 @@
 \par\vspace{1em}
 
 \begin{tabular}{cc}
-\textcolor{primary}{\textbf{BILL TO}} \textbf{Client Company Name} \\ Attn: John Smith \\ 456 Client Avenue \\ Suite 100 \\ City, State 67890 \\ client@example.com \\
+\textcolor{primary}{\textbf{BILL TO}}
+\par\vspace{0.3em}
+\textbf{Client Company Name} \\ Attn: John Smith \\ 456 Client Avenue \\ Suite 100 \\ City, State 67890 \\ client@example.com \\
 \end{tabular}
 
 \par\vspace{1.5em}
@@ -49,18 +56,29 @@ Development Hours (additional) & 8 & \$150.00 & \$1,200.00 \\
 \par\vspace{0.5em}
 
 \begin{flushright}
-Subtotal \$6,200.00 Tax (8\%) \$496.00 \textbf{Total Due} \textbf{\$6,696.00}
+ \fbox{ \begingroup
+\setlength{\tabcolsep}{8pt}
+\begin{tabular}{ccc}
+Subtotal & \$6,200.00 & Tax (8\%) \\
+\$496.00 &  & \textbf{Total Due} \\
+\textbf{\$6,696.00} \\
+\end{tabular}
+\endgroup } 
 \end{flushright}
 
 \par\vspace{1.5em}
 
-\textcolor{primary}{\textbf{Payment Information}} \textbf{Bank Transfer:} \\ Bank Name: First National Bank \\ Account Name: Your Company LLC \\ Account Number: 1234567890 \\ Routing Number: 021000021 \textbf{Other Payment Methods:} \\ PayPal: payments@yourcompany.com \\ Venmo: @yourcompany \\ \\ \textit{Please include invoice number with payment.}
+\textcolor{primary}{\textbf{Payment Information}}
+\par\vspace{0.5em}
+ \begin{tabular}{cc}
+\textbf{Bank Transfer:} \\ Bank Name: First National Bank \\ Account Name: Your Company LLC \\ Account Number: 1234567890 \\ Routing Number: 021000021 & \textbf{Other Payment Methods:} \\ PayPal: payments@yourcompany.com \\ Venmo: @yourcompany \\ \\ \textit{Please include invoice number with payment.} \\
+\end{tabular} 
 
 \par\vspace{1em}
 
 \textcolor{gray}{ \textbf{Terms \& Conditions:} Payment is due within 30 days of invoice date Late payments subject to 1.5\% monthly interest Please make checks payable to "Your Company LLC"\\ \textbf{Notes:} Thank you for your business! We appreciate working with you on this project. Please don't hesitate to reach out if you have any questions about this invoice. }
 
-\par\vspace{1fr}
+\par\vspace{\fill}
 
 \par\vspace{0.3em}
 

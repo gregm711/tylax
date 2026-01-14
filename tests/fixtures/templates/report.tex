@@ -9,18 +9,38 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{1em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.8em}{0.3em}
+\titlespacing*{\subsubsection}{0pt}{0.6em}{0.2em}
+\titlespacing*{\paragraph}{0pt}{0.5em}{0.1em}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
-\setstretch{1.81}
+\setstretch{1.38}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
 
 \begin{center}
-\\\textbf{ Report Title }\\ Subtitle or Course Name \\ Author Name \\ Institution or Organization \\ "[month repr:long] [day], [year]" \\
+
+\par\vspace{\stretch{2}}
+\textbf{ Report Title }
+\par\vspace{1em}
+Subtitle or Course Name
+\par\vspace{2em}
+Author Name \\ Institution or Organization
+\par\vspace{1em}
+"[month repr:long] [day], [year]"
+\par\vspace{\stretch{2}}
+
 \end{center}
 
-\section*{Contents}
+\newpage
+
+\renewcommand{\contentsname}{Contents}
 \tableofcontents
+
+\newpage
 
 \section{Introduction}
 
@@ -50,13 +70,18 @@ Describe any methods, procedures, or approaches used.
 
 Present your analysis, findings, or main arguments.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
-\begin{tabular}{ccc}
+\begin{tabular}{|c|c|c|}
+\hline
 \textbf{Category} & \textbf{Value} & \textbf{Notes} \\
+\hline
 Item A & 42 & Example data \\
+\hline
 Item B & 17 & More data \\
+\hline
 Item C & 89 & Additional info \\
+\hline
 \end{tabular}
 \caption{Example table with data}
 \end{table}
@@ -69,7 +94,7 @@ Interpret and discuss the significance of your findings.
 
 Summarize the key points and provide final thoughts or recommendations.
 
-\section{References}
-
-List your sources here in your preferred citation format.
+\begin{thebibliography}{99}
+\bibitem{ref1} List your sources here in your preferred citation format.
+\end{thebibliography}
 \end{document}

@@ -9,6 +9,7 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
 \usepackage{titlesec}
 \titleformat{\section}{\bfseries\fontsize{11.0pt}{13.2pt}\selectfont}{\thesection}{1em}{}
 \titlespacing*{\section}{0pt}{0.8em}{0.3em}
@@ -16,7 +17,7 @@
 \titlespacing*{\subsection}{0pt}{0.5em}{0.2em}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
-\setstretch{1.76}
+\setstretch{1.33}
 \definecolor{accent}{HTML}{EA580C}
 \definecolor{gray}{HTML}{6B7280}
 \definecolor{light}{HTML}{FFF7ED}
@@ -25,7 +26,11 @@
 \begin{document}
 
 \begin{center}
-\textcolor{white}{University Name · Department of Computer Science} \textcolor{white}{\textbf{CS 301: Data Structures and Algorithms}} \textcolor{white}{Fall 2024 · 3 Credit Hours}
+ \textcolor{white}{University Name · Department of Computer Science}
+\par\vspace{0.3em}
+\textcolor{white}{\textbf{CS 301: Data Structures and Algorithms}}
+\par\vspace{0.3em}
+\textcolor{white}{Fall 2024 · 3 Credit Hours} 
 \end{center}
 
 \par\vspace{1em}
@@ -33,7 +38,7 @@
 \begingroup
 \setlength{\tabcolsep}{2em}
 \begin{tabular}{cc}
-Instructor Information \textbf{Instructor:} Dr. Jane Smith \\ \textbf{Email:} jsmith@university.edu \\ \textbf{Office:} Engineering Building, Room 312 \\ \textbf{Office Hours:} Mon/Wed 2:00-4:00 PM \\ or by appointment \\ \textbf{Phone:} (555) 123-4567 & Course Details \textbf{Lecture:} MWF 10:00-10:50 AM \\ \textbf{Location:} Science Hall 101 \\ \textbf{Lab:} Thursday 2:00-4:00 PM \\ \textbf{Lab Location:} CS Lab 205 \\ \textbf{Course Website:} canvas.university.edu \\ \textbf{Prerequisites:} CS 201, MATH 220 \\
+ \subsection{Instructor Information} \textbf{Instructor:} Dr. Jane Smith \\ \textbf{Email:} jsmith@university.edu \\ \textbf{Office:} Engineering Building, Room 312 \\ \textbf{Office Hours:} Mon/Wed 2:00-4:00 PM \\ or by appointment \\ \textbf{Phone:} (555) 123-4567 &  \subsection{Course Details} \textbf{Lecture:} MWF 10:00-10:50 AM \\ \textbf{Location:} Science Hall 101 \\ \textbf{Lab:} Thursday 2:00-4:00 PM \\ \textbf{Lab Location:} CS Lab 205 \\ \textbf{Course Website:} canvas.university.edu \\ \textbf{Prerequisites:} CS 201, MATH 220 \\
 \end{tabular}
 \endgroup
 
@@ -105,7 +110,7 @@ C+: 77-79 & C: 73-76 & C-: 70-72 & D: 60-69 & F: <60 \\
 
 \begingroup
 \setlength{\tabcolsep}{6pt}
-\setlength{\arrayrulewidth}{0.5pt + gray}
+\setlength{\arrayrulewidth}{0.5pt}
 \rowcolors{2}{white}{white}
 \def\tylaxHeaderRowColor{primary}
 \begin{tabular}{|c|c|c|c|c|c|c|c|c|}
@@ -156,7 +161,7 @@ The best way to reach me is via email. I typically respond within 24 hours on we
 
 Course announcements will be posted on Canvas. Please check the course website regularly and ensure your notification settings are configured to receive updates.
 
-\par\vspace{1fr}
+\par\vspace{\fill}
 
 \begin{center}
 \textcolor{gray}{ \textit{This syllabus is subject to change. Students will be notified of any modifications.} \\ Last updated: November 28, 2024 · Made with TypeTeX · typetex.com }

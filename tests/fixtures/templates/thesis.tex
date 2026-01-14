@@ -9,28 +9,139 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{1em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.8em}{0.3em}
+\titlespacing*{\subsubsection}{0pt}{0.6em}{0.2em}
+\titlespacing*{\paragraph}{0pt}{0.5em}{0.1em}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
-\setstretch{1.82}
+\setstretch{1.38}
 \setlength{\parindent}{0.5in}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
 
-\\\textbf{ YOUR THESIS TITLE: \\ A STUDY OF SOMETHING IMPORTANT }\\by\\Your Full Name\\A thesis submitted in partial fulfillment \\ of the requirements for the degree of\\\textbf{Master of Science} \\ (Your Department)\\at the\\\textbf{UNIVERSITY NAME}\\"[month repr:long] [year]"\\Thesis Committee: \\ Professor Advisor Name, Chair \\ Professor Committee Member \\ Professor Committee Member
+\newpage
 
+\thispagestyle{empty}
+
+\begin{center}
+
+\par\vspace{\fill}
+\textbf{ YOUR THESIS TITLE: \\ A STUDY OF SOMETHING IMPORTANT }
+\par\vspace{2em}
+by
+\par\vspace{1em}
+Your Full Name
+\par\vspace{\stretch{2}}
+A thesis submitted in partial fulfillment \\ of the requirements for the degree of
+\par\vspace{1em}
+\textbf{Master of Science} \\ (Your Department)
+\par\vspace{1em}
+at the
+\par\vspace{1em}
+\textbf{UNIVERSITY NAME}
+\par\vspace{2em}
+"[month repr:long] [year]"
+\par\vspace{\fill}
+Thesis Committee: \\ Professor Advisor Name, Chair \\ Professor Committee Member \\ Professor Committee Member
+\end{center}
+
+\newpage
+
+\newpage
+
+\thispagestyle{empty}
+
+\par\vspace{\fill}
+
+\begin{center}
 Copyright "[year]" Your Name \\ All Rights Reserved
+\end{center}
 
-\textbf{ABSTRACT} \\ \textbf{YOUR THESIS TITLE: A STUDY OF SOMETHING IMPORTANT} \\by Your Full Name\\Write your abstract here. The abstract should provide a concise summary of your research, including the problem statement, methodology, key findings, and conclusions. Most universities require abstracts to be 150-350 words.\\This template provides a clean starting point for your thesis. Modify the front matter pages as required by your institution's formatting guidelines.
+\newpage
 
+\newpage
+
+\thispagestyle{empty}
+
+\begin{center}
+\textbf{ABSTRACT}
+\end{center}
+
+\par\vspace{2em}
+
+\textbf{YOUR THESIS TITLE: A STUDY OF SOMETHING IMPORTANT}
+
+\par\vspace{1em}
+
+by Your Full Name
+
+\par\vspace{2em}
+
+Write your abstract here. The abstract should provide a concise summary of your research, including the problem statement, methodology, key findings, and conclusions. Most universities require abstracts to be 150-350 words.
+
+This template provides a clean starting point for your thesis. Modify the front matter pages as required by your institution's formatting guidelines.
+
+\newpage
+
+\newpage
+
+\thispagestyle{empty}
+
+\par\vspace{\fill}
+
+\begin{center}
 To my family, \\ for their endless support and encouragement.
+\end{center}
 
-\textbf{ACKNOWLEDGMENTS} \\I would like to express my sincere gratitude to my advisor, Professor Name, for their guidance and support throughout this research. I am also grateful to my committee members for their valuable feedback and suggestions.\\Special thanks to my colleagues in the lab for their collaboration and friendship. Finally, I thank my family for their unwavering support.
+\par\vspace{\fill}
 
-TABLE OF CONTENTS
+\newpage
 
-LIST OF FIGURES
+\newpage
 
-LIST OF TABLES
+\thispagestyle{empty}
+
+\begin{center}
+\textbf{ACKNOWLEDGMENTS}
+\end{center}
+
+\par\vspace{2em}
+
+I would like to express my sincere gratitude to my advisor, Professor Name, for their guidance and support throughout this research. I am also grateful to my committee members for their valuable feedback and suggestions.
+
+Special thanks to my colleagues in the lab for their collaboration and friendship. Finally, I thank my family for their unwavering support.
+
+\newpage
+
+\newpage
+
+\thispagestyle{empty}
+
+\renewcommand{\contentsname}{TABLE OF CONTENTS}
+\tableofcontents
+
+\newpage
+
+\newpage
+
+\thispagestyle{empty}
+
+\renewcommand{\contentsname}{LIST OF FIGURES}
+\tableofcontents
+
+\newpage
+
+\newpage
+
+\thispagestyle{empty}
+
+\renewcommand{\contentsname}{LIST OF TABLES}
+\tableofcontents
+
+\newpage
 
 \section{Introduction}
 
@@ -94,13 +205,18 @@ E = m c^2
 
 Present your results in a logical sequence. Use figures and tables to illustrate key findings.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
-\begin{tabular}{ccc}
+\begin{tabular}{|c|c|c|}
+\hline
 \textbf{Condition} & \textbf{Mean} & \textbf{SD} \\
+\hline
 Control & 42.3 & 5.2 \\
+\hline
 Treatment A & 58.7 & 4.8 \\
+\hline
 Treatment B & 61.2 & 5.1 \\
+\hline
 \end{tabular}
 \caption{Summary of experimental results}
 \end{table}
@@ -131,11 +247,15 @@ Suggest directions for future research based on your findings.
 
 Summarize your main contributions and findings. Restate the significance of your work and its potential impact on the field.
 
+\newpage
+
 \begin{thebibliography}{99}
 \bibitem{ref1} Author, A. (2023). "Title of the paper." \textit{Journal Name}, 42(3), 123-135.
 \bibitem{ref2} Researcher, B., \& Colleague, C. (2022). \textit{Book Title}. Publisher Name.
 \bibitem{ref3} Scholar, D. (2024). "Conference paper title." In \textit{Proceedings of the Conference}, pp. 1-10.
 \end{thebibliography}
+
+\newpage
 
 \section*{Appendix A: Supplementary Materials}
 

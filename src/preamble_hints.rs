@@ -131,6 +131,7 @@ pub fn render_article_preamble(hints: &PreambleHints) -> String {
     out.push_str("\\usepackage{multicol}\n");
     out.push_str("\\usepackage{array}\n");
     out.push_str("\\usepackage{textcomp}\n");
+    out.push_str("\\usepackage{float}\n");
     if hints.uses_natbib {
         out.push_str("\\usepackage{natbib}\n");
     }
@@ -159,6 +160,12 @@ pub fn render_article_preamble(hints: &PreambleHints) -> String {
                 }
             }
         }
+    } else if hints.has_headings {
+        out.push_str("\\usepackage{titlesec}\n");
+        out.push_str("\\titlespacing*{\\section}{0pt}{1em}{0.5em}\n");
+        out.push_str("\\titlespacing*{\\subsection}{0pt}{0.8em}{0.3em}\n");
+        out.push_str("\\titlespacing*{\\subsubsection}{0pt}{0.6em}{0.2em}\n");
+        out.push_str("\\titlespacing*{\\paragraph}{0pt}{0.5em}{0.1em}\n");
     }
 
     if let Some(font) = hints.font.as_deref() {
@@ -472,9 +479,12 @@ fn compute_line_stretch(hints: &PreambleHints) -> Option<f64> {
     if size_pt <= 0.0 {
         return None;
     }
-    let stretch = (size_pt + leading_pt) / size_pt;
-    let stretch = (stretch * 1.1).min(2.5);
-    if (0.9..=2.5).contains(&stretch) {
+    // LaTeX baseline skip is typically ~1.2 * font size. Match Typst's
+    // "size + leading" against that baseline for closer line spacing.
+    let baseline = size_pt * 1.2;
+    let stretch = (size_pt + leading_pt) / baseline;
+    let stretch = stretch.min(2.5);
+    if (0.8..=2.5).contains(&stretch) {
         Some(stretch)
     } else {
         None

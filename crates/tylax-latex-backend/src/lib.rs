@@ -11,8 +11,25 @@ pub struct LatexRenderOptions {
     pub number_equations: bool,
     pub two_column: bool,
     pub inline_wide_tables: bool,
+    pub force_here: bool,
     pub table_grid: bool,
+    pub table_style: TableStyle,
+    pub table_caption_position: TableCaptionPosition,
     pub bibliography_style_default: Option<String>,
+    pub cite_command: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableStyle {
+    Plain,
+    Grid,
+    Booktabs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableCaptionPosition {
+    Top,
+    Bottom,
 }
 
 impl Default for LatexRenderOptions {
@@ -22,8 +39,12 @@ impl Default for LatexRenderOptions {
             number_equations: false,
             two_column: false,
             inline_wide_tables: false,
+            force_here: false,
             table_grid: false,
+            table_style: TableStyle::Plain,
+            table_caption_position: TableCaptionPosition::Bottom,
             bibliography_style_default: None,
+            cite_command: None,
         }
     }
 }
@@ -40,6 +61,9 @@ pub fn render_document(doc: &Document, options: LatexRenderOptions) -> String {
         out.push_str("\\usepackage{multirow}\n");
         out.push_str("\\usepackage{multicol}\n");
         out.push_str("\\usepackage{array}\n");
+        if options.table_style == TableStyle::Booktabs {
+            out.push_str("\\usepackage{booktabs}\n");
+        }
         if options.inline_wide_tables {
             out.push_str("\\usepackage{caption}\n");
         }
@@ -53,12 +77,19 @@ pub fn render_document(doc: &Document, options: LatexRenderOptions) -> String {
         let mut rendered: Option<String> = None;
         let mut consumed = 1usize;
 
-        if let Some(rendered_refs) = render_references_block(&doc.blocks, idx) {
+        if let Some(rendered_refs) = render_references_block(&doc.blocks, idx, &options) {
             rendered = Some(rendered_refs);
             consumed = 2;
         } else if let Some(rendered_heading) = render_heading_with_label(&doc.blocks, idx, &options)
         {
             rendered = Some(rendered_heading);
+            consumed = 2;
+        } else if let Some(rendered_env) = render_environment_with_label(&doc.blocks, idx, &options)
+        {
+            rendered = Some(rendered_env);
+            consumed = 2;
+        } else if let Some(rendered_table) = render_table_with_label(&doc.blocks, idx, &options) {
+            rendered = Some(rendered_table);
             consumed = 2;
         }
 
@@ -99,6 +130,36 @@ fn render_heading_with_label(
     Some(out)
 }
 
+fn render_environment_with_label(
+    blocks: &[Block],
+    idx: usize,
+    options: &LatexRenderOptions,
+) -> Option<String> {
+    let env_block = blocks.get(idx)?;
+    let Block::Environment(env) = env_block else {
+        return None;
+    };
+    let label = blocks
+        .get(idx + 1)
+        .and_then(extract_label_from_paragraph)?;
+    Some(render_environment(env, options, Some(&label)))
+}
+
+fn render_table_with_label(
+    blocks: &[Block],
+    idx: usize,
+    options: &LatexRenderOptions,
+) -> Option<String> {
+    let table_block = blocks.get(idx)?;
+    let Block::Table(table) = table_block else {
+        return None;
+    };
+    let label = blocks
+        .get(idx + 1)
+        .and_then(extract_label_from_paragraph)?;
+    Some(render_table_block(table, options, Some(&label)))
+}
+
 fn extract_label_from_paragraph(block: &Block) -> Option<String> {
     let Block::Paragraph(inlines) = block else {
         return None;
@@ -124,43 +185,57 @@ fn extract_label_from_paragraph(block: &Block) -> Option<String> {
     label
 }
 
-fn render_references_block(blocks: &[Block], idx: usize) -> Option<String> {
+fn render_references_block(
+    blocks: &[Block],
+    idx: usize,
+    options: &LatexRenderOptions,
+) -> Option<String> {
     let heading = blocks.get(idx)?;
-    let Block::Heading {
-        content,
-        numbered,
-        ..
-    } = heading else {
+    let Block::Heading { content, .. } = heading else {
         return None;
     };
-    if *numbered {
+    let title = normalize_inline_whitespace(&render_inlines(content, options));
+    if !is_references_title(&title) {
         return None;
     }
-    let title = normalize_inline_whitespace(&render_inlines(content));
-    if !title.eq_ignore_ascii_case("references") {
-        return None;
-    }
-    let Block::Paragraph(inlines) = blocks.get(idx + 1)? else {
-        return None;
-    };
-    let entries = split_reference_entries(inlines);
-    if entries.is_empty() {
-        return None;
-    }
+    let next = blocks.get(idx + 1)?;
+    match next {
+        Block::Paragraph(inlines) => {
+            let entries = split_reference_entries(inlines);
+            if entries.is_empty() {
+                return None;
+            }
 
-    let mut out = String::new();
-    out.push_str("\\begin{thebibliography}{99}\n");
-    for (i, entry) in entries.iter().enumerate() {
-        let rendered = normalize_inline_whitespace(&render_inlines(entry));
-        if rendered.is_empty() {
-            continue;
+            let mut out = String::new();
+            out.push_str("\\begin{thebibliography}{99}\n");
+            for (i, entry) in entries.iter().enumerate() {
+                let rendered = normalize_inline_whitespace(&render_inlines(entry, options));
+                if rendered.is_empty() {
+                    continue;
+                }
+                let (label, body) = strip_reference_prefix(&rendered);
+                let key = label.unwrap_or_else(|| format!("ref{}", i + 1));
+                out.push_str(&format!("\\bibitem{{{}}} {}\n", key, body));
+            }
+            out.push_str("\\end{thebibliography}");
+            Some(out)
         }
-        let (label, body) = strip_reference_prefix(&rendered);
-        let key = label.unwrap_or_else(|| format!("ref{}", i + 1));
-        out.push_str(&format!("\\bibitem{{{}}} {}\n", key, body));
+        Block::Bibliography { file, style } => {
+            let style = style
+                .as_deref()
+                .or_else(|| options.bibliography_style_default.as_deref());
+            Some(render_bibliography(file, style))
+        }
+        Block::Environment(env) if env.name == "thebibliography" => {
+            Some(render_environment(env, options, None))
+        }
+        _ => None,
     }
-    out.push_str("\\end{thebibliography}");
-    Some(out)
+}
+
+fn is_references_title(title: &str) -> bool {
+    let lowered = title.trim().to_lowercase();
+    lowered == "references" || lowered == "bibliography"
 }
 
 fn split_reference_entries(inlines: &[Inline]) -> Vec<Vec<Inline>> {
@@ -213,7 +288,7 @@ fn strip_reference_prefix(text: &str) -> (Option<String>, String) {
 
 fn render_block(block: &Block, options: &LatexRenderOptions) -> String {
     match block {
-        Block::Paragraph(inlines) => normalize_inline_whitespace(&render_inlines(inlines)),
+        Block::Paragraph(inlines) => normalize_inline_whitespace(&render_inlines(inlines, options)),
         Block::VSpace(size) => render_vspace(size),
         Block::Heading {
             level,
@@ -235,7 +310,7 @@ fn render_block(block: &Block, options: &LatexRenderOptions) -> String {
             format!(
                 "{}{{{}}}",
                 cmd,
-                normalize_inline_whitespace(&render_inlines(content))
+                normalize_inline_whitespace(&render_inlines(content, options))
             )
         }
         Block::List { kind, items } => {
@@ -274,16 +349,16 @@ fn render_block(block: &Block, options: &LatexRenderOptions) -> String {
             out.push_str(&format!("\n\\end{{{}}}", env));
             out
         }
-        Block::Table(table) => render_table(table, Some(options)),
+        Block::Table(table) => render_table_block(table, options, None),
         Block::Figure(figure) => render_figure(figure, options),
-        Block::Environment(env) => render_environment(env, options),
+        Block::Environment(env) => render_environment(env, options, None),
         Block::Bibliography { file, style } => {
             let style = style
                 .as_deref()
                 .or_else(|| options.bibliography_style_default.as_deref());
             render_bibliography(file, style)
         }
-        Block::Outline { title } => render_outline(title.as_deref()),
+        Block::Outline { title } => render_outline(title.as_deref(), options),
         Block::Box(b) => render_box(&b.blocks, options),
         Block::Block(b) => render_block_wrapper(&b.blocks, options),
         Block::Columns(columns) => render_columns(columns, options),
@@ -357,6 +432,20 @@ fn convert_math_content(input: &str) -> String {
     let mut out = String::new();
     let mut i = 0usize;
     while i < input.len() {
+        if let Some(paren_idx) = match_call_at(input, i, "text") {
+            if let Some((args, end_idx)) = extract_paren_content(input, paren_idx) {
+                out.push_str(&convert_text_call(&args));
+                i = end_idx;
+                continue;
+            }
+        }
+        if let Some(paren_idx) = match_call_at(input, i, "upright") {
+            if let Some((args, end_idx)) = extract_paren_content(input, paren_idx) {
+                out.push_str(&convert_upright_call(&args));
+                i = end_idx;
+                continue;
+            }
+        }
         if let Some(paren_idx) = match_call_at(input, i, "cases") {
             if let Some((args, end_idx)) = extract_paren_content(input, paren_idx) {
                 out.push_str(&convert_cases(&args));
@@ -619,6 +708,11 @@ fn convert_math_content(input: &str) -> String {
             }
         }
         if let Some((latex, len)) = match_sequence_at(input, i) {
+            out.push_str(latex);
+            i += len;
+            continue;
+        }
+        if let Some((latex, len)) = match_dotted_symbol_at(input, i) {
             out.push_str(latex);
             i += len;
             continue;
@@ -955,6 +1049,18 @@ fn convert_unary_command(cmd: &str, args: &str) -> String {
     format!("\\{}{{{}}}", cmd, convert_math_content(&arg))
 }
 
+fn convert_text_call(args: &str) -> String {
+    let arg = first_positional_arg(args).unwrap_or_default();
+    let text = strip_quotes(&arg);
+    format!("\\text{{{}}}", escape_latex(&text))
+}
+
+fn convert_upright_call(args: &str) -> String {
+    let arg = first_positional_arg(args).unwrap_or_default();
+    let text = strip_quotes(&arg);
+    format!("\\mathrm{{{}}}", escape_latex(&text))
+}
+
 fn convert_font_command(cmd: &str, args: &str) -> String {
     let arg = first_positional_arg(args).unwrap_or_default();
     let arg = strip_quotes(&arg);
@@ -1047,6 +1153,8 @@ fn match_sequence_at(input: &str, idx: usize) -> Option<(&'static str, usize)> {
 
 fn match_symbol_at(input: &str, idx: usize) -> Option<(&'static str, usize)> {
     const MAP: &[(&str, &str)] = &[
+        ("oo", "\\infty"),
+        ("dif", "\\mathrm{d}"),
         ("varepsilon", "\\varepsilon"),
         ("vartheta", "\\vartheta"),
         ("varsigma", "\\varsigma"),
@@ -1131,6 +1239,35 @@ fn match_symbol_at(input: &str, idx: usize) -> Option<(&'static str, usize)> {
     None
 }
 
+fn match_dotted_symbol_at(input: &str, idx: usize) -> Option<(&'static str, usize)> {
+    const MAP: &[(&str, &str)] = &[
+        ("square.stroked", "\\square"),
+        ("sym.square.stroked", "\\square"),
+    ];
+    for (token, latex) in MAP {
+        if !input[idx..].starts_with(token) {
+            continue;
+        }
+        if idx > 0 {
+            if let Some(prev) = input[..idx].chars().rev().next() {
+                if prev.is_ascii_alphanumeric() || prev == '_' || prev == '.' {
+                    continue;
+                }
+            }
+        }
+        let end = idx + token.len();
+        if end < input.len() {
+            if let Some(next) = input[end..].chars().next() {
+                if next.is_ascii_alphanumeric() || next == '_' || next == '.' {
+                    continue;
+                }
+            }
+        }
+        return Some((latex, token.len()));
+    }
+    None
+}
+
 fn parse_named_arg(input: &str, name: &str) -> Option<String> {
     let trimmed = input.trim();
     let prefix = format!("{}:", name);
@@ -1177,7 +1314,11 @@ fn mat_env_from_delim(delim: Option<&str>) -> &'static str {
     "pmatrix"
 }
 
-fn render_environment(env: &EnvironmentBlock, options: &LatexRenderOptions) -> String {
+fn render_environment(
+    env: &EnvironmentBlock,
+    options: &LatexRenderOptions,
+    label: Option<&str>,
+) -> String {
     let name = sanitize_env_name(&env.name);
     let mut out = String::new();
     if name == "proof" {
@@ -1186,12 +1327,17 @@ fn render_environment(env: &EnvironmentBlock, options: &LatexRenderOptions) -> S
         out.push_str(&format!(
             "\\begin{{{}}}[{}]\n",
             name,
-            normalize_inline_whitespace(&render_inlines(title))
+            normalize_inline_whitespace(&render_inlines(title, options))
         ));
     } else {
         out.push_str(&format!("\\begin{{{}}}\n", name));
     }
     out.push_str(&render_blocks_inline(&env.blocks, options));
+    if let Some(label) = label {
+        out.push_str("\n\\label{");
+        out.push_str(&escape_latex(label));
+        out.push('}');
+    }
     out.push_str(&format!("\n\\end{{{}}}", name));
     out
 }
@@ -1207,7 +1353,7 @@ fn sanitize_env_name(name: &str) -> String {
         .collect::<String>()
 }
 
-fn render_inlines(inlines: &[Inline]) -> String {
+fn render_inlines(inlines: &[Inline], options: &LatexRenderOptions) -> String {
     let mut out = String::new();
     let mut last_was_linebreak = false;
     for inline in inlines {
@@ -1215,12 +1361,12 @@ fn render_inlines(inlines: &[Inline]) -> String {
             Inline::Text(text) => out.push_str(&escape_latex(text)),
             Inline::Strong(inner) => {
                 out.push_str("\\textbf{");
-                out.push_str(&render_inlines(inner));
+                out.push_str(&render_inlines(inner, options));
                 out.push('}');
             }
             Inline::Emph(inner) => {
                 out.push_str("\\textit{");
-                out.push_str(&render_inlines(inner));
+                out.push_str(&render_inlines(inner, options));
                 out.push('}');
             }
             Inline::Code(code) => {
@@ -1237,12 +1383,17 @@ fn render_inlines(inlines: &[Inline]) -> String {
                 out.push_str("\\href{");
                 out.push_str(&escape_latex(url));
                 out.push_str("}{");
-                out.push_str(&render_inlines(text));
+                out.push_str(&render_inlines(text, options));
                 out.push('}');
             }
             Inline::Ref(label) => {
                 if is_equation_label(label) {
                     out.push_str("\\eqref{");
+                    out.push_str(&escape_latex(label));
+                    out.push('}');
+                } else if let Some(prefix) = reference_prefix(label) {
+                    out.push_str(prefix);
+                    out.push_str("~\\ref{");
                     out.push_str(&escape_latex(label));
                     out.push('}');
                 } else {
@@ -1257,13 +1408,16 @@ fn render_inlines(inlines: &[Inline]) -> String {
                 out.push('}');
             }
             Inline::Cite(key) => {
-                out.push_str("\\cite{");
+                let cmd = options.cite_command.as_deref().unwrap_or("cite");
+                out.push_str("\\");
+                out.push_str(cmd);
+                out.push_str("{");
                 out.push_str(&escape_latex(key));
                 out.push('}');
             }
             Inline::Footnote(content) => {
                 out.push_str("\\footnote{");
-                out.push_str(&render_inlines(content));
+                out.push_str(&render_inlines(content, options));
                 out.push('}');
             }
             Inline::Color { color, content } => {
@@ -1275,24 +1429,27 @@ fn render_inlines(inlines: &[Inline]) -> String {
                 out.push_str("{");
                 out.push_str(&value);
                 out.push_str("}{");
-                out.push_str(&render_inlines(content));
+                out.push_str(&render_inlines(content, options));
                 out.push('}');
             }
             Inline::RawLatex(raw) => out.push_str(raw),
             Inline::Superscript(content) => {
                 out.push_str("\\textsuperscript{");
-                out.push_str(&render_inlines(content));
+                out.push_str(&render_inlines(content, options));
                 out.push('}');
             }
             Inline::Subscript(content) => {
                 out.push_str("\\textsubscript{");
-                out.push_str(&render_inlines(content));
+                out.push_str(&render_inlines(content, options));
                 out.push('}');
             }
             Inline::LineBreak => {
                 if !last_was_linebreak {
-                    out.push_str("\\\\");
-                    last_was_linebreak = true;
+                    if !out.trim().is_empty() {
+                        // Add a trailing space to avoid "\\[...]" being parsed as an optional arg.
+                        out.push_str("\\\\ ");
+                        last_was_linebreak = true;
+                    }
                 }
                 continue;
             }
@@ -1305,6 +1462,50 @@ fn render_inlines(inlines: &[Inline]) -> String {
 fn is_equation_label(label: &str) -> bool {
     let lowered = label.trim().to_lowercase();
     lowered.starts_with("eq:")
+}
+
+fn reference_prefix(label: &str) -> Option<&'static str> {
+    let lowered = label.trim().to_lowercase();
+    if lowered.starts_with("fig:") {
+        return Some("Fig.");
+    }
+    if lowered.starts_with("tab:") {
+        return Some("Table");
+    }
+    if lowered.starts_with("sec:") {
+        return Some("Section");
+    }
+    if lowered.starts_with("alg:") {
+        return Some("Algorithm");
+    }
+    if lowered.starts_with("lst:") {
+        return Some("Listing");
+    }
+    if lowered.starts_with("thm:") {
+        return Some("Theorem");
+    }
+    if lowered.starts_with("lemma:") || lowered.starts_with("lem:") {
+        return Some("Lemma");
+    }
+    if lowered.starts_with("prop:") {
+        return Some("Proposition");
+    }
+    if lowered.starts_with("def:") {
+        return Some("Definition");
+    }
+    if lowered.starts_with("cor:") {
+        return Some("Corollary");
+    }
+    if lowered.starts_with("ex:") {
+        return Some("Example");
+    }
+    if lowered.starts_with("remark:") || lowered.starts_with("rem:") {
+        return Some("Remark");
+    }
+    if lowered.starts_with("app:") || lowered.starts_with("appendix:") {
+        return Some("Appendix");
+    }
+    None
 }
 
 fn escape_latex(input: &str) -> String {
@@ -1353,22 +1554,37 @@ fn normalize_inline_whitespace(input: &str) -> String {
 }
 
 fn render_table(table: &Table, options: Option<&LatexRenderOptions>) -> String {
+    let default_opts;
+    let opts = if let Some(opts) = options {
+        opts
+    } else {
+        default_opts = LatexRenderOptions::default();
+        &default_opts
+    };
     let mut out = String::new();
     let mut has_style = false;
     if table.inset.is_some() || table.stroke.is_some() || table.fill.is_some() {
         has_style = true;
     }
-    let stroke = table
-        .stroke
-        .as_deref()
-        .filter(|value| !stroke_is_none(value));
-    let grid_lines = options.map_or(false, |opts| opts.table_grid) || stroke.is_some();
+    let stroke_value = table.stroke.as_deref();
+    let stroke_enabled = match stroke_value {
+        Some(value) => !stroke_is_none(value),
+        None => true, // Typst tables default to a visible stroke.
+    };
+    let stroke = stroke_value.filter(|value| !stroke_is_none(value));
+    let stroke_width = stroke.and_then(parse_stroke_width);
+    let grid_lines = match opts.table_style {
+        TableStyle::Grid => true,
+        TableStyle::Booktabs => false,
+        TableStyle::Plain => opts.table_grid || stroke_enabled,
+    };
+    let use_booktabs = opts.table_style == TableStyle::Booktabs;
     if has_style {
         out.push_str("\\begingroup\n");
         if let Some(inset) = table.inset.as_deref() {
             out.push_str(&format!("\\setlength{{\\tabcolsep}}{{{}}}\n", inset));
         }
-        if let Some(stroke) = stroke {
+        if let Some(stroke) = stroke_width.as_deref() {
             out.push_str(&format!("\\setlength{{\\arrayrulewidth}}{{{}}}\n", stroke));
         }
         if let Some(fill) = table.fill.as_deref() {
@@ -1394,6 +1610,8 @@ fn render_table(table: &Table, options: Option<&LatexRenderOptions>) -> String {
                 } else {
                     out.push_str(&format!("\\rowcolors{{1}}{{{}}}{{{}}}\n", odd, even));
                 }
+            } else if fill.contains("=>") {
+                // Skip complex function-based fills that aren't recognized row/odd patterns.
             } else {
                 let (color_name, define) = resolve_color(fill, "tylaxTableFill");
                 if let Some(def) = define {
@@ -1411,25 +1629,29 @@ fn render_table(table: &Table, options: Option<&LatexRenderOptions>) -> String {
     out.push_str(&format!("\\begin{{tabular}}{{{}}}\n", col_spec));
     if grid_lines {
         out.push_str("\\hline\n");
+    } else if use_booktabs {
+        out.push_str("\\toprule\n");
     }
 
     let columns = table.columns.max(1);
     let mut col_idx = 0usize;
     let mut skip: Vec<usize> = vec![0; columns];
     let mut row_cells: Vec<String> = Vec::new();
-    let mut rows: Vec<String> = Vec::new();
+    let mut rows: Vec<(String, bool)> = Vec::new();
+    let mut row_has_header = false;
 
-    let flush_row = |row_cells: &mut Vec<String>, rows: &mut Vec<String>| {
+    let flush_row = |row_cells: &mut Vec<String>, rows: &mut Vec<(String, bool)>, row_has_header: &mut bool| {
         if !row_cells.is_empty() {
-            rows.push(row_cells.join(" & "));
+            rows.push((row_cells.join(" & "), *row_has_header));
             row_cells.clear();
+            *row_has_header = false;
         }
     };
 
     for cell in &table.cells {
         // Move to next row if we have filled columns.
         if col_idx >= columns {
-            flush_row(&mut row_cells, &mut rows);
+            flush_row(&mut row_cells, &mut rows, &mut row_has_header);
             col_idx = 0;
         }
 
@@ -1439,15 +1661,19 @@ fn render_table(table: &Table, options: Option<&LatexRenderOptions>) -> String {
             row_cells.push(String::new());
             col_idx += 1;
             if col_idx >= columns {
-                flush_row(&mut row_cells, &mut rows);
+                flush_row(&mut row_cells, &mut rows, &mut row_has_header);
                 col_idx = 0;
             }
         }
 
-        let rendered = normalize_inline_whitespace(&render_inlines(&cell.content));
+        let rendered = normalize_inline_whitespace(&render_inlines(&cell.content, opts));
         let rendered = apply_cell_style(cell, &rendered);
+        let rendered = apply_cell_header(cell, &rendered);
         let rendered = apply_cell_alignment(cell, &rendered, col_idx, table);
-        let rendered = apply_cell_spans(cell, &rendered, col_idx, table);
+        let rendered = apply_cell_spans(cell, &rendered, col_idx, table, grid_lines);
+        if cell.is_header {
+            row_has_header = true;
+        }
         row_cells.push(rendered);
 
         if cell.rowspan > 1 {
@@ -1460,25 +1686,33 @@ fn render_table(table: &Table, options: Option<&LatexRenderOptions>) -> String {
 
         col_idx += cell.colspan.max(1);
         if col_idx >= columns {
-            flush_row(&mut row_cells, &mut rows);
+            flush_row(&mut row_cells, &mut rows, &mut row_has_header);
             col_idx = 0;
         }
     }
 
-    flush_row(&mut row_cells, &mut rows);
+    flush_row(&mut row_cells, &mut rows, &mut row_has_header);
 
     if !rows.is_empty() {
         if has_style && out.contains("\\tylaxHeaderRowColor") {
             if let Some(first) = rows.first_mut() {
-                *first = format!("\\rowcolor{{\\tylaxHeaderRowColor}} {}", first);
+                let header = format!("\\rowcolor{{\\tylaxHeaderRowColor}} {}", first.0);
+                first.0 = header;
             }
         }
-        for row in rows {
+        let mut midrule_added = false;
+        for (row, is_header) in rows {
             out.push_str(&row);
             out.push_str(" \\\\\n");
             if grid_lines {
                 out.push_str("\\hline\n");
+            } else if use_booktabs && is_header && !midrule_added {
+                out.push_str("\\midrule\n");
+                midrule_added = true;
             }
+        }
+        if use_booktabs {
+            out.push_str("\\bottomrule\n");
         }
     }
 
@@ -1492,16 +1726,131 @@ fn render_table(table: &Table, options: Option<&LatexRenderOptions>) -> String {
     if let Some(caption) = &table.caption {
         out.push_str("\n");
         out.push_str("\\caption{");
-        out.push_str(&normalize_inline_whitespace(&render_inlines(caption)));
+        out.push_str(&normalize_inline_whitespace(&render_inlines(caption, opts)));
         out.push_str("}");
     }
 
     out
 }
 
+fn render_table_block(
+    table: &Table,
+    options: &LatexRenderOptions,
+    label: Option<&str>,
+) -> String {
+    let has_caption = table.caption.is_some();
+    let has_label = label.is_some();
+    if !has_caption && !has_label {
+        return render_table(table, Some(options));
+    }
+    let caption_first = options.table_caption_position == TableCaptionPosition::Top;
+    let label_only = has_label && !has_caption;
+    let mut out = String::new();
+    let placement = if options.force_here && !options.two_column {
+        "H"
+    } else {
+        "h"
+    };
+    out.push_str(&format!("\\begin{{table}}[{}]\n\\centering\n", placement));
+
+    let mut table_body = table.clone();
+    if has_caption {
+        table_body.caption = None;
+    }
+
+    let render_label = |out: &mut String| {
+        if let Some(label) = label {
+            if has_caption {
+                out.push_str("\\label{");
+                out.push_str(&escape_latex(label));
+                out.push_str("}\n");
+            } else {
+                out.push_str("\\refstepcounter{table}\n\\label{");
+                out.push_str(&escape_latex(label));
+                out.push_str("}\n");
+            }
+        }
+    };
+
+    if caption_first {
+        if let Some(caption) = &table.caption {
+            out.push_str("\\caption{");
+            out.push_str(&normalize_inline_whitespace(&render_inlines(caption, options)));
+            out.push_str("}\n");
+        }
+        render_label(&mut out);
+    } else if label_only {
+        render_label(&mut out);
+    }
+
+    out.push_str(&render_table(&table_body, Some(options)));
+
+    if !caption_first {
+        if let Some(caption) = &table.caption {
+            out.push_str("\n\\caption{");
+            out.push_str(&normalize_inline_whitespace(&render_inlines(caption, options)));
+            out.push_str("}");
+        }
+        if has_label && !label_only {
+            out.push('\n');
+            render_label(&mut out);
+        }
+    }
+
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str("\\end{table}");
+    out
+}
+
 fn stroke_is_none(value: &str) -> bool {
     let trimmed = value.trim().trim_matches('"').to_lowercase();
     trimmed == "none" || trimmed == "0" || trimmed == "0pt"
+}
+
+fn parse_stroke_width(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_matches('"');
+    if trimmed.is_empty() || stroke_is_none(trimmed) {
+        return None;
+    }
+    if trimmed.contains("=>") {
+        return None;
+    }
+    let mut chars = trimmed.chars().peekable();
+    let mut seen_digit = false;
+    let mut seen_dot = false;
+    let mut num_len = 0usize;
+    while let Some(ch) = chars.peek().copied() {
+        if ch.is_ascii_digit() {
+            seen_digit = true;
+            chars.next();
+            num_len += ch.len_utf8();
+            continue;
+        }
+        if ch == '.' && !seen_dot {
+            seen_dot = true;
+            chars.next();
+            num_len += ch.len_utf8();
+            continue;
+        }
+        break;
+    }
+    if !seen_digit {
+        return None;
+    }
+    let rest = trimmed[num_len..].trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+    let unit: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect();
+    if unit.is_empty() {
+        return None;
+    }
+    Some(format!("{}{}", &trimmed[..num_len], unit))
 }
 
 fn build_column_spec(table: &Table, grid_lines: bool) -> String {
@@ -1525,10 +1874,19 @@ fn build_column_spec(table: &Table, grid_lines: bool) -> String {
     spec
 }
 
-fn apply_cell_spans(cell: &TableCell, content: &str, col_idx: usize, table: &Table) -> String {
+fn apply_cell_spans(
+    cell: &TableCell,
+    content: &str,
+    col_idx: usize,
+    table: &Table,
+    grid_lines: bool,
+) -> String {
     let mut rendered = content.to_string();
     if cell.colspan > 1 {
-        let spec = column_align_spec(cell, col_idx, table);
+        let mut spec = column_align_spec(cell, col_idx, table).to_string();
+        if grid_lines {
+            spec = format!("|{}|", spec);
+        }
         rendered = format!(
             "\\multicolumn{{{}}}{{{}}}{{{}}}",
             cell.colspan, spec, rendered
@@ -1566,6 +1924,13 @@ fn apply_cell_style(cell: &TableCell, content: &str) -> String {
     content.to_string()
 }
 
+fn apply_cell_header(cell: &TableCell, content: &str) -> String {
+    if cell.is_header {
+        return format!("\\textbf{{{}}}", content);
+    }
+    content.to_string()
+}
+
 fn column_align_spec(cell: &TableCell, col_idx: usize, table: &Table) -> char {
     let align = cell
         .align
@@ -1584,16 +1949,33 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
             if is_wide_table(table) {
                 let mut out = String::new();
                 out.push_str("\\begin{center}\n");
-                out.push_str(&render_table(table, Some(options)));
-                if let Some(caption) = &figure.caption {
-                    out.push_str("\n\\captionof{table}{");
-                    out.push_str(&normalize_inline_whitespace(&render_inlines(caption)));
-                    out.push_str("}");
+                let caption_first =
+                    options.table_caption_position == TableCaptionPosition::Top;
+                if caption_first {
+                    if let Some(caption) = &figure.caption {
+                        out.push_str("\\captionof{table}{");
+                        out.push_str(&normalize_inline_whitespace(&render_inlines(caption, options)));
+                        out.push_str("}");
+                    }
+                    if let Some(label) = &figure.label {
+                        out.push_str("\n\\label{");
+                        out.push_str(&escape_latex(label));
+                        out.push_str("}");
+                    }
+                    out.push('\n');
                 }
-                if let Some(label) = &figure.label {
-                    out.push_str("\n\\label{");
-                    out.push_str(&escape_latex(label));
-                    out.push_str("}");
+                out.push_str(&render_table(table, Some(options)));
+                if !caption_first {
+                    if let Some(caption) = &figure.caption {
+                        out.push_str("\n\\captionof{table}{");
+                        out.push_str(&normalize_inline_whitespace(&render_inlines(caption, options)));
+                        out.push_str("}");
+                    }
+                    if let Some(label) = &figure.label {
+                        out.push_str("\n\\label{");
+                        out.push_str(&escape_latex(label));
+                        out.push_str("}");
+                    }
                 }
                 out.push_str("\n\\end{center}");
                 return out;
@@ -1602,11 +1984,14 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
     }
 
     let mut out = String::new();
-    let placement = figure
-        .placement
-        .as_deref()
-        .and_then(map_placement)
-        .unwrap_or("h");
+    let mapped = figure.placement.as_deref().and_then(map_placement);
+    let mut placement = mapped.unwrap_or("h");
+    if options.force_here && !options.two_column {
+        let should_force = figure.placement.is_none() || placement == "h";
+        if should_force {
+            placement = "H";
+        }
+    }
     let base_env = match figure.content {
         FigureContent::Table(_) => "table",
         _ => "figure",
@@ -1628,6 +2013,24 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
     }
     out.push_str(&format!("\\begin{{{}}}[{}]\n\\centering\n", env, placement));
 
+    let caption_first = matches!(
+        figure.content,
+        FigureContent::Table(_)
+    ) && options.table_caption_position == TableCaptionPosition::Top;
+    if caption_first {
+        if let Some(caption) = &figure.caption {
+            out.push_str("\\caption{");
+            out.push_str(&normalize_inline_whitespace(&render_inlines(caption, options)));
+            out.push_str("}");
+        }
+        if let Some(label) = &figure.label {
+            out.push_str("\n\\label{");
+            out.push_str(&escape_latex(label));
+            out.push_str("}");
+        }
+        out.push('\n');
+    }
+
     match &figure.content {
         FigureContent::Table(table) => {
             out.push_str(&render_table(table, Some(options)));
@@ -1640,15 +2043,17 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
         }
     }
 
-    if let Some(caption) = &figure.caption {
-        out.push_str("\n\\caption{");
-        out.push_str(&normalize_inline_whitespace(&render_inlines(caption)));
-        out.push_str("}");
-    }
-    if let Some(label) = &figure.label {
-        out.push_str("\n\\label{");
-        out.push_str(&escape_latex(label));
-        out.push_str("}");
+    if !caption_first {
+        if let Some(caption) = &figure.caption {
+            out.push_str("\n\\caption{");
+            out.push_str(&normalize_inline_whitespace(&render_inlines(caption, options)));
+            out.push_str("}");
+        }
+        if let Some(label) = &figure.label {
+            out.push_str("\n\\label{");
+            out.push_str(&escape_latex(label));
+            out.push_str("}");
+        }
     }
 
     out.push_str(&format!("\n\\end{{{}}}", env));
@@ -1724,18 +2129,39 @@ fn convert_length_to_latex(raw: &str) -> Option<String> {
         let scale = val / 100.0;
         return Some(format!("{:.2}\\linewidth", scale));
     }
+    if trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_digit() || ch == '.')
+    {
+        return Some(format!("{}pt", trimmed));
+    }
     Some(trimmed.to_string())
 }
 
 fn render_bibliography(file: &str, style: Option<&str>) -> String {
-    let trimmed = file.trim().trim_end_matches(".bib");
+    let mut files = Vec::new();
+    for part in file.split(',') {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let trimmed = trimmed.trim_end_matches(".bib");
+        if !trimmed.is_empty() {
+            files.push(escape_latex(trimmed));
+        }
+    }
+    let joined = if files.is_empty() {
+        escape_latex(file.trim())
+    } else {
+        files.join(",")
+    };
     let style = style
         .map(map_bibliography_style)
         .unwrap_or_else(|| "plain".to_string());
     let mut out = String::new();
     out.push_str(&format!("\\bibliographystyle{{{}}}\n", style));
     out.push_str("\\bibliography{");
-    out.push_str(&escape_latex(trimmed));
+    out.push_str(&joined);
     out.push('}');
     out
 }
@@ -1745,7 +2171,36 @@ fn render_vspace(raw: &str) -> String {
     if trimmed.is_empty() {
         return "\\par\\vspace{0pt}".to_string();
     }
+    if let Some(converted) = convert_vspace_length(trimmed) {
+        return format!("\\par\\vspace{{{}}}", converted);
+    }
     format!("\\par\\vspace{{{}}}", trimmed)
+}
+
+fn convert_vspace_length(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(fr) = trimmed.strip_suffix("fr") {
+        let val = fr.trim().parse::<f64>().ok()?;
+        if (val - 1.0).abs() < 0.01 {
+            return Some("\\fill".to_string());
+        }
+        if val > 0.0 {
+            if (val.fract()).abs() < 0.01 {
+                return Some(format!("\\stretch{{{}}}", val.round() as i64));
+            }
+            return Some(format!("\\stretch{{{:.2}}}", val));
+        }
+    }
+    if trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_digit() || ch == '.')
+    {
+        return Some(format!("{}pt", trimmed));
+    }
+    Some(trimmed.to_string())
 }
 
 fn map_bibliography_style(raw: &str) -> String {
@@ -1759,14 +2214,17 @@ fn map_bibliography_style(raw: &str) -> String {
     if lowered.contains("apa") {
         return "apalike".to_string();
     }
+    if lowered.contains("springer") && lowered.contains("mathphys") {
+        return "spmpsci".to_string();
+    }
     raw.trim().to_string()
 }
 
-fn render_outline(title: Option<&[Inline]>) -> String {
+fn render_outline(title: Option<&[Inline]>, options: &LatexRenderOptions) -> String {
     let mut out = String::new();
     if let Some(title) = title {
-        out.push_str("\\section*{");
-        out.push_str(&normalize_inline_whitespace(&render_inlines(title)));
+        out.push_str("\\renewcommand{\\contentsname}{");
+        out.push_str(&normalize_inline_whitespace(&render_inlines(title, options)));
         out.push_str("}\n");
     }
     out.push_str("\\tableofcontents");
@@ -1873,32 +2331,64 @@ fn parse_row_colors(raw: &str) -> Option<RowColors> {
         return None;
     }
 
-    if raw.contains("row == 0") || raw.contains("row==0") {
-        let header = tokens.get(0).cloned();
+    let lower = raw.to_lowercase();
+    let header_color = lower.contains("row == 0")
+        || lower.contains("row==0")
+        || lower.contains("y == 0")
+        || lower.contains("y==0");
+    let header_skip = lower.contains("row > 0")
+        || lower.contains("row>0")
+        || lower.contains("y > 0")
+        || lower.contains("y>0");
+    if header_color {
+        let header = tokens
+            .get(0)
+            .cloned()
+            .unwrap_or_else(|| "white".to_string());
         let odd = tokens
             .get(1)
             .cloned()
             .unwrap_or_else(|| "white".to_string());
-        let even = tokens.get(2).cloned().unwrap_or_else(|| {
-            tokens
-                .get(3)
-                .cloned()
-                .unwrap_or_else(|| odd.clone())
+        let even = tokens
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| odd.clone());
+        return Some(RowColors {
+            header: Some(header),
+            odd,
+            even,
         });
-        return Some(RowColors { header, odd, even });
     }
 
-    if raw.contains("calc.odd(row)")
-        || raw.contains("odd(row)")
-        || raw.contains("row % 2")
-    {
-        let odd = tokens
+    let odd_even_pattern = lower.contains("calc.odd(")
+        || lower.contains("odd(")
+        || lower.contains("row % 2")
+        || lower.contains("y % 2")
+        || lower.contains("calc.rem(");
+    if odd_even_pattern {
+        let mut odd = tokens
             .get(0)
             .cloned()
             .unwrap_or_else(|| "white".to_string());
-        let even = tokens.get(1).cloned().unwrap_or_else(|| odd.clone());
+        let mut even = tokens.get(1).cloned().unwrap_or_else(|| odd.clone());
+        let even_pattern = lower.contains("== 0") || lower.contains("!= 1") || lower.contains("even");
+        let odd_pattern = lower.contains("== 1") || lower.contains("!= 0");
+        if tokens.len() == 1 {
+            if even_pattern && !odd_pattern {
+                even = odd.clone();
+                odd = "white".to_string();
+            } else {
+                even = "white".to_string();
+            }
+        } else if even_pattern && !odd_pattern {
+            std::mem::swap(&mut odd, &mut even);
+        }
         return Some(RowColors {
-            header: None,
+            header: if header_skip {
+                Some("white".to_string())
+            } else {
+                None
+            },
             odd,
             even,
         });

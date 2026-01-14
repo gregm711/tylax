@@ -9,7 +9,13 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
 \usepackage{amsthm}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{1em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.8em}{0.3em}
+\titlespacing*{\subsubsection}{0pt}{0.6em}{0.2em}
+\titlespacing*{\paragraph}{0pt}{0.5em}{0.1em}
 \usepackage{newcomputermodern}
 \theoremstyle{plain}
 \newtheorem{theorem}{Theorem}[section]
@@ -24,12 +30,18 @@
 \theoremstyle{remark}
 \newtheorem{remark}[theorem]{Remark}
 \usepackage{setspace}
-\setstretch{1.76}
+\setstretch{1.33}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
 
 \begin{center}
-\textbf{ MATH 301: Real Analysis }\\ Lecture Notes - Week 5 \\\textcolor[HTML]{666666}{ Prof. Jane Smith · Fall 2024 · Your University }\\\textit{ Notes by: Your Name · Last updated: "[month repr:long] [day], [year]" }
+\textbf{ MATH 301: Real Analysis }
+\par\vspace{0.3em}
+Lecture Notes - Week 5
+\par\vspace{0.3em}
+\textcolor[HTML]{666666}{ Prof. Jane Smith · Fall 2024 · Your University }
+\par\vspace{0.3em}
+\textit{ Notes by: Your Name · Last updated: "[month repr:long] [day], [year]" }
 \end{center}
 
 \par\vspace{1em}
@@ -42,404 +54,54 @@
 
 In this lecture, we study the fundamental concept of convergence for sequences of real numbers. Understanding sequences is essential for defining limits, continuity, and the foundations of calculus.
 
-Sequence Sequence A \textbf{sequence} of real numbers is a function
+Sequence Sequence A \textbf{sequence} of real numbers is a function $a: \mathbb{N} \to \mathbb{R}$. We typically write $a_n$ for $a(n)$ and denote the sequence as $(a_n)_(n=1)^infinity$ or simply $(a_n)$.
 
-\begin{equation}
-a: \mathbb{N} \to \mathbb{R}
-\end{equation}
-
-. We typically write
-
-\begin{equation}
-a_n
-\end{equation}
-
-for
-
-\begin{equation}
-a(n)
-\end{equation}
-
-and denote the sequence as
-
-\begin{equation}
-(a_n)_(n=1)^infinity
-\end{equation}
-
-or simply
-
-\begin{equation}
-(a_n)
-\end{equation}
-
-.
-
-Consider the sequence
-
-\begin{equation}
-a_n = 1/n
-\end{equation}
-
-. The first few terms are:
-
-\begin{equation}
-a_1 = 1, quad a_2 = 1/2, quad a_3 = 1/3, quad a_4 = 1/4, quad \ldots
-\end{equation}
-
-Intuitively, this sequence "approaches" 0 as
-
-\begin{equation}
-n
-\end{equation}
-
-gets large.
+Consider the sequence $a_n = 1/n$. The first few terms are: $a_1 = 1, quad a_2 = 1/2, quad a_3 = 1/3, quad a_4 = 1/4, quad \ldots$ Intuitively, this sequence "approaches" 0 as $n$ gets large.
 
 \subsection{Convergence of Sequences}
 
-Convergence Convergence A sequence
+Convergence Convergence A sequence $(a_n)$ \textbf{converges} to a limit $L \in \mathbb{R}$ if for every $\epsilon > 0$, there exists $N \in \mathbb{N}$ such that for all $n > N$: $|a_n - L| < \epsilon$ We write $\lim_(n \to infinity) a_n = L$ or $a_n \to L$.
 
-\begin{equation}
-(a_n)
-\end{equation}
+The definition says that $a_n$ can be made arbitrarily close to $L$ by taking $n$ sufficiently large. The key insight is that $N$ depends on the choice of $\epsilon$: smaller $\epsilon$ typically requires larger $N$.
 
-\textbf{converges} to a limit
+Let's prove that $\lim_(n \to infinity) 1/n = 0$.
 
-\begin{equation}
-L \in \mathbb{R}
-\end{equation}
+\textbf{Proof.} Let $\epsilon > 0$ be given. We need to find $N$ such that $|1/n - 0| < \epsilon$ for all $n > N$.
 
-if for every
+Choose $N = \left\lceil 1/\epsilon \right\rceil$. Then for $n > N$: $|1/n - 0| = 1/n < 1/N \le \epsilon$
 
-\begin{equation}
-\epsilon > 0
-\end{equation}
-
-, there exists
-
-\begin{equation}
-N \in \mathbb{N}
-\end{equation}
-
-such that for all
-
-\begin{equation}
-n > N
-\end{equation}
-
-:
-
-\begin{equation}
-|a_n - L| < \epsilon
-\end{equation}
-
-We write
-
-\begin{equation}
-\lim_(n \to infinity) a_n = L
-\end{equation}
-
-or
-
-\begin{equation}
-a_n \to L
-\end{equation}
-
-.
-
-The definition says that
-
-\begin{equation}
-a_n
-\end{equation}
-
-can be made arbitrarily close to
-
-\begin{equation}
-L
-\end{equation}
-
-by taking
-
-\begin{equation}
-n
-\end{equation}
-
-sufficiently large. The key insight is that
-
-\begin{equation}
-N
-\end{equation}
-
-depends on the choice of
-
-\begin{equation}
-\epsilon
-\end{equation}
-
-: smaller
-
-\begin{equation}
-\epsilon
-\end{equation}
-
-typically requires larger
-
-\begin{equation}
-N
-\end{equation}
-
-.
-
-Let's prove that
-
-\begin{equation}
-\lim_(n \to infinity) 1/n = 0
-\end{equation}
-
-.
-
-\textbf{Proof.} Let
-
-\begin{equation}
-\epsilon > 0
-\end{equation}
-
-be given. We need to find
-
-\begin{equation}
-N
-\end{equation}
-
-such that
-
-\begin{equation}
-|1/n - 0| < \epsilon
-\end{equation}
-
-for all
-
-\begin{equation}
-n > N
-\end{equation}
-
-.
-
-Choose
-
-\begin{equation}
-N = \left\lceil 1/\epsilon \right\rceil
-\end{equation}
-
-. Then for
-
-\begin{equation}
-n > N
-\end{equation}
-
-:
-
-\begin{equation}
-|1/n - 0| = 1/n < 1/N \le \epsilon
-\end{equation}
-
-Thus
-
-\begin{equation}
-1/n \to 0
-\end{equation}
-
-.
-
-\begin{equation}
-square
-\end{equation}
+Thus $1/n \to 0$. $square$
 
 \subsection{Properties of Limits}
 
-Uniqueness of Limits Uniqueness of Limits If
+Uniqueness of Limits Uniqueness of Limits If $(a_n)$ converges, then its limit is unique.
 
-\begin{equation}
-(a_n)
-\end{equation}
+Suppose $a_n \to L$ and $a_n \to M$ with $L eq.not M$. Let $\epsilon = |L - M|/2 > 0$.
 
-converges, then its limit is unique.
+By convergence to $L$, there exists $N_1$ such that $|a_n - L| < \epsilon$ for $n > N_1$.
 
-Suppose
+By convergence to $M$, there exists $N_2$ such that $|a_n - M| < \epsilon$ for $n > N_2$.
 
-\begin{equation}
-a_n \to L
-\end{equation}
+For $n > \max\left(N_1, N_2\right)$, by the triangle inequality: $|L - M| \le |L - a_n| + |a_n - M| < \epsilon + \epsilon = |L - M|$
 
-and
+This is a contradiction, so $L = M$.
 
-\begin{equation}
-a_n \to M
-\end{equation}
-
-with
-
-\begin{equation}
-L eq.not M
-\end{equation}
-
-. Let
-
-\begin{equation}
-\epsilon = |L - M|/2 > 0
-\end{equation}
-
-.
-
-By convergence to
-
-\begin{equation}
-L
-\end{equation}
-
-, there exists
-
-\begin{equation}
-N_1
-\end{equation}
-
-such that
-
-\begin{equation}
-|a_n - L| < \epsilon
-\end{equation}
-
-for
-
-\begin{equation}
-n > N_1
-\end{equation}
-
-.
-
-By convergence to
-
-\begin{equation}
-M
-\end{equation}
-
-, there exists
-
-\begin{equation}
-N_2
-\end{equation}
-
-such that
-
-\begin{equation}
-|a_n - M| < \epsilon
-\end{equation}
-
-for
-
-\begin{equation}
-n > N_2
-\end{equation}
-
-.
-
-For
-
-\begin{equation}
-n > \max\left(N_1, N_2\right)
-\end{equation}
-
-, by the triangle inequality:
-
-\begin{equation}
-|L - M| \le |L - a_n| + |a_n - M| < \epsilon + \epsilon = |L - M|
-\end{equation}
-
-This is a contradiction, so
-
-\begin{equation}
-L = M
-\end{equation}
-
-.
-
-Algebraic Limit Theorem Algebraic Limit Theorem Let
-
-\begin{equation}
-(a_n) \to L
-\end{equation}
-
-and
-
-\begin{equation}
-(b_n) \to M
-\end{equation}
-
-. Then:
+Algebraic Limit Theorem Algebraic Limit Theorem Let $(a_n) \to L$ and $(b_n) \to M$. Then:
 
 \begin{enumerate}
-  \item $(a_n + b_n) \to L + M$
+  \item  \begin{equation}
+(a_n + b_n) \to L + M
+\end{equation}
   \item $(c dot a_n) \to c dot L$ for any constant $c \in \mathbb{R}$
-  \item $(a_n dot b_n) \to L dot M$
+  \item  \begin{equation}
+(a_n dot b_n) \to L dot M
+\end{equation}
   \item $(a_n / b_n) \to L / M$ provided $M eq.not 0$ and $b_n eq.not 0$ for all $n$
 \end{enumerate}
 
-We prove part (1). Let
+We prove part (1). Let $\epsilon > 0$. Since $a_n \to L$, there exists $N_1$ such that $|a_n - L| < \epsilon/2$ for $n > N_1$. Similarly, there exists $N_2$ such that $|b_n - M| < \epsilon/2$ for $n > N_2$.
 
-\begin{equation}
-\epsilon > 0
-\end{equation}
-
-. Since
-
-\begin{equation}
-a_n \to L
-\end{equation}
-
-, there exists
-
-\begin{equation}
-N_1
-\end{equation}
-
-such that
-
-\begin{equation}
-|a_n - L| < \epsilon/2
-\end{equation}
-
-for
-
-\begin{equation}
-n > N_1
-\end{equation}
-
-. Similarly, there exists
-
-\begin{equation}
-N_2
-\end{equation}
-
-such that
-
-\begin{equation}
-|b_n - M| < \epsilon/2
-\end{equation}
-
-for
-
-\begin{equation}
-n > N_2
-\end{equation}
-
-.
-
-For
-
-\begin{equation}
-n > N = \max\left(N_1, N_2\right)
-\end{equation}
-
-:
+For $n > N = \max\left(N_1, N_2\right)$:
 
 \begin{align}
 |(a_n + b_n) - (L + M)| &\le |a_n - L| + |b_n - M| \
@@ -450,127 +112,25 @@ Parts (2)-(4) are left as exercises.
 
 \subsection{Bounded Sequences}
 
-Bounded Sequence Bounded Sequence A sequence
-
-\begin{equation}
-(a_n)
-\end{equation}
-
-is \textbf{bounded} if there exists
-
-\begin{equation}
-M > 0
-\end{equation}
-
-such that
-
-\begin{equation}
-|a_n| \le M
-\end{equation}
-
-for all
-
-\begin{equation}
-n \in \mathbb{N}
-\end{equation}
-
-.
+Bounded Sequence Bounded Sequence A sequence $(a_n)$ is \textbf{bounded} if there exists $M > 0$ such that $|a_n| \le M$ for all $n \in \mathbb{N}$.
 
 Every convergent sequence is bounded.
 
 Every convergent sequence is bounded.
 
-Let
+Let $a_n \to L$. Taking $\epsilon = 1$, there exists $N$ such that $|a_n - L| < 1$ for all $n > N$.
 
-\begin{equation}
-a_n \to L
-\end{equation}
+For $n > N$: $|a_n| \le |a_n - L| + |L| < 1 + |L|$.
 
-. Taking
+Let $M = \max{|a_1|, |a_2|, \ldots, |a_N|, 1 + |L|}$.
 
-\begin{equation}
-\epsilon = 1
-\end{equation}
+Then $|a_n| \le M$ for all $n \in \mathbb{N}$.
 
-, there exists
-
-\begin{equation}
-N
-\end{equation}
-
-such that
-
-\begin{equation}
-|a_n - L| < 1
-\end{equation}
-
-for all
-
-\begin{equation}
-n > N
-\end{equation}
-
-.
-
-For
-
-\begin{equation}
-n > N
-\end{equation}
-
-:
-
-\begin{equation}
-|a_n| \le |a_n - L| + |L| < 1 + |L|
-\end{equation}
-
-.
-
-Let
-
-\begin{equation}
-M = \max{|a_1|, |a_2|, \ldots, |a_N|, 1 + |L|}
-\end{equation}
-
-.
-
-Then
-
-\begin{equation}
-|a_n| \le M
-\end{equation}
-
-for all
-
-\begin{equation}
-n \in \mathbb{N}
-\end{equation}
-
-.
-
-The converse is false! The sequence
-
-\begin{equation}
-a_n = (-1)^n
-\end{equation}
-
-is bounded (by
-
-\begin{equation}
-M = 1
-\end{equation}
-
-) but does not converge.
+The converse is false! The sequence $a_n = (-1)^n$ is bounded (by $M = 1$) but does not converge.
 
 \section{Monotone Sequences}
 
-Monotone Sequence Monotone Sequence A sequence
-
-\begin{equation}
-(a_n)
-\end{equation}
-
-is:
+Monotone Sequence Monotone Sequence A sequence $(a_n)$ is:
 
 \begin{itemize}
   \item \textbf{Increasing} if $a_n \le a_(n+1)$ for all $n$
@@ -580,46 +140,18 @@ is:
 
 Monotone Convergence Theorem Monotone Convergence Theorem Every bounded monotone sequence converges.
 
-This is one of the most important theorems in real analysis, relying on the completeness of
+This is one of the most important theorems in real analysis, relying on the completeness of $\mathbb{R}$.
 
-\begin{equation}
-\mathbb{R}
-\end{equation}
+Consider the sequence defined recursively by: $a_1 = 1, quad a_(n+1) = 1/2 (a_n + 2/a_n)$
 
-.
-
-Consider the sequence defined recursively by:
-
-\begin{equation}
-a_1 = 1, quad a_(n+1) = 1/2 (a_n + 2/a_n)
-\end{equation}
-
-This is the Babylonian method for computing
-
-\begin{equation}
-\sqrt{2}
-\end{equation}
-
-. One can show:
+This is the Babylonian method for computing $\sqrt{2}$. One can show:
 
 \begin{enumerate}
   \item $(a_n)$ is decreasing for $n \ge 2$
   \item $(a_n)$ is bounded below by $\sqrt{2}$
 \end{enumerate}
 
-By the Monotone Convergence Theorem,
-
-\begin{equation}
-(a_n)
-\end{equation}
-
-converges. Taking the limit of both sides of the recurrence shows
-
-\begin{equation}
-L = \sqrt{2}
-\end{equation}
-
-.
+By the Monotone Convergence Theorem, $(a_n)$ converges. Taking the limit of both sides of the recurrence shows $L = \sqrt{2}$.
 
 \par\vspace{1em}
 

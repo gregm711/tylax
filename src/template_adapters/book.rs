@@ -22,6 +22,11 @@ pub fn maybe_convert_book(input: &str) -> Option<String> {
 
     let doc = typst_to_ir(input);
     let hints = extract_preamble_hints(input);
+    let cite_command = if hints.uses_natbib {
+        Some("citep".to_string())
+    } else {
+        None
+    };
     let body = render_document(
         &doc,
         LatexRenderOptions {
@@ -29,14 +34,19 @@ pub fn maybe_convert_book(input: &str) -> Option<String> {
             number_equations: equation_numbering_enabled(&hints),
             two_column: is_two_column(&hints),
             inline_wide_tables: false,
+            force_here: true,
             table_grid: false,
+            table_style: tylax_latex_backend::TableStyle::Plain,
+            table_caption_position: tylax_latex_backend::TableCaptionPosition::Bottom,
             bibliography_style_default: hints.bibliography_style.clone(),
+            cite_command,
         },
     );
 
     let mut out = String::new();
     out.push_str("\\documentclass{book}\n");
     out.push_str("\\usepackage{graphicx}\n");
+    out.push_str("\\usepackage{float}\n");
     out.push_str("\\usepackage{hyperref}\n");
     if hints.uses_amsthm {
         out.push_str("\\usepackage{amsthm}\n");

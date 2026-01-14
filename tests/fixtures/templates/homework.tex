@@ -9,14 +9,22 @@
 \usepackage{multicol}
 \usepackage{array}
 \usepackage{textcomp}
+\usepackage{float}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{1em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.8em}{0.3em}
+\titlespacing*{\subsubsection}{0pt}{0.6em}{0.2em}
+\titlespacing*{\paragraph}{0pt}{0.5em}{0.1em}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
-\setstretch{1.81}
+\setstretch{1.38}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
 
 \begin{center}
-\textbf{Course Name: Homework 1}\\Your Name \\ Due: January 15, 2025
+\textbf{Course Name: Homework 1}
+\par\vspace{0.3em}
+Your Name \\ Due: January 15, 2025
 \end{center}
 
 \par\vspace{1em}
@@ -32,16 +40,10 @@
 Write your solution here. You can include mathematical equations:
 
 \begin{equation}
-\int_0^infinity e^(-x^2) dif x = \sqrt{\pi} / 2
+\int_0^infinity e^(-x^2) \mathrm{d} x = \sqrt{\pi} / 2
 \end{equation}
 
-And inline math like
-
-\begin{equation}
-x^2 + y^2 = z^2
-\end{equation}
-
-.
+And inline math like $x^2 + y^2 = z^2$.
 
 \par\vspace{1em}
 
@@ -89,45 +91,11 @@ a &= b + c \
 
 \textbf{Proof:}
 
-We proceed by induction on
+We proceed by induction on $n$.
 
-\begin{equation}
-n
-\end{equation}
+\textbf{Base case:} When $n = 1$, the statement holds because...
 
-.
+\textbf{Inductive step:} Assume the statement holds for $n = k$. We show it holds for $n = k + 1$...
 
-\textbf{Base case:} When
-
-\begin{equation}
-n = 1
-\end{equation}
-
-, the statement holds because...
-
-\textbf{Inductive step:} Assume the statement holds for
-
-\begin{equation}
-n = k
-\end{equation}
-
-. We show it holds for
-
-\begin{equation}
-n = k + 1
-\end{equation}
-
-...
-
-Therefore, by induction, the statement holds for all
-
-\begin{equation}
-n \ge 1
-\end{equation}
-
-.
-
-\begin{equation}
-square
-\end{equation}
+Therefore, by induction, the statement holds for all $n \ge 1$. $square$
 \end{document}
