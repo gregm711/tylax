@@ -291,6 +291,10 @@ fn maybe_named_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Block>
             let blocks = extract_content_blocks(node, losses);
             Some(Block::Block(BlockBlock { blocks }))
         }
+        "important" => {
+            let blocks = extract_content_blocks(node, losses);
+            Some(Block::Block(BlockBlock { blocks }))
+        }
         _ => None,
     }
 }
@@ -551,7 +555,65 @@ fn flush_paragraph(blocks: &mut Vec<Block>, current: &mut Vec<Inline>) {
     if current.is_empty() {
         return;
     }
+    strip_trailing_bracket_artifact(current);
     blocks.push(Block::Paragraph(std::mem::take(current)));
+}
+
+fn strip_trailing_bracket_artifact(inlines: &mut Vec<Inline>) {
+    loop {
+        while let Some(last) = inlines.last() {
+            match last {
+                Inline::LineBreak => {
+                    inlines.pop();
+                }
+                Inline::Text(text) if text.trim().is_empty() => {
+                    inlines.pop();
+                }
+                _ => break,
+            }
+        }
+
+        let mut open_brackets = 0usize;
+        let mut close_brackets = 0usize;
+        for inline in inlines.iter() {
+            if let Inline::Text(text) = inline {
+                for ch in text.chars() {
+                    match ch {
+                        '[' => open_brackets += 1,
+                        ']' => close_brackets += 1,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        let has_unbalanced_close = close_brackets > open_brackets;
+        let mut removed = false;
+        if let Some(Inline::Text(text)) = inlines.last_mut() {
+            let trimmed = text.trim_end_matches(|ch: char| ch.is_whitespace());
+            if trimmed == "]" && has_unbalanced_close {
+                inlines.pop();
+                removed = true;
+            } else if trimmed.ends_with(']') && has_unbalanced_close {
+                let mut chars = trimmed.chars().collect::<Vec<_>>();
+                if chars.len() >= 2 && chars[chars.len() - 2].is_whitespace() {
+                    chars.pop(); // remove ']'
+                    let mut new: String = chars.into_iter().collect();
+                    new = new.trim_end().to_string();
+                    if new.is_empty() {
+                        inlines.pop();
+                    } else {
+                        *text = new;
+                    }
+                    removed = true;
+                }
+            }
+        }
+
+        if !removed {
+            break;
+        }
+    }
 }
 
 fn extract_math(node: &SyntaxNode) -> Option<String> {
