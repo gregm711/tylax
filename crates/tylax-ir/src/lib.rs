@@ -119,6 +119,7 @@ pub enum Alignment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Inline {
     Text(String),
+    Size { size: String, content: Vec<Inline> },
     Strong(Vec<Inline>),
     Emph(Vec<Inline>),
     Code(String),

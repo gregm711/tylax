@@ -733,7 +733,7 @@ fn is_italic_style(value: &str) -> bool {
     matches!(lowered.as_str(), "italic" | "oblique")
 }
 
-fn parse_length_to_pt(value: &str, font_size: &str) -> Option<f64> {
+pub fn parse_length_to_pt(value: &str, font_size: &str) -> Option<f64> {
     let (num, unit) = split_number_unit(value)?;
     if unit == "pt" {
         return Some(num);

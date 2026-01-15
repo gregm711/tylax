@@ -22,6 +22,7 @@ use super::context::{
 };
 use super::utils::{sanitize_label, to_roman_numeral};
 use crate::features::images::ImageAttributes;
+use crate::utils::loss::{LossKind, LOSS_MARKER_PREFIX};
 
 /// Convert a command symbol (e.g., \alpha, \beta, or special chars like \$, \%)
 pub fn convert_command_sym(conv: &mut LatexConverter, elem: SyntaxElement, output: &mut String) {
@@ -1824,12 +1825,26 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 return;
             }
 
+            let context = match conv.state.mode {
+                ConversionMode::Math => Some("math".to_string()),
+                ConversionMode::Text => Some("text".to_string()),
+            };
+            let loss_id = conv.record_loss(
+                LossKind::UnknownCommand,
+                Some(base_name.to_string()),
+                format!("Unknown command \\{}", base_name),
+                Some(cmd.syntax().text().to_string()),
+                context,
+            );
+            let loss_marker = format!("/* {}{} */", LOSS_MARKER_PREFIX, loss_id);
+
             // Pass through unknown commands using AST-based processing
             // This preserves the behavior of convert_default_command from old version
             if conv.state.options.non_strict {
                 use mitex_parser::syntax::SyntaxKind;
 
                 if matches!(conv.state.mode, ConversionMode::Math) {
+                    output.push_str(&loss_marker);
                     // In math mode, output as function call: \cmd{arg} -> cmd(arg)
                     let has_args = cmd
                         .syntax()
@@ -1857,7 +1872,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                     }
                 } else {
                     // In text mode, output name as comment to avoid garbage text
-                    let _ = write!(output, "/* \\{} */", base_name);
+                    let _ = write!(output, "{} /* \\{} */", loss_marker, base_name);
                     for child in cmd.syntax().children_with_tokens() {
                         if child.kind() == SyntaxKind::ClauseArgument {
                             if let SyntaxElement::Node(n) = child {

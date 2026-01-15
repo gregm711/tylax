@@ -10,6 +10,7 @@ use super::context::{ConversionMode, EnvironmentContext, LatexConverter};
 use super::table::{parse_with_grid_parser, CellAlign};
 use super::utils::sanitize_label;
 use crate::data::constants::{CodeBlockOptions, TheoremStyle, LANGUAGE_MAP, THEOREM_TYPES};
+use crate::utils::loss::{LossKind, LOSS_MARKER_PREFIX};
 
 /// Convert a LaTeX environment
 pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, output: &mut String) {
@@ -218,8 +219,16 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             if conv.state.counters.contains_key(env_str) {
                 convert_theorem(conv, &node, env_str, output);
             } else {
+                let loss_id = conv.record_loss(
+                    LossKind::UnknownEnvironment,
+                    Some(env_str.to_string()),
+                    format!("Unknown environment {}", env_str),
+                    Some(node.text().to_string()),
+                    Some("text".to_string()),
+                );
+                let loss_marker = format!("/* {}{} */", LOSS_MARKER_PREFIX, loss_id);
                 // Just process content
-                let _ = writeln!(output, "/* Begin {} */", env_str);
+                let _ = writeln!(output, "{} /* Begin {} */", loss_marker, env_str);
                 conv.visit_env_content(&node, output);
                 let _ = write!(output, "\n/* End {} */\n", env_str);
             }

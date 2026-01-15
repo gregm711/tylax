@@ -37,6 +37,12 @@ fn collect_blocks(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Block> {
     while i < children.len() {
         let child = &children[i];
         match child.kind() {
+            SyntaxKind::Import
+            | SyntaxKind::ModuleImport
+            | SyntaxKind::Include
+            | SyntaxKind::ModuleInclude => {
+                i += 1;
+            }
             SyntaxKind::Heading => {
                 flush_paragraph(&mut blocks, &mut current_inline);
                 let level = count_heading_markers(&child) as u8;
@@ -419,6 +425,10 @@ fn collect_list(nodes: &[SyntaxNode], kind: ListKind, losses: &mut Vec<Loss>) ->
 fn collect_inlines(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Inline> {
     let mut out = Vec::new();
     match node.kind() {
+        SyntaxKind::Import
+        | SyntaxKind::ModuleImport
+        | SyntaxKind::Include
+        | SyntaxKind::ModuleInclude => {}
         SyntaxKind::Text | SyntaxKind::Str => {
             let text = node.text().to_string();
             if !text.is_empty() {
@@ -1397,6 +1407,12 @@ fn maybe_vspace_block(node: &SyntaxNode, _losses: &mut Vec<Loss>) -> Option<Bloc
 fn maybe_inline_func(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<Inline>> {
     let func_name = get_func_call_name(node)?;
     match func_name.as_str() {
+        "important" => {
+            let content = extract_inline_content_from_call(node, losses);
+            if !content.is_empty() {
+                return Some(content);
+            }
+        }
         "cite" => {
             let mut keys: Vec<String> = Vec::new();
             let mut style: Option<String> = None;
@@ -1545,6 +1561,7 @@ fn maybe_inline_func(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<In
             let mut bold = false;
             let mut italic = false;
             let mut color: Option<String> = None;
+            let mut size: Option<String> = None;
             let mut content: Option<Vec<Inline>> = None;
 
             if let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) {
@@ -1569,6 +1586,18 @@ fn maybe_inline_func(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<In
                                     "fill" => {
                                         if let Some(parsed) = parse_color_value(&value) {
                                             color = Some(parsed);
+                                        }
+                                    }
+                                    "size" => {
+                                        if let Some(parsed) = parse_string_literal(&value) {
+                                            size = Some(parsed);
+                                        } else if let Some(num) = parse_number_literal(&value) {
+                                            size = Some(format!("{num}pt"));
+                                        } else {
+                                            let raw = value.text().trim().trim_matches('"');
+                                            if !raw.is_empty() {
+                                                size = Some(raw.to_string());
+                                            }
                                         }
                                     }
                                     "italic" => {
@@ -1614,6 +1643,9 @@ fn maybe_inline_func(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<In
             }
             if let Some(color) = color {
                 wrapped = vec![Inline::Color { color, content: wrapped }];
+            }
+            if let Some(size) = size {
+                wrapped = vec![Inline::Size { size, content: wrapped }];
             }
             return Some(wrapped);
         }

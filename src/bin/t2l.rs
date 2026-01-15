@@ -8,9 +8,14 @@ use std::path::Path;
 use tylax::{
     convert_auto, convert_auto_document, detect_format,
     diagnostics::{check_latex, format_diagnostics},
-    latex_document_to_typst, latex_to_typst,
+    latex_document_to_typst, latex_math_to_typst_with_report, latex_to_typst,
+    latex_to_typst_with_report,
     tikz::{convert_cetz_to_tikz, convert_tikz_to_cetz, is_cetz_code},
-    typst_document_to_latex, typst_to_latex, typst_to_latex_ir,
+    typst_document_to_latex, typst_to_latex, typst_to_latex_ir, typst_to_latex_ir_with_report,
+    utils::repair::{AiRepairConfig, maybe_repair_typst_to_latex},
+    utils::loss::{LossKind, LossRecord, LossReport, LOSS_MARKER_PREFIX},
+    utils::latex_analysis::metrics_source as latex_metrics_source,
+    utils::typst_analysis::metrics_source as typst_metrics_source,
 };
 
 #[cfg(feature = "cli")]
@@ -42,6 +47,26 @@ struct Cli {
     /// Pretty print the output
     #[arg(short, long)]
     pretty: bool,
+
+    /// Enable AI auto-repair for LaTeX -> Typst conversions
+    #[arg(long)]
+    auto_repair: bool,
+
+    /// Command to invoke for AI repair (reads JSON on stdin, writes Typst on stdout)
+    #[arg(long)]
+    ai_cmd: Option<String>,
+
+    /// Write a loss report JSON to this path (LaTeX -> Typst only)
+    #[arg(long)]
+    loss_log: Option<String>,
+
+    /// Write a post-repair report JSON to this path
+    #[arg(long)]
+    post_repair_log: Option<String>,
+
+    /// Allow AI output even if it does not reduce loss markers
+    #[arg(long)]
+    allow_no_gain: bool,
 
     /// Use the IR-based Typst → LaTeX pipeline
     #[arg(long)]
@@ -93,6 +118,26 @@ enum Commands {
         /// Use the IR-based Typst → LaTeX pipeline
         #[arg(long)]
         ir: bool,
+
+        /// Enable AI auto-repair for LaTeX -> Typst conversions
+        #[arg(long)]
+        auto_repair: bool,
+
+        /// Command to invoke for AI repair (reads JSON on stdin, writes Typst on stdout)
+        #[arg(long)]
+        ai_cmd: Option<String>,
+
+        /// Write a loss report JSON to this path (LaTeX -> Typst only)
+        #[arg(long)]
+        loss_log: Option<String>,
+
+        /// Write a post-repair report JSON to this path
+        #[arg(long)]
+        post_repair_log: Option<String>,
+
+        /// Allow AI output even if it does not reduce loss markers
+        #[arg(long)]
+        allow_no_gain: bool,
     },
 
     /// Convert TikZ to CeTZ or vice versa
@@ -230,12 +275,54 @@ fn main() -> io::Result<()> {
         d => d,
     };
 
+    let repair_config = AiRepairConfig {
+        auto_repair: cli.auto_repair,
+        ai_cmd: cli.ai_cmd.clone(),
+        allow_no_gain: cli.allow_no_gain,
+    };
+    let mut loss_report: Option<LossReport> = None;
+    let mut post_report: Option<LossReport> = None;
+
     // Convert
     let result = if cli.full_document {
         match direction {
-            Direction::L2t => latex_document_to_typst(&input),
+            Direction::L2t => {
+                if cli.auto_repair || cli.loss_log.is_some() || cli.post_repair_log.is_some() {
+                    let report = latex_to_typst_with_report(&input);
+                    loss_report = Some(report.report.clone());
+                    let repaired = tylax::utils::repair::maybe_repair_latex_to_typst(
+                        &input,
+                        &report.content,
+                        &report.report,
+                        &repair_config,
+                    );
+                    if cli.post_repair_log.is_some() {
+                        post_report = Some(build_post_report_typst(&repaired));
+                    }
+                    repaired
+                } else {
+                    latex_document_to_typst(&input)
+                }
+            }
             Direction::T2l => {
-                if cli.ir {
+                let use_ir = cli.ir
+                    || cli.auto_repair
+                    || cli.loss_log.is_some()
+                    || cli.post_repair_log.is_some();
+                if cli.auto_repair || cli.loss_log.is_some() || cli.post_repair_log.is_some() {
+                    let report = typst_to_latex_ir_with_report(&input, true);
+                    loss_report = Some(report.report.clone());
+                    let repaired = maybe_repair_typst_to_latex(
+                        &input,
+                        &report.content,
+                        &report.report,
+                        &repair_config,
+                    );
+                    if cli.post_repair_log.is_some() {
+                        post_report = Some(build_post_report_latex(&repaired));
+                    }
+                    repaired
+                } else if use_ir {
                     typst_to_latex_ir(&input, true)
                 } else {
                     typst_document_to_latex(&input)
@@ -245,9 +332,43 @@ fn main() -> io::Result<()> {
         }
     } else {
         match direction {
-            Direction::L2t => latex_to_typst(&input),
+            Direction::L2t => {
+                if cli.auto_repair || cli.loss_log.is_some() || cli.post_repair_log.is_some() {
+                    let report = latex_math_to_typst_with_report(&input);
+                    loss_report = Some(report.report.clone());
+                    let repaired = tylax::utils::repair::maybe_repair_latex_to_typst(
+                        &input,
+                        &report.content,
+                        &report.report,
+                        &repair_config,
+                    );
+                    if cli.post_repair_log.is_some() {
+                        post_report = Some(build_post_report_typst(&repaired));
+                    }
+                    repaired
+                } else {
+                    latex_to_typst(&input)
+                }
+            }
             Direction::T2l => {
-                if cli.ir {
+                let use_ir = cli.ir
+                    || cli.auto_repair
+                    || cli.loss_log.is_some()
+                    || cli.post_repair_log.is_some();
+                if cli.auto_repair || cli.loss_log.is_some() || cli.post_repair_log.is_some() {
+                    let report = typst_to_latex_ir_with_report(&input, false);
+                    loss_report = Some(report.report.clone());
+                    let repaired = maybe_repair_typst_to_latex(
+                        &input,
+                        &report.content,
+                        &report.report,
+                        &repair_config,
+                    );
+                    if cli.post_repair_log.is_some() {
+                        post_report = Some(build_post_report_latex(&repaired));
+                    }
+                    repaired
+                } else if use_ir {
                     typst_to_latex_ir(&input, false)
                 } else {
                     typst_to_latex(&input)
@@ -256,6 +377,17 @@ fn main() -> io::Result<()> {
             Direction::Auto => convert_auto(&input).0,
         }
     };
+
+    if let (Some(path), Some(report)) = (cli.loss_log.as_ref(), loss_report.as_ref()) {
+        let serialized = serde_json::to_string_pretty(report)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        fs::write(path, serialized)?;
+    }
+    if let (Some(path), Some(report)) = (cli.post_repair_log.as_ref(), post_report.as_ref()) {
+        let serialized = serde_json::to_string_pretty(report)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        fs::write(path, serialized)?;
+    }
 
     // Pretty print if requested
     let result = if cli.pretty {
@@ -307,6 +439,11 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
             direction,
             full_document,
             ir,
+            auto_repair,
+            ai_cmd,
+            loss_log,
+            post_repair_log,
+            allow_no_gain,
         } => {
             let (content, filename) = match input {
                 Some(ref path) => (fs::read_to_string(path)?, Some(path.clone())),
@@ -344,11 +481,50 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                 d => d,
             };
 
+            let repair_config = AiRepairConfig {
+                auto_repair,
+                ai_cmd: ai_cmd.clone(),
+                allow_no_gain,
+            };
+            let mut loss_report: Option<LossReport> = None;
+            let mut post_report: Option<LossReport> = None;
+
             let result = if full_document {
                 match direction {
-                    Direction::L2t => latex_document_to_typst(&content),
+                    Direction::L2t => {
+                        if auto_repair || loss_log.is_some() || post_repair_log.is_some() {
+                            let report = latex_to_typst_with_report(&content);
+                            loss_report = Some(report.report.clone());
+                            let repaired = tylax::utils::repair::maybe_repair_latex_to_typst(
+                                &content,
+                                &report.content,
+                                &report.report,
+                                &repair_config,
+                            );
+                            if post_repair_log.is_some() {
+                                post_report = Some(build_post_report_typst(&repaired));
+                            }
+                            repaired
+                        } else {
+                            latex_document_to_typst(&content)
+                        }
+                    }
                     Direction::T2l => {
-                        if ir {
+                        let use_ir = ir || auto_repair || loss_log.is_some() || post_repair_log.is_some();
+                        if auto_repair || loss_log.is_some() || post_repair_log.is_some() {
+                            let report = typst_to_latex_ir_with_report(&content, true);
+                            loss_report = Some(report.report.clone());
+                            let repaired = maybe_repair_typst_to_latex(
+                                &content,
+                                &report.content,
+                                &report.report,
+                                &repair_config,
+                            );
+                            if post_repair_log.is_some() {
+                                post_report = Some(build_post_report_latex(&repaired));
+                            }
+                            repaired
+                        } else if use_ir {
                             typst_to_latex_ir(&content, true)
                         } else {
                             typst_document_to_latex(&content)
@@ -358,9 +534,40 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                 }
             } else {
                 match direction {
-                    Direction::L2t => latex_to_typst(&content),
+                    Direction::L2t => {
+                        if auto_repair || loss_log.is_some() || post_repair_log.is_some() {
+                            let report = latex_math_to_typst_with_report(&content);
+                            loss_report = Some(report.report.clone());
+                            let repaired = tylax::utils::repair::maybe_repair_latex_to_typst(
+                                &content,
+                                &report.content,
+                                &report.report,
+                                &repair_config,
+                            );
+                            if post_repair_log.is_some() {
+                                post_report = Some(build_post_report_typst(&repaired));
+                            }
+                            repaired
+                        } else {
+                            latex_to_typst(&content)
+                        }
+                    }
                     Direction::T2l => {
-                        if ir {
+                        let use_ir = ir || auto_repair || loss_log.is_some() || post_repair_log.is_some();
+                        if auto_repair || loss_log.is_some() || post_repair_log.is_some() {
+                            let report = typst_to_latex_ir_with_report(&content, false);
+                            loss_report = Some(report.report.clone());
+                            let repaired = maybe_repair_typst_to_latex(
+                                &content,
+                                &report.content,
+                                &report.report,
+                                &repair_config,
+                            );
+                            if post_repair_log.is_some() {
+                                post_report = Some(build_post_report_latex(&repaired));
+                            }
+                            repaired
+                        } else if use_ir {
                             typst_to_latex_ir(&content, false)
                         } else {
                             typst_to_latex(&content)
@@ -369,6 +576,17 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                     Direction::Auto => convert_auto(&content).0,
                 }
             };
+
+            if let (Some(path), Some(report)) = (loss_log.as_ref(), loss_report.as_ref()) {
+                let serialized = serde_json::to_string_pretty(report)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                fs::write(path, serialized)?;
+            }
+            if let (Some(path), Some(report)) = (post_repair_log.as_ref(), post_report.as_ref()) {
+                let serialized = serde_json::to_string_pretty(report)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                fs::write(path, serialized)?;
+            }
 
             match output {
                 Some(path) => {
@@ -590,6 +808,40 @@ fn pretty_print(input: &str) -> String {
     }
 
     result.trim().to_string()
+}
+
+fn build_post_report_typst(output: &str) -> LossReport {
+    let metrics = typst_metrics_source(output, LOSS_MARKER_PREFIX);
+    let mut records = Vec::new();
+    for idx in 0..metrics.loss_markers {
+        let id = format!("L{:04}", idx + 1);
+        records.push(LossRecord::new(
+            id,
+            LossKind::Other,
+            Some("post-repair-loss-marker".to_string()),
+            "loss marker present after repair",
+            None,
+            None,
+        ));
+    }
+    LossReport::new("latex", "typst", records, Vec::new())
+}
+
+fn build_post_report_latex(output: &str) -> LossReport {
+    let metrics = latex_metrics_source(output, LOSS_MARKER_PREFIX);
+    let mut records = Vec::new();
+    for idx in 0..metrics.loss_markers {
+        let id = format!("L{:04}", idx + 1);
+        records.push(LossRecord::new(
+            id,
+            LossKind::Other,
+            Some("post-repair-loss-marker".to_string()),
+            "loss marker present after repair",
+            None,
+            None,
+        ));
+    }
+    LossReport::new("typst", "latex", records, Vec::new())
 }
 
 #[cfg(not(feature = "cli"))]

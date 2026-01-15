@@ -130,6 +130,12 @@ pub fn latex_to_typst_with_options(input: &str, options: L2TOptions) -> String {
     converter.convert_document(input)
 }
 
+/// Convert a complete LaTeX document to Typst and return a loss report.
+pub fn latex_to_typst_with_report(input: &str) -> crate::utils::loss::ConversionReport {
+    let mut converter = LatexConverter::new();
+    converter.convert_document_with_report(input)
+}
+
 /// Convert LaTeX math to Typst math
 ///
 /// This is a convenience function for converting math-only content.
@@ -171,6 +177,12 @@ pub fn latex_math_to_typst_with_options(input: &str, options: L2TOptions) -> Str
     converter.convert_math(input)
 }
 
+/// Convert LaTeX math to Typst and return a loss report.
+pub fn latex_math_to_typst_with_report(input: &str) -> crate::utils::loss::ConversionReport {
+    let mut converter = LatexConverter::new();
+    converter.convert_math_with_report(input)
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -205,6 +217,12 @@ Content here.
 \end{document}";
         let output = latex_to_typst(input);
         assert!(output.contains("== Introduction"));
+    }
+
+    #[test]
+    fn test_loss_report_unknown_command() {
+        let report = latex_math_to_typst_with_report(r"\unknowncmd{a}");
+        assert!(!report.report.losses.is_empty());
     }
 
     #[test]

@@ -84,13 +84,56 @@ pub fn preprocess_typst(input: &str) -> PreprocessResult {
         };
     }
 
-    let root = parse(input);
+    let filtered = strip_imports(input);
+    let root = parse(&filtered);
     let mut eval = Evaluator::new();
     let source = eval.expand_node(&root);
     PreprocessResult {
         source,
         losses: eval.losses,
     }
+}
+
+fn strip_imports(input: &str) -> String {
+    let mut out = String::new();
+    let mut skipping = false;
+    let mut depth: i32 = 0;
+    for line in input.lines() {
+        let trimmed = line.trim_start();
+        if !skipping && (trimmed.starts_with("#import") || trimmed.starts_with("#include")) {
+            depth = count_paren_delta(trimmed);
+            if depth <= 0 {
+                skipping = false;
+                depth = 0;
+            } else {
+                skipping = true;
+            }
+            continue;
+        }
+        if skipping {
+            depth += count_paren_delta(trimmed);
+            if depth <= 0 {
+                skipping = false;
+                depth = 0;
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+fn count_paren_delta(line: &str) -> i32 {
+    let mut delta = 0;
+    for ch in line.chars() {
+        match ch {
+            '(' => delta += 1,
+            ')' => delta -= 1,
+            _ => {}
+        }
+    }
+    delta
 }
 
 struct Evaluator {
@@ -120,7 +163,13 @@ impl Evaluator {
         }
 
         match node.kind() {
-            SyntaxKind::LetBinding | SyntaxKind::SetRule | SyntaxKind::ShowRule => String::new(),
+            SyntaxKind::LetBinding
+            | SyntaxKind::SetRule
+            | SyntaxKind::ShowRule
+            | SyntaxKind::Import
+            | SyntaxKind::ModuleImport
+            | SyntaxKind::Include
+            | SyntaxKind::ModuleInclude => String::new(),
             SyntaxKind::ContentBlock => self.expand_content_block(node),
             SyntaxKind::Conditional => self.expand_conditional(node),
             SyntaxKind::ForLoop => self.expand_for_loop(node),

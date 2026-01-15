@@ -80,6 +80,7 @@ pub use core::latex2typst::{
     convert_document_with_ast, convert_document_with_ast_options, convert_math_with_ast,
     convert_math_with_ast_options, convert_with_ast, convert_with_ast_options, ConversionMode,
     ConversionState, EnvironmentContext, L2TOptions, LatexConverter,
+    latex_math_to_typst_with_report, latex_to_typst_with_report,
 };
 
 // Re-export data modules
@@ -105,9 +106,11 @@ pub use data::symbols;
 pub use utils::diagnostics;
 pub use utils::error::{ConversionError, ConversionOutput, ConversionResult, ConversionWarning};
 pub use utils::files;
+pub use utils::loss::{ConversionReport, LossKind, LossRecord, LossReport, LOSS_MARKER_PREFIX};
 
 // Re-export IR pipeline function
 pub use ir_pipeline::typst_to_latex_ir;
+pub use ir_pipeline::typst_to_latex_ir_with_report;
 
 /// Convert LaTeX math code to Typst math code
 ///

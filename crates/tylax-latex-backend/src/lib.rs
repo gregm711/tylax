@@ -17,6 +17,7 @@ pub struct LatexRenderOptions {
     pub table_caption_position: TableCaptionPosition,
     pub bibliography_style_default: Option<String>,
     pub cite_command: Option<String>,
+    pub base_font_size_pt: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +46,7 @@ impl Default for LatexRenderOptions {
             table_caption_position: TableCaptionPosition::Bottom,
             bibliography_style_default: None,
             cite_command: None,
+            base_font_size_pt: None,
         }
     }
 }
@@ -125,7 +127,7 @@ fn render_heading_with_label(
         .and_then(extract_label_from_paragraph)?;
     let mut out = render_block(heading, options);
     out.push_str("\n\\label{");
-    out.push_str(&escape_latex(&label));
+    out.push_str(&escape_label(&label));
     out.push('}');
     Some(out)
 }
@@ -194,8 +196,8 @@ fn render_references_block(
     let Block::Heading { content, .. } = heading else {
         return None;
     };
-    let title = normalize_inline_whitespace(&render_inlines(content, options));
-    if !is_references_title(&title) {
+    let title_plain = normalize_inline_whitespace(&plain_inline_text(content));
+    if !is_references_title(&title_plain) {
         return None;
     }
     let next = blocks.get(idx + 1)?;
@@ -205,16 +207,25 @@ fn render_references_block(
             if entries.is_empty() {
                 return None;
             }
+            let has_label = entries
+                .iter()
+                .any(|entry| strip_reference_prefix_inlines(entry).0.is_some());
+            if !has_label && entries.len() <= 1 {
+                return None;
+            }
 
             let mut out = String::new();
             out.push_str("\\begin{thebibliography}{99}\n");
             for (i, entry) in entries.iter().enumerate() {
-                let rendered = normalize_inline_whitespace(&render_inlines(entry, options));
+                let (label, entry_body) = strip_reference_prefix_inlines(entry);
+                let rendered = normalize_inline_whitespace(&render_inlines(&entry_body, options));
                 if rendered.is_empty() {
                     continue;
                 }
-                let (label, body) = strip_reference_prefix(&rendered);
-                let key = label.unwrap_or_else(|| format!("ref{}", i + 1));
+                let (label_fallback, body) = strip_reference_prefix_rendered(&rendered);
+                let key = label
+                    .or(label_fallback)
+                    .unwrap_or_else(|| format!("ref{}", i + 1));
                 out.push_str(&format!("\\bibitem{{{}}} {}\n", key, body));
             }
             out.push_str("\\end{thebibliography}");
@@ -239,28 +250,283 @@ fn is_references_title(title: &str) -> bool {
 }
 
 fn split_reference_entries(inlines: &[Inline]) -> Vec<Vec<Inline>> {
-    let mut entries: Vec<Vec<Inline>> = Vec::new();
-    let mut current: Vec<Inline> = Vec::new();
+    let mut entries = split_inlines_on_linebreak(inlines);
+    entries.retain(|entry| !entry.is_empty());
+    entries
+}
+
+fn split_inlines_on_linebreak(inlines: &[Inline]) -> Vec<Vec<Inline>> {
+    let mut entries: Vec<Vec<Inline>> = vec![Vec::new()];
     for inline in inlines {
-        if matches!(inline, Inline::LineBreak) {
-            if !current.is_empty() {
-                entries.push(current);
-                current = Vec::new();
+        match inline {
+            Inline::LineBreak => {
+                if entries.last().map_or(false, |entry| !entry.is_empty()) {
+                    entries.push(Vec::new());
+                }
             }
-            continue;
+            Inline::Size { size, content } => {
+                split_wrapped_inlines(&mut entries, content, |part| {
+                    Inline::Size {
+                        size: size.clone(),
+                        content: part,
+                    }
+                });
+            }
+            Inline::Strong(inner) => {
+                split_wrapped_inlines(&mut entries, inner, |part| {
+                    Inline::Strong(part)
+                });
+            }
+            Inline::Emph(inner) => {
+                split_wrapped_inlines(&mut entries, inner, |part| {
+                    Inline::Emph(part)
+                });
+            }
+            Inline::Link { text, url } => {
+                let url = url.clone();
+                split_wrapped_inlines(&mut entries, text, |part| {
+                    Inline::Link {
+                        text: part,
+                        url: url.clone(),
+                    }
+                });
+            }
+            Inline::Footnote(inner) => {
+                split_wrapped_inlines(&mut entries, inner, |part| {
+                    Inline::Footnote(part)
+                });
+            }
+            Inline::Color { color, content } => {
+                let color = color.clone();
+                split_wrapped_inlines(&mut entries, content, |part| {
+                    Inline::Color {
+                        color: color.clone(),
+                        content: part,
+                    }
+                });
+            }
+            Inline::Superscript(inner) => {
+                split_wrapped_inlines(&mut entries, inner, |part| {
+                    Inline::Superscript(part)
+                });
+            }
+            Inline::Subscript(inner) => {
+                split_wrapped_inlines(&mut entries, inner, |part| {
+                    Inline::Subscript(part)
+                });
+            }
+            _ => {
+                if let Some(entry) = entries.last_mut() {
+                    entry.push(inline.clone());
+                }
+            }
         }
-        current.push(inline.clone());
-    }
-    if !current.is_empty() {
-        entries.push(current);
     }
     entries
 }
 
-fn strip_reference_prefix(text: &str) -> (Option<String>, String) {
+fn split_wrapped_inlines<F>(entries: &mut Vec<Vec<Inline>>, content: &[Inline], wrap: F)
+where
+    F: Fn(Vec<Inline>) -> Inline,
+{
+    let parts = split_inlines_on_linebreak(content);
+    if parts.is_empty() {
+        return;
+    }
+    let mut iter = parts.into_iter();
+    if let Some(first) = iter.next() {
+        if !first.is_empty() {
+            if let Some(entry) = entries.last_mut() {
+                entry.push(wrap(first));
+            }
+        }
+    }
+    for part in iter {
+        if entries.last().map_or(false, |entry| !entry.is_empty()) {
+            entries.push(Vec::new());
+        }
+        if let Some(entry) = entries.last_mut() {
+            if !part.is_empty() {
+                entry.push(wrap(part));
+            }
+        }
+    }
+}
+
+fn strip_reference_prefix_inlines(inlines: &[Inline]) -> (Option<String>, Vec<Inline>) {
+    let (label, mut body) = strip_reference_prefix_inlines_inner(inlines);
+    if label.is_some() {
+        trim_leading_inline_whitespace(&mut body);
+    }
+    (label, body)
+}
+
+fn strip_reference_prefix_inlines_inner(inlines: &[Inline]) -> (Option<String>, Vec<Inline>) {
+    if inlines.is_empty() {
+        return (None, Vec::new());
+    }
+    let mut idx = 0;
+    while idx < inlines.len() {
+        match &inlines[idx] {
+            Inline::LineBreak => {
+                idx += 1;
+                continue;
+            }
+            Inline::Text(text) => {
+                let trimmed = text.trim_start();
+                if trimmed.is_empty() {
+                    idx += 1;
+                    continue;
+                }
+                if let Some((label, remainder)) = strip_label_from_text(trimmed) {
+                    let mut out = Vec::new();
+                    if !remainder.is_empty() {
+                        out.push(Inline::Text(remainder));
+                    }
+                    out.extend_from_slice(&inlines[idx + 1..]);
+                    return (Some(label), out);
+                }
+                return (None, inlines.to_vec());
+            }
+            Inline::Size { size, content } => {
+                if let Some((label, inner)) =
+                    strip_wrapped_reference_prefix(content, |part| Inline::Size {
+                        size: size.clone(),
+                        content: part,
+                    })
+                {
+                    let mut out = Vec::new();
+                    if let Some(wrapped) = inner {
+                        out.push(wrapped);
+                    }
+                    out.extend_from_slice(&inlines[idx + 1..]);
+                    return (Some(label), out);
+                }
+                return (None, inlines.to_vec());
+            }
+            Inline::Strong(inner) => {
+                if let Some((label, inner)) =
+                    strip_wrapped_reference_prefix(inner, Inline::Strong)
+                {
+                    let mut out = Vec::new();
+                    if let Some(wrapped) = inner {
+                        out.push(wrapped);
+                    }
+                    out.extend_from_slice(&inlines[idx + 1..]);
+                    return (Some(label), out);
+                }
+                return (None, inlines.to_vec());
+            }
+            Inline::Emph(inner) => {
+                if let Some((label, inner)) =
+                    strip_wrapped_reference_prefix(inner, Inline::Emph)
+                {
+                    let mut out = Vec::new();
+                    if let Some(wrapped) = inner {
+                        out.push(wrapped);
+                    }
+                    out.extend_from_slice(&inlines[idx + 1..]);
+                    return (Some(label), out);
+                }
+                return (None, inlines.to_vec());
+            }
+            Inline::Color { color, content } => {
+                let color = color.clone();
+                if let Some((label, inner)) =
+                    strip_wrapped_reference_prefix(content, |part| Inline::Color {
+                        color: color.clone(),
+                        content: part,
+                    })
+                {
+                    let mut out = Vec::new();
+                    if let Some(wrapped) = inner {
+                        out.push(wrapped);
+                    }
+                    out.extend_from_slice(&inlines[idx + 1..]);
+                    return (Some(label), out);
+                }
+                return (None, inlines.to_vec());
+            }
+            Inline::Superscript(inner) => {
+                if let Some((label, inner)) =
+                    strip_wrapped_reference_prefix(inner, Inline::Superscript)
+                {
+                    let mut out = Vec::new();
+                    if let Some(wrapped) = inner {
+                        out.push(wrapped);
+                    }
+                    out.extend_from_slice(&inlines[idx + 1..]);
+                    return (Some(label), out);
+                }
+                return (None, inlines.to_vec());
+            }
+            Inline::Subscript(inner) => {
+                if let Some((label, inner)) =
+                    strip_wrapped_reference_prefix(inner, Inline::Subscript)
+                {
+                    let mut out = Vec::new();
+                    if let Some(wrapped) = inner {
+                        out.push(wrapped);
+                    }
+                    out.extend_from_slice(&inlines[idx + 1..]);
+                    return (Some(label), out);
+                }
+                return (None, inlines.to_vec());
+            }
+            Inline::Link { text, url } => {
+                let url = url.clone();
+                if let Some((label, inner)) =
+                    strip_wrapped_reference_prefix(text, |part| Inline::Link {
+                        text: part,
+                        url: url.clone(),
+                    })
+                {
+                    let mut out = Vec::new();
+                    if let Some(wrapped) = inner {
+                        out.push(wrapped);
+                    }
+                    out.extend_from_slice(&inlines[idx + 1..]);
+                    return (Some(label), out);
+                }
+                return (None, inlines.to_vec());
+            }
+            Inline::Footnote(content) => {
+                if let Some((label, inner)) =
+                    strip_wrapped_reference_prefix(content, Inline::Footnote)
+                {
+                    let mut out = Vec::new();
+                    if let Some(wrapped) = inner {
+                        out.push(wrapped);
+                    }
+                    out.extend_from_slice(&inlines[idx + 1..]);
+                    return (Some(label), out);
+                }
+                return (None, inlines.to_vec());
+            }
+            _ => return (None, inlines.to_vec()),
+        }
+    }
+    (None, inlines.to_vec())
+}
+
+fn strip_wrapped_reference_prefix<F>(
+    content: &[Inline],
+    wrap: F,
+) -> Option<(String, Option<Inline>)>
+where
+    F: Fn(Vec<Inline>) -> Inline,
+{
+    let (label, mut inner) = strip_reference_prefix_inlines_inner(content);
+    let label = label?;
+    trim_leading_inline_whitespace(&mut inner);
+    let wrapped = if inner.is_empty() { None } else { Some(wrap(inner)) };
+    Some((label, wrapped))
+}
+
+fn strip_label_from_text(text: &str) -> Option<(String, String)> {
     let trimmed = text.trim_start();
     let Some(rest) = trimmed.strip_prefix('[') else {
-        return (None, trimmed.to_string());
+        return None;
     };
     let mut digits = String::new();
     let mut chars = rest.chars().peekable();
@@ -274,16 +540,112 @@ fn strip_reference_prefix(text: &str) -> (Option<String>, String) {
             break;
         }
     }
-    if chars.peek().copied() == Some(']') {
-        chars.next();
-        let remainder: String = chars.collect();
-        let body = remainder.trim_start().to_string();
-        if !digits.is_empty() {
-            return (Some(format!("ref{}", digits)), body);
-        }
-        return (None, body);
+    if digits.is_empty() || chars.peek().copied() != Some(']') {
+        return None;
     }
+    chars.next();
+    let remainder: String = chars.collect();
+    Some((format!("ref{}", digits), remainder.trim_start().to_string()))
+}
+
+fn trim_leading_inline_whitespace(inlines: &mut Vec<Inline>) {
+    while let Some(first) = inlines.first_mut() {
+        match first {
+            Inline::Text(text) => {
+                let trimmed = text.trim_start().to_string();
+                if trimmed.is_empty() {
+                    inlines.remove(0);
+                    continue;
+                }
+                *text = trimmed;
+                break;
+            }
+            Inline::LineBreak => {
+                inlines.remove(0);
+            }
+            _ => break,
+        }
+    }
+}
+
+fn strip_reference_prefix_rendered(text: &str) -> (Option<String>, String) {
+    let trimmed = text.trim_start();
+    if let Some((label, remainder)) = strip_label_from_text(trimmed) {
+        return (Some(label), remainder);
+    }
+    if !trimmed.starts_with('{') {
+        return (None, trimmed.to_string());
+    }
+
+    let bytes = trimmed.as_bytes();
+    let mut idx = 1usize;
+    idx = skip_spaces(bytes, idx);
+    if idx < bytes.len() && bytes[idx] == b'\\' {
+        idx += 1;
+        let (cmd, next) = read_command_name(trimmed, idx);
+        idx = next;
+        if cmd == "fontsize" {
+            idx = skip_spaces(bytes, idx);
+            idx = skip_brace_group(trimmed, idx).unwrap_or(idx);
+            idx = skip_spaces(bytes, idx);
+            idx = skip_brace_group(trimmed, idx).unwrap_or(idx);
+            idx = skip_spaces(bytes, idx);
+            if trimmed[idx..].starts_with("\\selectfont") {
+                idx += "\\selectfont".len();
+            }
+        }
+        idx = skip_spaces(bytes, idx);
+    }
+
+    if idx < bytes.len() && bytes[idx] == b'[' {
+        if let Some((label, remainder)) = strip_label_from_text(&trimmed[idx..]) {
+            let mut out = String::new();
+            out.push_str(&trimmed[..idx]);
+            out.push_str(&remainder);
+            return (Some(label), out);
+        }
+    }
+
     (None, trimmed.to_string())
+}
+
+fn skip_spaces(bytes: &[u8], mut idx: usize) -> usize {
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+    idx
+}
+
+fn read_command_name(s: &str, start: usize) -> (String, usize) {
+    let mut idx = start;
+    let bytes = s.as_bytes();
+    while idx < bytes.len() && (bytes[idx] as char).is_ascii_alphabetic() {
+        idx += 1;
+    }
+    (s[start..idx].to_string(), idx)
+}
+
+fn skip_brace_group(s: &str, start: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    if start >= bytes.len() || bytes[start] != b'{' {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut idx = start;
+    while idx < bytes.len() {
+        match bytes[idx] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(idx + 1);
+                }
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+    None
 }
 
 fn render_block(block: &Block, options: &LatexRenderOptions) -> String {
@@ -405,7 +767,7 @@ fn render_math_block(math: &MathBlock, options: &LatexRenderOptions) -> String {
         out.push_str(content);
         if let Some(label) = &math.label {
             out.push_str("\n\\label{");
-            out.push_str(&escape_latex(label));
+            out.push_str(&escape_label(label));
             out.push('}');
         }
         out.push_str(&format!("\n\\end{{{}}}", env));
@@ -416,7 +778,7 @@ fn render_math_block(math: &MathBlock, options: &LatexRenderOptions) -> String {
         out.push_str(content);
         if let Some(label) = &math.label {
             out.push_str("\n\\label{");
-            out.push_str(&escape_latex(label));
+            out.push_str(&escape_label(label));
             out.push('}');
         }
         out.push_str("\n\\end{equation}");
@@ -1335,7 +1697,7 @@ fn render_environment(
     out.push_str(&render_blocks_inline(&env.blocks, options));
     if let Some(label) = label {
         out.push_str("\n\\label{");
-        out.push_str(&escape_latex(label));
+        out.push_str(&escape_label(label));
         out.push('}');
     }
     out.push_str(&format!("\n\\end{{{}}}", name));
@@ -1353,12 +1715,103 @@ fn sanitize_env_name(name: &str) -> String {
         .collect::<String>()
 }
 
+fn render_inline_size(size: &str, content: &[Inline], options: &LatexRenderOptions) -> String {
+    if content.is_empty() {
+        return String::new();
+    }
+    let base_pt = options.base_font_size_pt.unwrap_or(10.0);
+    if let Some(size_pt) = parse_size_to_pt(size, base_pt) {
+        if base_pt > 0.0 {
+            let scale = size_pt / base_pt;
+            if (scale - 1.0).abs() < 0.05 {
+                return render_inlines(content, options);
+            }
+            if let Some(cmd) = map_size_command(scale) {
+                return format!("{{{} {}}}", cmd, render_inlines(content, options));
+            }
+        }
+        let baseline = (size_pt * 1.2).max(size_pt + 1.0);
+        return format!(
+            "{{\\fontsize{{{:.1}pt}}{{{:.1}pt}}\\selectfont {}}}",
+            size_pt,
+            baseline,
+            render_inlines(content, options)
+        );
+    }
+    render_inlines(content, options)
+}
+
+fn parse_size_to_pt(value: &str, base_pt: f64) -> Option<f64> {
+    let (num, unit) = split_number_unit(value)?;
+    match unit {
+        "pt" => Some(num),
+        "em" | "rem" => {
+            if base_pt > 0.0 {
+                Some(num * base_pt)
+            } else {
+                None
+            }
+        }
+        "" => Some(num),
+        _ => None,
+    }
+}
+
+fn split_number_unit(value: &str) -> Option<(f64, &str)> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut split_idx = trimmed.len();
+    for (idx, ch) in trimmed.char_indices() {
+        if !(ch.is_ascii_digit() || ch == '.' || ch == '-') {
+            split_idx = idx;
+            break;
+        }
+    }
+    let (num_str, unit) = trimmed.split_at(split_idx);
+    let num = num_str.trim().parse::<f64>().ok()?;
+    Some((num, unit.trim()))
+}
+
+fn map_size_command(scale: f64) -> Option<&'static str> {
+    const SIZE_MAP: [(&str, f64); 10] = [
+        ("\\tiny", 0.5),
+        ("\\scriptsize", 0.7),
+        ("\\footnotesize", 0.8),
+        ("\\small", 0.9),
+        ("\\normalsize", 1.0),
+        ("\\large", 1.2),
+        ("\\Large", 1.44),
+        ("\\LARGE", 1.728),
+        ("\\huge", 2.074),
+        ("\\Huge", 2.488),
+    ];
+    let mut best_cmd: Option<&'static str> = None;
+    let mut best_diff = f64::MAX;
+    for (cmd, target) in SIZE_MAP {
+        let diff = (scale - target).abs();
+        if diff < best_diff {
+            best_diff = diff;
+            best_cmd = Some(cmd);
+        }
+    }
+    if best_diff <= 0.15 {
+        best_cmd
+    } else {
+        None
+    }
+}
+
 fn render_inlines(inlines: &[Inline], options: &LatexRenderOptions) -> String {
     let mut out = String::new();
     let mut last_was_linebreak = false;
     for inline in inlines {
         match inline {
             Inline::Text(text) => out.push_str(&escape_latex(text)),
+            Inline::Size { size, content } => {
+                out.push_str(&render_inline_size(size, content, options));
+            }
             Inline::Strong(inner) => {
                 out.push_str("\\textbf{");
                 out.push_str(&render_inlines(inner, options));
@@ -1389,22 +1842,22 @@ fn render_inlines(inlines: &[Inline], options: &LatexRenderOptions) -> String {
             Inline::Ref(label) => {
                 if is_equation_label(label) {
                     out.push_str("\\eqref{");
-                    out.push_str(&escape_latex(label));
+                    out.push_str(&escape_label(label));
                     out.push('}');
                 } else if let Some(prefix) = reference_prefix(label) {
                     out.push_str(prefix);
                     out.push_str("~\\ref{");
-                    out.push_str(&escape_latex(label));
+                    out.push_str(&escape_label(label));
                     out.push('}');
                 } else {
                     out.push_str("\\ref{");
-                    out.push_str(&escape_latex(label));
+                    out.push_str(&escape_label(label));
                     out.push('}');
                 }
             }
             Inline::Label(label) => {
                 out.push_str("\\label{");
-                out.push_str(&escape_latex(label));
+                out.push_str(&escape_label(label));
                 out.push('}');
             }
             Inline::Cite(key) => {
@@ -1412,7 +1865,7 @@ fn render_inlines(inlines: &[Inline], options: &LatexRenderOptions) -> String {
                 out.push_str("\\");
                 out.push_str(cmd);
                 out.push_str("{");
-                out.push_str(&escape_latex(key));
+                out.push_str(&escape_cite_keys(key));
                 out.push('}');
             }
             Inline::Footnote(content) => {
@@ -1528,6 +1981,38 @@ fn escape_latex(input: &str) -> String {
     out
 }
 
+fn escape_label(input: &str) -> String {
+    let mut out = String::new();
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, ':' | '-' | '_' | '.') {
+            out.push(ch);
+        } else if ch.is_whitespace() {
+            out.push('-');
+        }
+    }
+    if out.is_empty() {
+        "label".to_string()
+    } else {
+        out
+    }
+}
+
+fn escape_cite_keys(input: &str) -> String {
+    let mut keys = Vec::new();
+    for part in input.split(',') {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        keys.push(escape_label(trimmed));
+    }
+    if keys.is_empty() {
+        escape_label(input)
+    } else {
+        keys.join(",")
+    }
+}
+
 fn color_to_latex(input: &str) -> (Option<&'static str>, String) {
     let trimmed = input.trim().trim_matches('"');
     if let Some(hex) = extract_hex_color(trimmed) {
@@ -1551,6 +2036,45 @@ fn normalize_inline_whitespace(input: &str) -> String {
         }
     }
     out.trim().to_string()
+}
+
+fn plain_inline_text(inlines: &[Inline]) -> String {
+    let mut out = String::new();
+    for inline in inlines {
+        match inline {
+            Inline::Text(text) => out.push_str(text),
+            Inline::Code(code) => out.push_str(code),
+            Inline::Math(content) => out.push_str(content),
+            Inline::Size { content, .. } => out.push_str(&plain_inline_text(content)),
+            Inline::Strong(inner) => out.push_str(&plain_inline_text(inner)),
+            Inline::Emph(inner) => out.push_str(&plain_inline_text(inner)),
+            Inline::Link { text, .. } => out.push_str(&plain_inline_text(text)),
+            Inline::Footnote(content) => out.push_str(&plain_inline_text(content)),
+            Inline::Color { content, .. } => out.push_str(&plain_inline_text(content)),
+            Inline::Superscript(content) => out.push_str(&plain_inline_text(content)),
+            Inline::Subscript(content) => out.push_str(&plain_inline_text(content)),
+            Inline::LineBreak => out.push(' '),
+            Inline::RawLatex(_) | Inline::Ref(_) | Inline::Label(_) | Inline::Cite(_) => {}
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_references_prefix_inside_size() {
+        let entry = vec![Inline::Size {
+            size: "9pt".to_string(),
+            content: vec![Inline::Text("[1] A.".to_string())],
+        }];
+        let (label, body) = strip_reference_prefix_inlines(&entry);
+        assert_eq!(label.as_deref(), Some("ref1"));
+        let rendered = render_inlines(&body, &LatexRenderOptions::default());
+        assert_eq!(rendered, "{\\small A.}");
+    }
 }
 
 fn render_table(table: &Table, options: Option<&LatexRenderOptions>) -> String {
@@ -1582,7 +2106,11 @@ fn render_table(table: &Table, options: Option<&LatexRenderOptions>) -> String {
     if has_style {
         out.push_str("\\begingroup\n");
         if let Some(inset) = table.inset.as_deref() {
-            out.push_str(&format!("\\setlength{{\\tabcolsep}}{{{}}}\n", inset));
+            if let Some(token) = parse_table_inset(inset) {
+                if let Some(value) = convert_length_to_latex(&token) {
+                    out.push_str(&format!("\\setlength{{\\tabcolsep}}{{{}}}\n", value));
+                }
+            }
         }
         if let Some(stroke) = stroke_width.as_deref() {
             out.push_str(&format!("\\setlength{{\\arrayrulewidth}}{{{}}}\n", stroke));
@@ -1746,12 +2274,20 @@ fn render_table_block(
     let caption_first = options.table_caption_position == TableCaptionPosition::Top;
     let label_only = has_label && !has_caption;
     let mut out = String::new();
-    let placement = if options.force_here && !options.two_column {
-        "H"
+    let wide = options.two_column && is_wide_table(table);
+    let mut env = "table".to_string();
+    if wide {
+        env.push('*');
+    }
+    let mut placement = if options.force_here && !options.two_column {
+        "H".to_string()
     } else {
-        "h"
+        default_float_placement(options).to_string()
     };
-    out.push_str(&format!("\\begin{{table}}[{}]\n\\centering\n", placement));
+    if wide && placement == "h" {
+        placement = "t".to_string();
+    }
+    out.push_str(&format!("\\begin{{{}}}[{}]\n\\centering\n", env, placement));
 
     let mut table_body = table.clone();
     if has_caption {
@@ -1762,11 +2298,11 @@ fn render_table_block(
         if let Some(label) = label {
             if has_caption {
                 out.push_str("\\label{");
-                out.push_str(&escape_latex(label));
+                out.push_str(&escape_label(label));
                 out.push_str("}\n");
             } else {
                 out.push_str("\\refstepcounter{table}\n\\label{");
-                out.push_str(&escape_latex(label));
+                out.push_str(&escape_label(label));
                 out.push_str("}\n");
             }
         }
@@ -1800,7 +2336,7 @@ fn render_table_block(
     if !out.ends_with('\n') {
         out.push('\n');
     }
-    out.push_str("\\end{table}");
+    out.push_str(&format!("\\end{{{}}}", env));
     out
 }
 
@@ -1959,7 +2495,7 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
                     }
                     if let Some(label) = &figure.label {
                         out.push_str("\n\\label{");
-                        out.push_str(&escape_latex(label));
+                        out.push_str(&escape_label(label));
                         out.push_str("}");
                     }
                     out.push('\n');
@@ -1973,7 +2509,7 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
                     }
                     if let Some(label) = &figure.label {
                         out.push_str("\n\\label{");
-                        out.push_str(&escape_latex(label));
+                        out.push_str(&escape_label(label));
                         out.push_str("}");
                     }
                 }
@@ -1985,11 +2521,15 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
 
     let mut out = String::new();
     let mapped = figure.placement.as_deref().and_then(map_placement);
-    let mut placement = mapped.unwrap_or("h");
+    let mut placement = if let Some(mapped) = mapped {
+        mapped.to_string()
+    } else {
+        default_float_placement(options).to_string()
+    };
     if options.force_here && !options.two_column {
         let should_force = figure.placement.is_none() || placement == "h";
         if should_force {
-            placement = "H";
+            placement = "H".to_string();
         }
     }
     let base_env = match figure.content {
@@ -1997,7 +2537,6 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
         _ => "figure",
     };
     let mut env = base_env.to_string();
-    let mut placement = placement.to_string();
     if options.two_column {
         let wide = match &figure.content {
             FigureContent::Image(image) => is_wide_image(image),
@@ -2025,7 +2564,7 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
         }
         if let Some(label) = &figure.label {
             out.push_str("\n\\label{");
-            out.push_str(&escape_latex(label));
+            out.push_str(&escape_label(label));
             out.push_str("}");
         }
         out.push('\n');
@@ -2051,7 +2590,7 @@ fn render_figure(figure: &Figure, options: &LatexRenderOptions) -> String {
         }
         if let Some(label) = &figure.label {
             out.push_str("\n\\label{");
-            out.push_str(&escape_latex(label));
+            out.push_str(&escape_label(label));
             out.push_str("}");
         }
     }
@@ -2084,6 +2623,11 @@ fn is_wide_table(table: &Table) -> bool {
 }
 
 fn render_image(image: &Image) -> String {
+    let path = if image.path.to_lowercase().ends_with(".svg") {
+        format!("{}.pdf", image.path.trim_end_matches(".svg"))
+    } else {
+        image.path.clone()
+    };
     let mut opts = Vec::new();
     if let Some(width) = image.width.as_deref().and_then(convert_length_to_latex) {
         opts.push(format!("width={}", width));
@@ -2104,7 +2648,7 @@ fn render_image(image: &Image) -> String {
     format!(
         "\\includegraphics{}{{{}}}",
         opt_str,
-        escape_latex(&image.path)
+        escape_latex(&path)
     )
 }
 
@@ -2116,6 +2660,14 @@ fn map_placement(raw: &str) -> Option<&'static str> {
         "page" | "p" => Some("p"),
         "none" => Some("h"),
         _ => None,
+    }
+}
+
+fn default_float_placement(options: &LatexRenderOptions) -> &'static str {
+    if options.two_column {
+        "t"
+    } else {
+        "h"
     }
 }
 
@@ -2136,6 +2688,52 @@ fn convert_length_to_latex(raw: &str) -> Option<String> {
         return Some(format!("{}pt", trimmed));
     }
     Some(trimmed.to_string())
+}
+
+fn parse_table_inset(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains("=>") {
+        return None;
+    }
+    let candidate = if let Some(idx) = trimmed.find("x:") {
+        extract_length_token(&trimmed[idx + 2..])
+    } else if trimmed.starts_with('(') && trimmed.contains(',') {
+        extract_length_token(trimmed)
+    } else {
+        extract_length_token(trimmed)
+    }?;
+    if candidate.ends_with('%') {
+        return None;
+    }
+    Some(candidate)
+}
+
+fn extract_length_token(raw: &str) -> Option<String> {
+    let mut token = String::new();
+    let mut started = false;
+    for ch in raw.chars() {
+        if !started {
+            if ch.is_ascii_digit() || ch == '.' || ch == '-' {
+                token.push(ch);
+                started = true;
+            }
+            continue;
+        }
+        if ch.is_ascii_digit() || ch == '.' || ch == '-' || ch.is_ascii_alphabetic() {
+            token.push(ch);
+            started = true;
+        } else if started {
+            break;
+        }
+    }
+    if token.is_empty() {
+        None
+    } else {
+        Some(token)
+    }
 }
 
 fn render_bibliography(file: &str, style: Option<&str>) -> String {

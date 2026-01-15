@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use typst_syntax::{parse, SyntaxKind, SyntaxNode};
+use tylax::utils::typst_analysis::lint_source;
 
 #[derive(Debug)]
 struct Issue {
@@ -55,8 +55,16 @@ fn main() {
             });
             continue;
         };
-        let root = parse(&source);
-        lint_node(&root, &file, &mut issues);
+        let local_issues = lint_source(&source);
+        for issue in local_issues {
+            issues.push(Issue {
+                file: file.clone(),
+                line: issue.line,
+                col: issue.col,
+                kind: issue.kind,
+                message: issue.message,
+            });
+        }
     }
 
     if issues.is_empty() {
@@ -96,135 +104,4 @@ fn collect_typ_files(dir: &Path, files: &mut Vec<PathBuf>) {
             files.push(path);
         }
     }
-}
-
-fn lint_node(node: &SyntaxNode, file: &Path, issues: &mut Vec<Issue>) {
-    match node.kind() {
-        SyntaxKind::Dots => {
-            push_issue(file, issues, "error", "spread/ellipsis '..' is not allowed");
-        }
-        SyntaxKind::ShowRule => {
-            if !is_allowed_show_rule(node) {
-                push_issue(file, issues, "error", "show rules are not allowed");
-            }
-        }
-        SyntaxKind::SetRule => {
-            if let Some(name) = set_rule_name(node) {
-                if matches!(
-                    name.as_str(),
-                    "page" | "text" | "par" | "math.equation" | "std.bibliography"
-                ) {
-                    // Allowed: subset supports these set rules for preamble hints.
-                } else {
-                    push_issue(file, issues, "error", "set rules are not allowed");
-                }
-            } else {
-                push_issue(file, issues, "error", "set rules are not allowed");
-            }
-        }
-        SyntaxKind::CodeBlock => {
-            push_issue(file, issues, "error", "code blocks { ... } are not allowed; use [ ... ] content blocks");
-        }
-        SyntaxKind::LetBinding => {
-            if node.children().any(|c| c.kind() == SyntaxKind::CodeBlock) {
-                push_issue(file, issues, "error", "#let with code block body is not allowed");
-            }
-        }
-        SyntaxKind::Binary => {
-            if node.children().any(|c| c.kind() == SyntaxKind::In) {
-                push_issue(file, issues, "error", "the `in` operator is not allowed (use explicit fields or booleans)");
-            }
-        }
-        SyntaxKind::FuncCall => {
-            if let Some(name) = func_call_name(node) {
-                if name == "place" {
-                    push_issue(file, issues, "error", "place(...) is not allowed; use align/block/box");
-                }
-                if name.starts_with("calc.") || name == "calc" {
-                    push_issue(file, issues, "error", "calc.* is not allowed");
-                }
-                if let Some(method) = name.split('.').last() {
-                    if matches!(method, "map" | "filter" | "fold" | "reduce" | "join") {
-                        push_issue(file, issues, "error", "functional collection methods are not allowed; use #for loops");
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-
-    for child in node.children() {
-        lint_node(&child, file, issues);
-    }
-}
-
-fn set_rule_name(node: &SyntaxNode) -> Option<String> {
-    for child in node.children() {
-        match child.kind() {
-            SyntaxKind::Ident => return Some(child.text().to_string()),
-            SyntaxKind::FieldAccess => {
-                let mut parts = Vec::new();
-                for part in child.children() {
-                    if part.kind() == SyntaxKind::Ident {
-                        parts.push(part.text().to_string());
-                    }
-                }
-                if !parts.is_empty() {
-                    return Some(parts.join("."));
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn is_allowed_show_rule(node: &SyntaxNode) -> bool {
-    for child in node.children() {
-        match child.kind() {
-            SyntaxKind::Ident => {
-                if child.text() == "heading" {
-                    return true;
-                }
-            }
-            SyntaxKind::FuncCall => {
-                if let Some(name) = func_call_name(&child) {
-                    if name == "heading.where" || name == "heading" {
-                        return true;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
-fn func_call_name(node: &SyntaxNode) -> Option<String> {
-    let first = node.children().next()?;
-    if first.kind() == SyntaxKind::Ident {
-        return Some(first.text().to_string());
-    }
-    if first.kind() == SyntaxKind::FieldAccess {
-        let mut parts = Vec::new();
-        for child in first.children() {
-            if child.kind() == SyntaxKind::Ident {
-                parts.push(child.text().to_string());
-            }
-        }
-        if !parts.is_empty() {
-            return Some(parts.join("."));
-        }
-    }
-    None
-}
-
-fn push_issue(file: &Path, issues: &mut Vec<Issue>, kind: &'static str, message: &str) {
-    issues.push(Issue {
-        file: file.to_path_buf(),
-        line: 0,
-        col: 0,
-        kind,
-        message: message.to_string(),
-    });
 }

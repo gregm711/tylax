@@ -4,7 +4,7 @@
 \usepackage{algorithmic}
 \usepackage{graphicx}
 \usepackage{textcomp}
-\usepackage{xcolor}
+\usepackage[table]{xcolor}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \title{A Typesetting System to Untangle the Scientific Writing Process}
 \author{
@@ -68,7 +68,7 @@ We conducted experiments on...
 
 \subsection{Results}
 
-\begin{table}[h]
+\begin{table}[t]
 \centering
 \caption{Comparison of methods on the benchmark dataset.}
 \begin{tabular}{|c|c|c|c|}
@@ -91,7 +91,7 @@ Summarize your contributions and suggest directions for future work.
 In this paper, we presented... Future work includes...
 
 \begin{thebibliography}{99}
-\bibitem{ref1} J. Smith, "Example paper title," in \textit{Proc. IEEE Conference}, 2023, pp. 1-10.
-\bibitem{ref2} A. Jones and B. Williams, "Another example paper," \textit{IEEE Trans. on Computing}, vol. 42, no. 3, pp. 123-135, 2024.
+\bibitem{ref1} {\small J. Smith, "Example paper title," in \textit{Proc. IEEE Conference}, 2023, pp. 1-10.}
+\bibitem{ref2} {\small A. Jones and B. Williams, "Another example paper," \textit{IEEE Trans. on Computing}, vol. 42, no. 3, pp. 123-135, 2024. }
 \end{thebibliography}
 \end{document}

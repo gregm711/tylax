@@ -1,6 +1,13 @@
 pub mod ams;
 pub mod book;
+pub mod common;
 pub mod ieee;
 pub mod letter;
 pub mod newsletter;
 pub mod arxiv;
+pub mod neurips;
+pub mod icml;
+pub mod iclr;
+pub mod cvpr;
+pub mod tmlr;
+pub mod jmlr;

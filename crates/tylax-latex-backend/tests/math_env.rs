@@ -20,6 +20,7 @@ fn math_block_uses_gather_without_alignment() {
             table_caption_position: tylax_latex_backend::TableCaptionPosition::Bottom,
             bibliography_style_default: None,
             cite_command: None,
+            base_font_size_pt: None,
         },
     );
     assert!(out.contains("\\begin{gather}"));
@@ -45,6 +46,7 @@ fn math_block_uses_align_with_alignment_points() {
             table_caption_position: tylax_latex_backend::TableCaptionPosition::Bottom,
             bibliography_style_default: None,
             cite_command: None,
+            base_font_size_pt: None,
         },
     );
     assert!(out.contains("\\begin{align}"));

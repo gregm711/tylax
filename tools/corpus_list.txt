@@ -1,0 +1,9 @@
+# name path
+charged-ieee typst-corpus/typst-templates/charged-ieee/template/main.typ
+unequivocal-ams typst-corpus/typst-templates/unequivocal-ams/template/main.typ
+iclr typst-corpus/ml-templates/iclr/main.typ
+icml typst-corpus/ml-templates/icml/main.typ
+neurips typst-corpus/ml-templates/neurips/main.typ
+cvpr typst-corpus/ml-templates/cvpr/main.typ
+jmlr typst-corpus/ml-templates/jmlr/main.typ
+tmlr typst-corpus/ml-templates/tmlr/main.typ

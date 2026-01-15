@@ -4,7 +4,7 @@ use tylax_typst_frontend::typst_to_ir;
 
 use crate::preamble_hints::{
     equation_number_within, equation_numbering_enabled, extract_preamble_hints, is_two_column,
-    render_amsthm_definitions,
+    parse_length_to_pt, render_amsthm_definitions,
 };
 
 #[derive(Debug, Default)]
@@ -22,6 +22,8 @@ pub fn maybe_convert_book(input: &str) -> Option<String> {
 
     let doc = typst_to_ir(input);
     let hints = extract_preamble_hints(input);
+    let base_font_size_pt =
+        hints.text_size.as_deref().and_then(|size| parse_length_to_pt(size, "10pt"));
     let cite_command = if hints.uses_natbib {
         Some("citep".to_string())
     } else {
@@ -40,6 +42,7 @@ pub fn maybe_convert_book(input: &str) -> Option<String> {
             table_caption_position: tylax_latex_backend::TableCaptionPosition::Bottom,
             bibliography_style_default: hints.bibliography_style.clone(),
             cite_command,
+            base_font_size_pt,
         },
     );
 

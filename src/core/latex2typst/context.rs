@@ -11,6 +11,7 @@ use std::fmt::Write;
 
 use crate::data::constants::{AcronymDef, GlossaryDef};
 use crate::data::maps::TEX_COMMAND_SPEC;
+use crate::utils::loss::{LossKind, LossRecord, LossReport};
 use fxhash::FxHashMap;
 use lazy_static::lazy_static;
 
@@ -189,6 +190,10 @@ pub struct ConversionState {
     pub document_class: Option<String>,
     /// Collected errors/warnings
     pub warnings: Vec<String>,
+    /// Collected conversion losses
+    pub losses: Vec<LossRecord>,
+    /// Incrementing loss id counter
+    pub loss_seq: usize,
     /// Counter for theorems, equations, etc.
     pub counters: HashMap<String, u32>,
     /// Acronym definitions (key -> AcronymDef)
@@ -204,6 +209,11 @@ pub struct ConversionState {
 impl ConversionState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn next_loss_id(&mut self) -> String {
+        self.loss_seq += 1;
+        format!("L{:04}", self.loss_seq)
     }
 
     /// Push a new environment onto the stack
@@ -336,6 +346,9 @@ impl LatexConverter {
 
     /// Convert a complete LaTeX document to Typst
     pub fn convert_document(&mut self, input: &str) -> String {
+        self.state.warnings.clear();
+        self.state.losses.clear();
+        self.state.loss_seq = 0;
         self.state.in_preamble = true;
 
         // Preprocess: protect zero-argument commands that MiTeX would otherwise lose
@@ -371,6 +384,9 @@ impl LatexConverter {
 
     /// Convert math-only LaTeX to Typst
     pub fn convert_math(&mut self, input: &str) -> String {
+        self.state.warnings.clear();
+        self.state.losses.clear();
+        self.state.loss_seq = 0;
         self.state.mode = ConversionMode::Math;
         self.state.in_preamble = false;
 
@@ -383,6 +399,42 @@ impl LatexConverter {
 
         // Post-process
         self.postprocess_math(output)
+    }
+
+    /// Convert a complete LaTeX document and return a loss report
+    pub fn convert_document_with_report(&mut self, input: &str) -> crate::utils::loss::ConversionReport {
+        let content = self.convert_document(input);
+        let report = self.take_loss_report();
+        crate::utils::loss::ConversionReport::new(content, report)
+    }
+
+    /// Convert math-only LaTeX and return a loss report
+    pub fn convert_math_with_report(&mut self, input: &str) -> crate::utils::loss::ConversionReport {
+        let content = self.convert_math(input);
+        let report = self.take_loss_report();
+        crate::utils::loss::ConversionReport::new(content, report)
+    }
+
+    /// Record a conversion loss and return its id.
+    pub fn record_loss(
+        &mut self,
+        kind: LossKind,
+        name: Option<String>,
+        message: impl Into<String>,
+        snippet: Option<String>,
+        context: Option<String>,
+    ) -> String {
+        let id = self.state.next_loss_id();
+        let record = LossRecord::new(id.clone(), kind, name, message, snippet, context);
+        self.state.losses.push(record);
+        id
+    }
+
+    /// Consume the current loss report.
+    pub fn take_loss_report(&mut self) -> LossReport {
+        let losses = std::mem::take(&mut self.state.losses);
+        let warnings = std::mem::take(&mut self.state.warnings);
+        LossReport::new("latex", "typst", losses, warnings)
     }
 
     /// Visit a syntax node and convert it
@@ -404,6 +456,17 @@ impl LatexConverter {
                     SyntaxElement::Token(t) => t.text().to_string(),
                 };
                 self.state.warnings.push(format!("Parse error: {}", text));
+                let context = match self.state.mode {
+                    ConversionMode::Math => Some("math".to_string()),
+                    ConversionMode::Text => Some("text".to_string()),
+                };
+                self.record_loss(
+                    LossKind::ParseError,
+                    None,
+                    "Parse error",
+                    Some(text.clone()),
+                    context,
+                );
                 let _ = write!(output, "/* LaTeX Error: {} */", text.replace("*/", "* /"));
             }
 
