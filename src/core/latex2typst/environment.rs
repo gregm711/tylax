@@ -6,9 +6,9 @@ use mitex_parser::syntax::{CmdItem, EnvItem, SyntaxElement, SyntaxKind, SyntaxNo
 use rowan::ast::AstNode;
 use std::fmt::Write;
 
-use super::context::{ConversionMode, EnvironmentContext, LatexConverter};
+use super::context::{ConversionMode, EnvironmentContext, LatexConverter, TemplateKind};
 use super::table::{parse_with_grid_parser, CellAlign};
-use super::utils::sanitize_label;
+use super::utils::{escape_typst_string, sanitize_label};
 use crate::data::constants::{CodeBlockOptions, TheoremStyle, LANGUAGE_MAP, THEOREM_TYPES};
 use crate::utils::loss::{LossKind, LOSS_MARKER_PREFIX};
 
@@ -34,8 +34,8 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             conv.visit_env_content(&node, output);
         }
 
-        // Figure environment
-        "figure" | "figure*" => {
+        // Figure-like environments
+        "figure" | "figure*" | "listing" | "listing*" | "sidewaysfigure" => {
             convert_figure(conv, &node, output);
         }
 
@@ -70,6 +70,12 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             conv.visit_env_content(&node, output);
             conv.state.pop_env();
             output.push('\n');
+        }
+
+        // ICML author list (metadata only)
+        "icmlauthorlist" => {
+            let mut scratch = String::new();
+            conv.visit_env_content(&node, &mut scratch);
         }
 
         // Math environments
@@ -112,8 +118,46 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         "lstlisting" => {
             convert_lstlisting(conv, &node, output);
         }
+        "Large" | "large" | "singlespacing" | "onehalfspacing" | "doublespacing" => {
+            conv.visit_env_content(&node, output);
+        }
+
+        // Custom boxes and pages
+        "titlepage" => {
+            convert_titlepage(conv, &node, output);
+        }
+        "tcolorbox" | "tcolorbox*" | "OxWarningBox" | "OxInfoBox" => {
+            convert_boxed_env(conv, &node, output);
+        }
+        "program" => {
+            convert_program(conv, &node, output);
+        }
         "minted" => {
             convert_minted(conv, &node, output);
+        }
+        "savequote" => {
+            convert_savequote(conv, &node, output);
+        }
+        "frontmatter" | "sloppypar" => {
+            conv.visit_env_content(&node, output);
+        }
+        "nomenclature" | "nomenclature*" => {
+            output.push_str("\n= Nomenclature\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "dedication" | "acknowledgements" | "acknowledgments" => {
+            let title = match env_str {
+                "dedication" => "Dedication",
+                "acknowledgements" => "Acknowledgements",
+                _ => "Acknowledgments",
+            };
+            let _ = writeln!(output, "\n= {}\n", title);
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "sidewaystable" => {
+            convert_table(conv, &node, output);
         }
 
         // TikZ
@@ -143,10 +187,16 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
 
         // Abstract
         "abstract" => {
-            output.push_str("\n#block(width: 100%, inset: 1em)[\n");
-            output.push_str("  #align(center)[#text(weight: \"bold\")[Abstract]]\n  ");
-            conv.visit_env_content(&node, output);
-            output.push_str("\n]\n");
+            if conv.state.template_kind == Some(TemplateKind::Ieee) {
+                let mut buffer = String::new();
+                conv.visit_env_content(&node, &mut buffer);
+                conv.state.abstract_text = Some(buffer.trim().to_string());
+            } else {
+                output.push_str("\n#block(width: 100%, inset: 1em)[\n");
+                output.push_str("  #align(center)[#text(weight: \"bold\")[Abstract]]\n  ");
+                conv.visit_env_content(&node, output);
+                output.push_str("\n]\n");
+            }
         }
 
         // Center, flushleft, flushright
@@ -226,7 +276,7 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
                     Some(node.text().to_string()),
                     Some("text".to_string()),
                 );
-                let loss_marker = format!("/* {}{} */", LOSS_MARKER_PREFIX, loss_id);
+                let loss_marker = format!(" /* {}{} */ ", LOSS_MARKER_PREFIX, loss_id);
                 // Just process content
                 let _ = writeln!(output, "{} /* Begin {} */", loss_marker, env_str);
                 conv.visit_env_content(&node, output);
@@ -234,6 +284,71 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             }
         }
     }
+}
+
+fn convert_savequote(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut String) {
+    conv.state.push_env(EnvironmentContext::Savequote);
+    let mut content = String::new();
+    conv.visit_env_content(node, &mut content);
+    conv.state.pop_env();
+    output.push_str("\n#quote[\n");
+    output.push_str(content.trim());
+    output.push_str("\n]\n");
+}
+
+fn convert_titlepage(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut String) {
+    output.push_str("\n#pagebreak()\n");
+    let mut content = String::new();
+    conv.visit_env_content(node, &mut content);
+    output.push_str(content.trim());
+    output.push_str("\n#pagebreak()\n");
+}
+
+fn convert_boxed_env(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut String) {
+    let mut content = String::new();
+    conv.visit_env_content(node, &mut content);
+    output.push_str("\n#block(stroke: 0.6pt, inset: 6pt)[\n");
+    output.push_str(content.trim());
+    output.push_str("\n]\n");
+}
+
+fn convert_program(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut String) {
+    let mut caption_cmd: Option<CmdItem> = None;
+    let mut label_text = String::new();
+    let mut content = String::new();
+
+    for child in node.children_with_tokens() {
+        if let SyntaxElement::Node(n) = &child {
+            if let Some(cmd) = CmdItem::cast(n.clone()) {
+                if let Some(name_tok) = cmd.name_tok() {
+                    let name = name_tok.text();
+                    if name == "\\caption" {
+                        caption_cmd = Some(cmd.clone());
+                    } else if name == "\\label" {
+                        if let Some(lbl) = conv.get_required_arg(&cmd, 0) {
+                            label_text = lbl;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    conv.visit_env_content(node, &mut content);
+
+    output.push_str("\n#figure(");
+    if let Some(ref cmd) = caption_cmd {
+        if let Some(cap) = conv.get_converted_required_arg(cmd, 0) {
+            let _ = writeln!(output, "\n  caption: [{}],", cap);
+        }
+    }
+    output.push_str(")[\n");
+    output.push_str(content.trim());
+    output.push_str("\n] ");
+    if !label_text.is_empty() {
+        let _ = write!(output, "<{}>", sanitize_label(&label_text));
+    }
+    output.push('\n');
 }
 
 // =============================================================================
@@ -257,12 +372,19 @@ fn convert_figure(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Str
                 if let Some(name_tok) = cmd.name_tok() {
                     let name = name_tok.text();
                     if name == "\\includegraphics" {
-                        has_image = true;
-                        output.push_str("  image(\"");
                         if let Some(path) = conv.get_required_arg(&cmd, 0) {
-                            output.push_str(&path);
+                            let trimmed = path.trim();
+                            if !trimmed.is_empty()
+                                && !trimmed.contains('\\')
+                                && !trimmed.contains('{')
+                                && !trimmed.contains('}')
+                            {
+                                has_image = true;
+                                output.push_str("  image(\"");
+                                output.push_str(trimmed);
+                                output.push_str("\")");
+                            }
                         }
-                        output.push_str("\"),\n");
                     } else if name == "\\caption" {
                         // Store the command for later conversion
                         caption_cmd = Some(cmd.clone());
@@ -276,15 +398,27 @@ fn convert_figure(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Str
         }
     }
 
+    let mut wrote_arg = has_image;
     if !has_image {
-        output.push_str("  [],\n"); // Placeholder
+        output.push_str("  []");
+        wrote_arg = true;
     }
 
     // Convert caption content (may contain math like $\downarrow$)
     if let Some(ref cmd) = caption_cmd {
         if let Some(cap) = conv.get_converted_required_arg(cmd, 0) {
-            let _ = writeln!(output, "  caption: [{}],", cap);
+            if wrote_arg {
+                output.push_str(",\n");
+            } else {
+                output.push('\n');
+            }
+            let _ = write!(output, "  caption: [{}]", cap);
+            wrote_arg = true;
         }
+    }
+
+    if wrote_arg {
+        output.push('\n');
     }
 
     output.push(')');
@@ -433,21 +567,16 @@ fn convert_equation(
     // Apply math cleanup
     let cleaned = conv.cleanup_math_spacing(&math_content);
 
-    // For starred equations (equation*), disable numbering
+    output.push_str("#math.equation(block: true");
     if is_starred {
-        output.push_str("#math.equation(block: true, numbering: none)[\n$ ");
-        output.push_str(&cleaned);
-        output.push_str(" $\n]");
-    } else {
-        output.push_str("$ ");
-        output.push_str(&cleaned);
-        output.push_str(" $");
-
-        if !label.is_empty() {
-            let _ = write!(output, " <{}>", sanitize_label(&label));
-        }
+        output.push_str(", numbering: none");
     }
-
+    output.push_str(")[\n$ ");
+    output.push_str(cleaned.trim());
+    output.push_str(" $\n]");
+    if !label.is_empty() {
+        let _ = write!(output, " <{}>", sanitize_label(&label));
+    }
     output.push('\n');
 
     conv.state.mode = prev_mode;
@@ -495,19 +624,15 @@ fn convert_align(
     let cleaned = conv.cleanup_math_spacing(&math_content);
 
     if !is_inner {
-        // For starred environments (align*, eqnarray*, etc.), disable numbering
+        output.push_str("#math.equation(block: true");
         if is_starred {
-            output.push_str("#math.equation(block: true, numbering: none)[\n$ ");
-            output.push_str(&cleaned);
-            output.push_str(" $\n]");
-        } else {
-            output.push_str("$ ");
-            output.push_str(&cleaned);
-            output.push_str(" $");
-
-            if !label.is_empty() {
-                let _ = write!(output, " <{}>", sanitize_label(&label));
-            }
+            output.push_str(", numbering: none");
+        }
+        output.push_str(")[\n$ ");
+        output.push_str(cleaned.trim());
+        output.push_str(" $\n]");
+        if !label.is_empty() {
+            let _ = write!(output, " <{}>", sanitize_label(&label));
         }
         output.push('\n');
     } else {
@@ -539,15 +664,15 @@ fn convert_gather(
 
     let processed = conv.postprocess_math(content);
 
+    let mut heading = String::new();
+    heading.push_str("#math.equation(block: true");
     if is_starred {
-        let _ = write!(
-            output,
-            "#math.equation(block: true, numbering: none)[\n$ {} $\n]\n",
-            processed.trim()
-        );
-    } else {
-        let _ = writeln!(output, "$ {} $", processed.trim());
+        heading.push_str(", numbering: none");
     }
+    heading.push_str(")[\n$ ");
+    heading.push_str(processed.trim());
+    heading.push_str(" $\n]\n");
+    let _ = write!(output, "{}", heading);
 }
 
 /// Convert a multline environment
@@ -571,15 +696,15 @@ fn convert_multline(
 
     let processed = conv.postprocess_math(content);
 
+    let mut heading = String::new();
+    heading.push_str("#math.equation(block: true");
     if is_starred {
-        let _ = write!(
-            output,
-            "#math.equation(block: true, numbering: none)[\n$ {} $\n]\n",
-            processed.trim()
-        );
-    } else {
-        let _ = writeln!(output, "$ {} $", processed.trim());
+        heading.push_str(", numbering: none");
     }
+    heading.push_str(")[\n$ ");
+    heading.push_str(processed.trim());
+    heading.push_str(" $\n]\n");
+    let _ = write!(output, "{}", heading);
 }
 
 /// Convert a matrix environment
@@ -752,7 +877,9 @@ fn convert_theorem(
     conv.state.push_env(env_ctx);
 
     // Get theorem info from mapping table, or use defaults
-    let (display_name, style) = if let Some(info) = THEOREM_TYPES.get(env_name) {
+    let (display_name, _style) = if let Some(custom) = conv.state.custom_theorems.get(env_name) {
+        (custom.clone(), TheoremStyle::Plain)
+    } else if let Some(info) = THEOREM_TYPES.get(env_name) {
         (info.display_name.to_string(), info.style)
     } else {
         // Fallback: capitalize first letter
@@ -767,64 +894,57 @@ fn convert_theorem(
 
     // Proof doesn't get numbered
     let is_proof = env_name == "proof";
-    let counter_str = if is_proof {
-        String::new()
-    } else {
-        let counter = conv.state.next_counter(env_name);
-        format!(" {}", counter)
-    };
 
     // Check for optional argument (theorem name/attribution)
     let custom_name = conv.get_env_optional_arg(node);
 
-    // Standard LaTeX-like theorem format:
-    // **Theorem 1.** _Body text in italics._
-    // **Definition 1.** Body text in normal font.
-    // _Remark 1._ Body text in normal font.
-    // _Proof._ Body text. □
-
-    output.push('\n');
-
-    // Format header based on style
-    match style {
-        TheoremStyle::Plain => {
-            // Bold title, will have italic body
-            let _ = write!(output, "*{}{}.*", display_name, counter_str);
-        }
-        TheoremStyle::Definition => {
-            // Bold title, normal body
-            let _ = write!(output, "*{}{}.*", display_name, counter_str);
-        }
-        TheoremStyle::Remark => {
-            // Italic title, normal body
-            let _ = write!(output, "_{}{}._", display_name, counter_str);
-        }
-    }
-
-    // Add custom name if present
-    if let Some(name) = custom_name {
-        let _ = write!(output, " _({}.)_", name);
-    }
-    output.push(' ');
-
-    // Apply body formatting based on style
-    let use_italic_body = matches!(style, TheoremStyle::Plain) && !is_proof;
-
-    if use_italic_body {
-        output.push('_');
-    }
-
-    conv.visit_env_content(node, output);
-
-    if use_italic_body {
-        output.push('_');
-    }
-
-    // Proof gets QED symbol
     if is_proof {
-        output.push_str(" #h(1fr) $square.stroked$");
+        // Render proof inline with a QED symbol.
+        let mut buf = String::new();
+        buf.push('\n');
+        let _ = write!(buf, "_{}._", display_name);
+        if let Some(name) = custom_name {
+            let _ = write!(buf, " _({}.)_", name);
+        }
+        buf.push(' ');
+        conv.visit_env_content(node, &mut buf);
+        buf.push_str(" #h(1fr) $square.stroked$");
+        buf.push_str("\n\n");
+        output.push_str(&buf);
+        conv.state.pop_env();
+        return;
     }
 
+    // For theorem-like blocks, wrap in a referenceable figure.
+    let mut label = String::new();
+    for child in node.children_with_tokens() {
+        if let SyntaxElement::Node(n) = &child {
+            if let Some(cmd) = CmdItem::cast(n.clone()) {
+                if let Some(name_tok) = cmd.name_tok() {
+                    if name_tok.text() == "\\label" {
+                        if let Some(lbl) = conv.get_required_arg(&cmd, 0) {
+                            label = lbl;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut body = String::new();
+    if let Some(name) = custom_name {
+        let _ = write!(body, "_({}.)_ ", name);
+    }
+    conv.visit_env_content(node, &mut body);
+
+    output.push_str("\n#figure(kind: \"theorem\", supplement: [");
+    output.push_str(&display_name);
+    output.push_str("], caption: [])[\n");
+    output.push_str(body.trim());
+    output.push_str("\n] ");
+    if !label.is_empty() {
+        let _ = write!(output, "<{}>", sanitize_label(&label));
+    }
     output.push_str("\n\n");
 
     conv.state.pop_env();
@@ -956,9 +1076,11 @@ fn convert_algorithm(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut 
 
     // Process as code-like content
     let content = conv.extract_env_raw_content(node);
-    output.push_str("```\n");
-    output.push_str(&content);
-    output.push_str("\n```\n");
+    let trimmed = content.trim_end();
+    let escaped = escape_typst_string(trimmed);
+    output.push_str("  #raw(block: true, lang: \"text\", \"");
+    output.push_str(&escaped);
+    output.push_str("\")\n");
 
     output.push_str("]\n");
 }

@@ -551,6 +551,21 @@ fn collect_inlines(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Inline> {
     out
 }
 
+fn has_inline_content(inlines: &[Inline]) -> bool {
+    for inline in inlines {
+        match inline {
+            Inline::Text(text) => {
+                if !text.trim().is_empty() {
+                    return true;
+                }
+            }
+            Inline::LineBreak => {}
+            _ => return true,
+        }
+    }
+    false
+}
+
 fn flush_paragraph(blocks: &mut Vec<Block>, current: &mut Vec<Inline>) {
     if current.is_empty() {
         return;
@@ -1011,8 +1026,8 @@ fn maybe_grid_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Block> 
                 SyntaxKind::Named => {
                     let key = extract_named_key(&child).unwrap_or_default();
                     if key == "columns" {
-                        if let Some(value) = extract_named_value_node(&child) {
-                            if let Some(n) = infer_table_columns(value.text().as_ref()) {
+                        if let Some(value_text) = extract_named_value_text(&child) {
+                            if let Some(n) = infer_table_columns(&value_text) {
                                 columns = n.max(1);
                             }
                         }
@@ -1090,13 +1105,9 @@ fn parse_table_from_func_call(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Opti
         match child.kind() {
             SyntaxKind::Named => {
                 let key = extract_named_key(&child).unwrap_or_default();
+                let value_text = extract_named_value_text(&child);
                 if let Some(value) = extract_named_value_node(&child) {
-                    let value_text = value.text().to_string();
-                    if key == "columns" {
-                        columns = infer_table_columns(&value_text);
-                    } else if key == "align" {
-                        align = Some(parse_typst_align(&value_text));
-                    } else if key == "caption" {
+                    if key == "caption" {
                         caption = Some(collect_inlines(&value, losses));
                     } else if key == "stroke" {
                         stroke = Some(node_full_text(&value));
@@ -1104,6 +1115,19 @@ fn parse_table_from_func_call(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Opti
                         fill = Some(node_full_text(&value));
                     } else if key == "inset" {
                         inset = Some(node_full_text(&value));
+                    }
+                }
+                if let Some(value_text) = value_text {
+                    if key == "columns" {
+                        columns = infer_table_columns(&value_text);
+                    } else if key == "align" {
+                        align = Some(parse_typst_align(&value_text));
+                    } else if key == "stroke" && stroke.is_none() {
+                        stroke = Some(value_text);
+                    } else if key == "fill" && fill.is_none() {
+                        fill = Some(value_text);
+                    } else if key == "inset" && inset.is_none() {
+                        inset = Some(value_text);
                     }
                 }
             }
@@ -1140,7 +1164,21 @@ fn parse_table_from_func_call(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Opti
                     });
                 }
             }
-            _ => {}
+            _ => {
+                let content = collect_inlines(&child, losses);
+                if has_inline_content(&content) {
+                    cells.push(TableCell {
+                        content,
+                        colspan: 1,
+                        rowspan: 1,
+                        align: None,
+                        is_header: false,
+                        fill: None,
+                        stroke: None,
+                        inset: None,
+                    });
+                }
+            }
         }
     }
 
@@ -1192,6 +1230,21 @@ fn extract_named_value_node(node: &SyntaxNode) -> Option<SyntaxNode> {
         }
     }
     None
+}
+
+fn extract_named_value_text(node: &SyntaxNode) -> Option<String> {
+    let raw = node_full_text(node);
+    let idx = raw.find(':')?;
+    let mut value = raw[idx + 1..].trim().to_string();
+    if value.ends_with(',') {
+        value.pop();
+        value = value.trim_end().to_string();
+    }
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
 }
 
 fn extract_cell_from_table_cell(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<TableCell> {

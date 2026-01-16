@@ -4,7 +4,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tylax::{
     convert_auto, convert_auto_document, detect_format,
     diagnostics::{check_latex, format_diagnostics},
@@ -16,6 +16,10 @@ use tylax::{
     utils::loss::{LossKind, LossRecord, LossReport, LOSS_MARKER_PREFIX},
     utils::latex_analysis::metrics_source as latex_metrics_source,
     utils::typst_analysis::metrics_source as typst_metrics_source,
+};
+use tylax::core::latex2typst::utils::{
+    collect_bibliography_entries, collect_graphicspath_entries, collect_includegraphics_paths,
+    expand_latex_inputs, sanitize_bibtex_content,
 };
 
 #[cfg(feature = "cli")]
@@ -216,7 +220,7 @@ fn main() -> io::Result<()> {
     }
 
     // Read input
-    let (input, filename) = match cli.input_file {
+    let (mut input, filename) = match cli.input_file {
         Some(ref path) => (fs::read_to_string(path)?, Some(path.clone())),
         None => {
             let mut buffer = String::new();
@@ -275,6 +279,28 @@ fn main() -> io::Result<()> {
         d => d,
     };
 
+    let mut bib_entries: Vec<String> = Vec::new();
+    let mut bib_base_dir: Option<std::path::PathBuf> = None;
+    let mut graphic_paths: Vec<String> = Vec::new();
+    let mut graphic_dirs: Vec<String> = Vec::new();
+    let mut graphics_base_dir: Option<PathBuf> = None;
+
+    if matches!(direction, Direction::L2t) && cli.full_document {
+        if let Some(path) = filename.as_ref() {
+            if let Some(parent) = Path::new(path).parent() {
+                input = expand_latex_inputs(&input, parent);
+                bib_entries = collect_bibliography_entries(&input);
+                if bib_entries.is_empty() {
+                    bib_entries = collect_bibliography_entries_with_includes(&input, parent);
+                }
+                bib_base_dir = Some(parent.to_path_buf());
+                graphic_dirs = collect_graphicspath_entries(&input);
+                graphic_paths = collect_includegraphics_paths(&input);
+                graphics_base_dir = Some(parent.to_path_buf());
+            }
+        }
+    }
+
     let repair_config = AiRepairConfig {
         auto_repair: cli.auto_repair,
         ai_cmd: cli.ai_cmd.clone(),
@@ -284,7 +310,7 @@ fn main() -> io::Result<()> {
     let mut post_report: Option<LossReport> = None;
 
     // Convert
-    let result = if cli.full_document {
+    let mut result = if cli.full_document {
         match direction {
             Direction::L2t => {
                 if cli.auto_repair || cli.loss_log.is_some() || cli.post_repair_log.is_some() {
@@ -390,6 +416,60 @@ fn main() -> io::Result<()> {
     }
 
     // Pretty print if requested
+    if !bib_entries.is_empty() {
+        if let Some(output_path) = cli.output.as_ref() {
+            let out_dir = Path::new(output_path)
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            if let Some(base_dir) = bib_base_dir.as_ref() {
+                if let Ok(mapping) = sanitize_bibliography_files(&bib_entries, base_dir, &out_dir) {
+                    result = rewrite_bibliography_paths(&result, &mapping);
+                    if !result.contains("#bibliography") {
+                        let mut mapped: Vec<String> = Vec::new();
+                        for entry in &bib_entries {
+                            let mut name = entry.clone();
+                            if !name.ends_with(".bib") {
+                                name.push_str(".bib");
+                            }
+                            if let Some(mapped_name) = mapping.get(&name) {
+                                mapped.push(mapped_name.clone());
+                            }
+                        }
+                        if !mapped.is_empty() {
+                            mapped.sort();
+                            mapped.dedup();
+                            let quoted: Vec<String> =
+                                mapped.into_iter().map(|s| format!("\"{}\"", s)).collect();
+                            if quoted.len() == 1 {
+                                result.push_str("\n#bibliography(");
+                                result.push_str(&quoted.join(", "));
+                                result.push_str(")\n");
+                            } else {
+                                result.push_str("\n#bibliography((");
+                                result.push_str(&quoted.join(", "));
+                                result.push_str("))\n");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let (Some(output_path), Some(base_dir)) = (cli.output.as_ref(), graphics_base_dir.as_ref()) {
+        let out_dir = Path::new(output_path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        if !graphic_paths.is_empty() {
+            if let Ok(mapping) =
+                copy_graphics_assets(&graphic_paths, &graphic_dirs, base_dir, &out_dir)
+            {
+                result = rewrite_image_paths(&result, &mapping);
+            }
+        }
+    }
+
     let result = if cli.pretty {
         pretty_print(&result)
     } else {
@@ -409,6 +489,430 @@ fn main() -> io::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn sanitize_bibliography_files(
+    entries: &[String],
+    base_dir: &Path,
+    out_dir: &Path,
+) -> io::Result<std::collections::HashMap<String, String>> {
+    let mut mapping = std::collections::HashMap::new();
+    let mut merged_entries: Vec<(String, String)> = Vec::new();
+    for entry in entries {
+        let mut name = entry.clone();
+        if !name.ends_with(".bib") {
+            name.push_str(".bib");
+        }
+        let stem = Path::new(&name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("references");
+        let out_name = format!("{}.typst.bib", stem);
+        let out_path = out_dir.join(&out_name);
+        let src_path = base_dir.join(&name);
+        if src_path.exists() {
+            let content = fs::read_to_string(&src_path)?;
+            let sanitized = sanitize_bibtex_content(&content);
+            if entries.len() > 1 {
+                merged_entries.extend(extract_bib_entries(&sanitized));
+            } else {
+                fs::write(&out_path, sanitized)?;
+            }
+        } else if !out_path.exists() {
+            let placeholder = "% Missing bibliography source. Provide a .bib file to populate citations.\n";
+            fs::write(&out_path, placeholder)?;
+        }
+        mapping.insert(name, out_name);
+    }
+
+    if entries.len() > 1 && !merged_entries.is_empty() {
+        let merged_name = "references.typst.bib".to_string();
+        let merged_path = out_dir.join(&merged_name);
+        let mut seen = std::collections::HashSet::new();
+        let mut merged = String::new();
+        for (key, entry_text) in merged_entries {
+            let key_norm = key.to_lowercase();
+            if seen.insert(key_norm) {
+                merged.push_str(&entry_text);
+                if !merged.ends_with('\n') {
+                    merged.push('\n');
+                }
+            }
+        }
+        fs::write(&merged_path, merged)?;
+        for value in mapping.values_mut() {
+            *value = merged_name.clone();
+        }
+    }
+
+    Ok(mapping)
+}
+
+#[cfg(feature = "cli")]
+fn extract_bib_entries(content: &str) -> Vec<(String, String)> {
+    let bytes = content.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    let mut anon_idx = 0usize;
+
+    while i < bytes.len() {
+        if bytes[i] == b'@' {
+            let start = i;
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_alphabetic() {
+                j += 1;
+            }
+            if j == i + 1 {
+                i += 1;
+                continue;
+            }
+            let entry_type = &content[i + 1..j];
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j >= bytes.len() || (bytes[j] != b'{' && bytes[j] != b'(') {
+                i += 1;
+                continue;
+            }
+            let open = bytes[j] as char;
+            let close = if open == '{' { '}' } else { ')' };
+            j += 1;
+
+            // Extract key
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            let key_start = j;
+            while j < bytes.len() && bytes[j] != b',' && bytes[j] != close as u8 {
+                j += 1;
+            }
+            let key = content[key_start..j].trim().to_string();
+
+            // Scan to matching close
+            let mut depth = 1i32;
+            while j < bytes.len() && depth > 0 {
+                let ch = bytes[j] as char;
+                if ch == open {
+                    depth += 1;
+                } else if ch == close {
+                    depth -= 1;
+                }
+                j += 1;
+            }
+            let end = j.min(bytes.len());
+            let entry_text = content[start..end].to_string();
+
+            let key_final = if entry_type.eq_ignore_ascii_case("string")
+                || entry_type.eq_ignore_ascii_case("preamble")
+                || entry_type.eq_ignore_ascii_case("comment")
+                || key.is_empty()
+            {
+                anon_idx += 1;
+                format!("{}-{}", entry_type, anon_idx)
+            } else {
+                key
+            };
+            out.push((key_final, entry_text));
+            i = end;
+            continue;
+        }
+        i += 1;
+    }
+
+    out
+}
+
+#[cfg(feature = "cli")]
+fn rewrite_bibliography_paths(
+    content: &str,
+    mapping: &std::collections::HashMap<String, String>,
+) -> String {
+    let mut out = content.to_string();
+    for (orig, new_name) in mapping {
+        let needle = format!("\"{}\"", orig);
+        let replacement = format!("\"{}\"", new_name);
+        out = out.replace(&needle, &replacement);
+    }
+    out
+}
+
+#[cfg(feature = "cli")]
+fn collect_bibliography_entries_with_includes(
+    input: &str,
+    base_dir: &Path,
+) -> Vec<String> {
+    let mut entries = collect_bibliography_entries(input);
+    if !entries.is_empty() {
+        return entries;
+    }
+
+    for inc in collect_include_paths(input) {
+        let mut candidate = base_dir.join(&inc);
+        if candidate.extension().is_none() {
+            let with_tex = candidate.with_extension("tex");
+            if with_tex.exists() {
+                candidate = with_tex;
+            }
+        }
+        if let Ok(content) = fs::read_to_string(&candidate) {
+            let nested = collect_bibliography_entries(&content);
+            entries.extend(nested);
+        }
+    }
+
+    if !entries.is_empty() {
+        return entries;
+    }
+
+    // Fallback: collect .bib files from references/ or bibliography/ folders.
+    for folder in ["references", "bibliography"] {
+        let dir = base_dir.join(folder);
+        if let Ok(read_dir) = fs::read_dir(&dir) {
+            for entry in read_dir.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) != Some("bib") {
+                    continue;
+                }
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    entries.push(format!("{}/{}", folder, stem));
+                }
+            }
+        }
+    }
+
+    // Final fallback: collect .bib files from the base directory.
+    if let Ok(read_dir) = fs::read_dir(base_dir) {
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("bib") {
+                continue;
+            }
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                entries.push(stem.to_string());
+            }
+        }
+    }
+
+    entries
+}
+
+#[cfg(feature = "cli")]
+fn collect_include_paths(input: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && (input[i..].starts_with("\\input") || input[i..].starts_with("\\include"))
+        {
+            let cmd_len = if input[i..].starts_with("\\input") {
+                "\\input".len()
+            } else {
+                "\\include".len()
+            };
+            let after = i + cmd_len;
+            if after < bytes.len() && bytes[after].is_ascii_alphabetic() {
+                i += 1;
+                continue;
+            }
+            let mut j = after;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'{' {
+                let mut depth = 0i32;
+                let mut end = None;
+                for (off, ch) in input[j..].char_indices() {
+                    match ch {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end = Some(j + off);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(end_pos) = end {
+                    let content = input[j + 1..end_pos].trim();
+                    if !content.is_empty() {
+                        out.push(content.to_string());
+                    }
+                    i = end_pos + 1;
+                    continue;
+                }
+            }
+            i = after;
+        }
+        i += 1;
+    }
+    out
+}
+
+#[cfg(feature = "cli")]
+fn resolve_graphics_path(
+    raw: &str,
+    graphic_dirs: &[String],
+    base_dir: &Path,
+) -> Option<(PathBuf, String)> {
+    const EXTENSIONS: &[&str] = &[".pdf", ".png", ".jpg", ".jpeg", ".eps", ".svg"];
+
+    if raw.is_empty() || raw.contains('\\') || raw.contains('{') || raw.contains('}') {
+        return None;
+    }
+
+    let raw_path = Path::new(raw);
+    let mut bases: Vec<PathBuf> = Vec::new();
+    if raw_path.is_absolute() {
+        bases.push(PathBuf::new());
+    } else {
+        bases.push(base_dir.to_path_buf());
+        for dir in graphic_dirs {
+            let trimmed = dir.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let candidate = PathBuf::from(trimmed);
+            if candidate.is_absolute() {
+                bases.push(candidate);
+            } else {
+                bases.push(base_dir.join(candidate));
+            }
+        }
+    }
+
+    let has_ext = raw_path.extension().is_some();
+    if has_ext {
+        for base in &bases {
+            let candidate = if raw_path.is_absolute() {
+                raw_path.to_path_buf()
+            } else {
+                base.join(raw_path)
+            };
+            if candidate.exists() {
+                return Some((candidate, raw.to_string()));
+            }
+        }
+        return None;
+    }
+
+    for base in &bases {
+        let candidate = if raw_path.is_absolute() {
+            raw_path.to_path_buf()
+        } else {
+            base.join(raw_path)
+        };
+        if candidate.exists() {
+            return Some((candidate, raw.to_string()));
+        }
+    }
+
+    for ext in EXTENSIONS {
+        for base in &bases {
+            let mut with_ext = raw.to_string();
+            with_ext.push_str(ext);
+            let candidate = if raw_path.is_absolute() {
+                PathBuf::from(&with_ext)
+            } else {
+                base.join(&with_ext)
+            };
+            if candidate.exists() {
+                return Some((candidate, with_ext));
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(feature = "cli")]
+fn copy_graphics_assets(
+    paths: &[String],
+    graphic_dirs: &[String],
+    base_dir: &Path,
+    out_dir: &Path,
+) -> io::Result<std::collections::HashMap<String, String>> {
+    let mut mapping = std::collections::HashMap::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut missing: Vec<String> = Vec::new();
+
+    for raw in paths {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some((src, rel)) = resolve_graphics_path(trimmed, graphic_dirs, base_dir) {
+            if seen.insert(rel.clone()) {
+                let dest = out_dir.join(&rel);
+                if dest == src {
+                    continue;
+                }
+                if let Some(parent) = dest.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let mut copied = fs::copy(&src, &dest).is_ok();
+                if copied {
+                    if let (Ok(src_meta), Ok(dest_meta)) = (fs::metadata(&src), fs::metadata(&dest)) {
+                        if src_meta.len() > 0 && dest_meta.len() == 0 {
+                            copied = false;
+                        }
+                    }
+                }
+                if !copied {
+                    if let Ok(data) = fs::read(&src) {
+                        fs::write(&dest, data)?;
+                        copied = true;
+                    }
+                }
+                if !copied {
+                    missing.push(trimmed.to_string());
+                }
+            }
+            if trimmed != rel {
+                mapping.insert(trimmed.to_string(), rel);
+            }
+        } else {
+            missing.push(trimmed.to_string());
+        }
+    }
+
+    if !missing.is_empty() {
+        let placeholder_name = "missing-image.svg";
+        let placeholder_path = out_dir.join(placeholder_name);
+        if !placeholder_path.exists() {
+            let svg = r##"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <rect x="0" y="0" width="640" height="360" fill="#fff5f5" stroke="#cc0000" stroke-width="4"/>
+  <line x1="0" y1="0" x2="640" y2="360" stroke="#cc0000" stroke-width="3"/>
+  <line x1="640" y1="0" x2="0" y2="360" stroke="#cc0000" stroke-width="3"/>
+  <text x="320" y="190" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="24" fill="#cc0000">Missing image</text>
+</svg>
+"##;
+            fs::write(&placeholder_path, svg)?;
+        }
+        for raw in missing {
+            mapping.insert(raw, placeholder_name.to_string());
+        }
+    }
+
+    Ok(mapping)
+}
+
+#[cfg(feature = "cli")]
+fn rewrite_image_paths(
+    content: &str,
+    mapping: &std::collections::HashMap<String, String>,
+) -> String {
+    let mut out = content.to_string();
+    for (orig, new_name) in mapping {
+        let needle = format!("\"{}\"", orig);
+        let replacement = format!("\"{}\"", new_name);
+        out = out.replace(&needle, &replacement);
+    }
+    out
 }
 
 #[cfg(feature = "cli")]
@@ -445,7 +949,7 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
             post_repair_log,
             allow_no_gain,
         } => {
-            let (content, filename) = match input {
+            let (mut content, filename) = match input {
                 Some(ref path) => (fs::read_to_string(path)?, Some(path.clone())),
                 None => {
                     let mut buffer = String::new();
@@ -481,6 +985,25 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                 d => d,
             };
 
+            let mut bib_entries: Vec<String> = Vec::new();
+            let mut bib_base_dir: Option<std::path::PathBuf> = None;
+            let mut graphic_paths: Vec<String> = Vec::new();
+            let mut graphic_dirs: Vec<String> = Vec::new();
+            let mut graphics_base_dir: Option<PathBuf> = None;
+
+            if matches!(direction, Direction::L2t) && full_document {
+                if let Some(path) = filename.as_ref() {
+                    if let Some(parent) = Path::new(path).parent() {
+                        content = expand_latex_inputs(&content, parent);
+                        bib_entries = collect_bibliography_entries(&content);
+                        bib_base_dir = Some(parent.to_path_buf());
+                        graphic_dirs = collect_graphicspath_entries(&content);
+                        graphic_paths = collect_includegraphics_paths(&content);
+                        graphics_base_dir = Some(parent.to_path_buf());
+                    }
+                }
+            }
+
             let repair_config = AiRepairConfig {
                 auto_repair,
                 ai_cmd: ai_cmd.clone(),
@@ -489,7 +1012,7 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
             let mut loss_report: Option<LossReport> = None;
             let mut post_report: Option<LossReport> = None;
 
-            let result = if full_document {
+            let mut result = if full_document {
                 match direction {
                     Direction::L2t => {
                         if auto_repair || loss_log.is_some() || post_repair_log.is_some() {
@@ -576,6 +1099,33 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                     Direction::Auto => convert_auto(&content).0,
                 }
             };
+
+            if !bib_entries.is_empty() {
+                if let Some(output_path) = output.as_ref() {
+                    let out_dir = Path::new(output_path)
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    if let Some(base_dir) = bib_base_dir.as_ref() {
+                        if let Ok(mapping) = sanitize_bibliography_files(&bib_entries, base_dir, &out_dir) {
+                            result = rewrite_bibliography_paths(&result, &mapping);
+                        }
+                    }
+                }
+            }
+            if let (Some(output_path), Some(base_dir)) = (output.as_ref(), graphics_base_dir.as_ref()) {
+                let out_dir = Path::new(output_path)
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                if !graphic_paths.is_empty() {
+                    if let Ok(mapping) =
+                        copy_graphics_assets(&graphic_paths, &graphic_dirs, base_dir, &out_dir)
+                    {
+                        result = rewrite_image_paths(&result, &mapping);
+                    }
+                }
+            }
 
             if let (Some(path), Some(report)) = (loss_log.as_ref(), loss_report.as_ref()) {
                 let serialized = serde_json::to_string_pretty(report)

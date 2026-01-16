@@ -1331,6 +1331,22 @@ lazy_static! {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
             alias: None,
         }));
+        m.insert("bibliography".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("addbibresource".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("bibdata".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("bibliographystyle".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
         m.insert("label".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
             alias: None,
@@ -1521,6 +1537,218 @@ lazy_static! {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
             alias: None,
         }));
+        m.insert("textsubscript".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("textsuperscript".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("ifthenelse".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 3 } },
+            alias: None,
+        }));
+        m.insert("equal".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("subref".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("lstinputlisting".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right {
+                pattern: ArgPattern::Glob {
+                    pattern: GlobStr::from("{,b}t"),
+                },
+            },
+            alias: None,
+        }));
+        m.insert("tableHeaderStart".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("tableHeaderEnd".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("tableHCell".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("tableHCellTwoRows".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("todo".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("tcbox".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("dotfill".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("makefrontmatterpages".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("listofreferences".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("clearpage".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("cleardoublepage".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("cleartooddpage".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("myclearpage".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("mypagestyle".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("mylisthead".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("nomname".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("onehalfspacing".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("doublespacing".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("singlespacing".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("printnomenclature".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("input".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("include".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("fill".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("rule".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("product".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("prod".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("limits".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("nolimits".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("ab".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("blindtext".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("blinditemize".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("blindmathtrue".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("blindmathfalse".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("pagenumbering".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("thesistitlepage".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("addcontentsline".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 3 } },
+            alias: None,
+        }));
+        m.insert("endfirsthead".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("endfoot".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("endlastfoot".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("chapterprecis".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("makeintropages".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
+            alias: None,
+        }));
+        m.insert("Year".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("trnumber".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("committee".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("support".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("disclaimer".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
         m.insert("texttt".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
             alias: None,
@@ -1640,6 +1868,254 @@ lazy_static! {
         }));
         m.insert("xlongequal".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("affiliation".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("institution".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("department".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("city".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("country".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("email".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("icmltitle".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("icmlauthor".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("icmlaffiliation".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("icmlcorrespondingauthor".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("icmlkeywords".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("icmltitlerunning".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("icmlsetsymbol".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("printAffiliationsAndNotice".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("nicefrac".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("Author".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right {
+                pattern: ArgPattern::Glob {
+                    pattern: GlobStr::from("tt{,b}{,b}{,b}{,b}{,b}{,b}"),
+                },
+            },
+            alias: None,
+        }));
+        m.insert("Degree".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("Supervisor".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right {
+                pattern: ArgPattern::Glob {
+                    pattern: GlobStr::from("tt{,b}"),
+                },
+            },
+            alias: None,
+        }));
+        m.insert("Acceptor".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 3 } },
+            alias: None,
+        }));
+        m.insert("Reader".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 3 } },
+            alias: None,
+        }));
+        m.insert("DegreeDate".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("ThesisDate".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("prefacesection".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("dept".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("principaladviser".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("firstreader".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("secondreader".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("thirdreader".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("fourthreader".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("chair".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("othermembers".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("numberofmembers".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("field".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("degreeyear".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("degreesemester".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("degreeterm".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("degreemonth".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("advisor".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("coadvisorOne".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("coadvisorTwo".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("committeeInternalOne".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("committeeInternalTwo".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("committeeInternal".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("committeeExternal".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("pdOneName".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("pdOneSchool".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("pdOneYear".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("pdTwoName".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("pdTwoSchool".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("pdTwoYear".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("qauthor".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("newthought".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("lettrine".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("doi".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("ce".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("symbfit".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("symbfup".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("pdfbookmark".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::Glob { pattern: GlobStr::from("{,b}tt") } },
+            alias: None,
+        }));
+        m.insert("EntryHeading".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("entry".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
             alias: None,
         }));
 

@@ -135,6 +135,15 @@ pub struct ConvertContext {
     pub variables: HashMap<String, String>,
     /// Pending label to be attached to the next figure/table environment
     pub pending_label: Option<String>,
+    /// Pending bibliography heading to reconcile with #bibliography
+    pub pending_bibliography_heading: Option<PendingHeading>,
+}
+
+/// Pending heading metadata (used to suppress duplicate bibliography headings)
+#[derive(Debug, Clone)]
+pub struct PendingHeading {
+    pub command: String,
+    pub title: String,
 }
 
 /// Initial capacity for output buffer (reduces reallocations)
@@ -156,6 +165,7 @@ impl ConvertContext {
             warnings: Vec::new(),
             variables: HashMap::new(),
             pending_label: None,
+            pending_bibliography_heading: None,
         }
     }
 
@@ -174,6 +184,7 @@ impl ConvertContext {
             warnings: Vec::new(),
             variables: HashMap::new(),
             pending_label: None,
+            pending_bibliography_heading: None,
         }
     }
 

@@ -27,14 +27,15 @@ pub fn convert_formula(conv: &mut LatexConverter, elem: SyntaxElement, output: &
 
             // Apply math cleanup
             let cleaned = conv.cleanup_math_spacing(&math_content);
+            let cleaned = cleaned.trim();
 
             if is_inline {
                 output.push('$');
-                output.push_str(&cleaned);
+                output.push_str(cleaned);
                 output.push('$');
             } else {
                 output.push_str("$ ");
-                output.push_str(&cleaned);
+                output.push_str(cleaned);
                 output.push_str(" $");
             }
 

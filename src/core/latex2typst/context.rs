@@ -11,13 +11,15 @@ use std::fmt::Write;
 
 use crate::data::constants::{AcronymDef, GlossaryDef};
 use crate::data::maps::TEX_COMMAND_SPEC;
+use crate::features::templates::{generate_title_block, generate_typst_preamble, parse_document_class, DocumentClass};
 use crate::utils::loss::{LossKind, LossRecord, LossReport};
 use fxhash::FxHashMap;
 use lazy_static::lazy_static;
 
 use super::utils::{
     clean_whitespace, convert_caption_text, extract_arg_content, extract_arg_content_with_braces,
-    extract_curly_inner_content, protect_zero_arg_commands, restore_protected_commands,
+    extract_curly_inner_content, protect_zero_arg_commands, replace_verb_commands,
+    attach_orphan_labels, resolve_reference_markers, restore_protected_commands,
 };
 
 // =============================================================================
@@ -148,6 +150,7 @@ pub enum EnvironmentContext {
     Cases,
     TikZ,
     Verbatim,
+    Savequote,
     Theorem(String), // Theorem-like environment with name
 }
 
@@ -177,6 +180,8 @@ pub struct ConversionState {
     pub indent: usize,
     /// Collected labels for the current element
     pub pending_label: Option<String>,
+    /// Known labels found in the document (sanitized)
+    pub known_labels: HashSet<String>,
     /// Pending operator state
     pub pending_op: Option<PendingOperator>,
     /// User-defined macros
@@ -188,6 +193,14 @@ pub struct ConversionState {
     pub author: Option<String>,
     pub date: Option<String>,
     pub document_class: Option<String>,
+    pub document_class_info: Option<DocumentClass>,
+    pub template_kind: Option<TemplateKind>,
+    pub abstract_text: Option<String>,
+    pub keywords: Vec<String>,
+    pub author_blocks: Vec<AuthorBlock>,
+    pub current_author_idx: Option<usize>,
+    pub affiliation_map: HashMap<String, String>,
+    pub thesis_meta: Vec<(String, String)>,
     /// Collected errors/warnings
     pub warnings: Vec<String>,
     /// Collected conversion losses
@@ -204,6 +217,32 @@ pub struct ConversionState {
     pub used_acronyms: HashSet<String>,
     /// Conversion options
     pub options: L2TOptions,
+    /// Custom theorem environments defined in preamble
+    pub custom_theorems: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TemplateKind {
+    Ieee,
+    Acm,
+    Cvpr,
+    Iclr,
+    Icml,
+    Neurips,
+    Jmlr,
+    Tmlr,
+    MitThesis,
+    StanfordThesis,
+    UcbThesis,
+    Dissertate,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AuthorBlock {
+    pub name: Option<String>,
+    pub lines: Vec<String>,
+    pub email: Option<String>,
+    pub affiliation_keys: Vec<String>,
 }
 
 impl ConversionState {
@@ -351,8 +390,12 @@ impl LatexConverter {
         self.state.loss_seq = 0;
         self.state.in_preamble = true;
 
+        // Preprocess: normalize \verb into a brace-based form so the parser can handle it.
+        let verb_expanded = replace_verb_commands(input);
+        // Preprocess: replace empty superscript math blocks like $^{th}$
+        let verb_expanded = super::utils::replace_empty_math_superscripts(&verb_expanded);
         // Preprocess: protect zero-argument commands that MiTeX would otherwise lose
-        let protected_input = protect_zero_arg_commands(input);
+        let protected_input = protect_zero_arg_commands(&verb_expanded);
 
         // Preprocess: extract and expand macro definitions
         let (mut macro_db, processed_input) =
@@ -363,8 +406,43 @@ impl LatexConverter {
             macro_db.undefine(op);
         }
 
-        let expanded_input = crate::features::macros::expand_macros(&processed_input, &macro_db);
-
+        let mut expanded_input = crate::features::macros::expand_macros(&processed_input, &macro_db);
+        // Strip bibliography commands that are not meaningful in Typst output.
+        expanded_input = super::utils::strip_command_with_braced_arg(&expanded_input, "bibliographystyle");
+        expanded_input = super::utils::strip_sectioning_stars(&expanded_input);
+        expanded_input = super::utils::strip_env_options(&expanded_input, &["nomenclature", "nomenclature*"]);
+        expanded_input = super::utils::strip_command_optional_arg(&expanded_input, &["blindtext"]);
+        let mut doc_class = parse_document_class(&expanded_input);
+        let pkg_template = detect_template_from_packages(&expanded_input);
+        let class_lower = doc_class.class_name.to_lowercase();
+        let mut template_kind = match class_lower.as_str() {
+            "ieeetran" => Some(TemplateKind::Ieee),
+            "acmart" => Some(TemplateKind::Acm),
+            "mitthesis" => Some(TemplateKind::MitThesis),
+            "ucbthesis" => Some(TemplateKind::UcbThesis),
+            "dissertate" => Some(TemplateKind::Dissertate),
+            _ => None,
+        };
+        if template_kind.is_none() {
+            template_kind = pkg_template;
+        }
+        if matches!(
+            template_kind,
+            Some(
+                TemplateKind::Cvpr
+                    | TemplateKind::Iclr
+                    | TemplateKind::Icml
+                    | TemplateKind::Neurips
+            )
+        ) && doc_class.columns <= 1
+        {
+            doc_class.columns = 2;
+            if doc_class.paper.is_none() {
+                doc_class.paper = Some("us-letter".to_string());
+            }
+        }
+        self.state.document_class_info = Some(doc_class.clone());
+        self.state.template_kind = template_kind;
         // Parse with mitex-parser
         let tree = mitex_parser::parse(&expanded_input, self.spec.clone());
 
@@ -377,9 +455,14 @@ impl LatexConverter {
 
         // Build final document with preamble
         let result = self.build_document(output);
+        let resolved = resolve_reference_markers(&result);
+        let attached = attach_orphan_labels(&resolved);
+        let escaped = super::utils::escape_at_in_words(&attached);
+        let normalized = super::utils::normalize_latex_quotes(&escaped);
+        let sanitized = super::utils::sanitize_loss_comment_boundaries(&normalized);
 
         // Restore protected commands
-        restore_protected_commands(&result)
+        restore_protected_commands(&sanitized)
     }
 
     /// Convert math-only LaTeX to Typst
@@ -448,6 +531,24 @@ impl LatexConverter {
     pub fn visit_element(&mut self, elem: SyntaxElement, output: &mut String) {
         use SyntaxKind::*;
 
+        if self.state.in_preamble {
+            match elem.kind() {
+                ScopeRoot => {
+                    if let SyntaxElement::Node(n) = elem {
+                        self.visit_node(&n, output);
+                    }
+                }
+                ItemCmd => {
+                    super::markup::convert_command(self, elem, output);
+                }
+                ItemEnv => {
+                    super::environment::convert_environment(self, elem, output);
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match elem.kind() {
             // Handle errors gracefully
             TokenError => {
@@ -477,14 +578,9 @@ impl LatexConverter {
                 }
             }
 
-            // Containers - only output content after preamble
+            // Containers
             ItemText | ItemParen | ClauseArgument => {
-                if self.state.in_preamble {
-                    if let SyntaxElement::Node(n) = elem {
-                        let mut dummy = String::new();
-                        self.visit_node(&n, &mut dummy);
-                    }
-                } else if let SyntaxElement::Node(n) = elem {
+                if let SyntaxElement::Node(n) = elem {
                     self.visit_node(&n, output);
                 }
             }
@@ -524,9 +620,6 @@ impl LatexConverter {
 
             // Plain word
             TokenWord => {
-                if self.state.in_preamble {
-                    return;
-                }
                 if let SyntaxElement::Token(t) = elem {
                     let text = t.text();
                     if matches!(self.state.mode, ConversionMode::Math) {
@@ -535,7 +628,7 @@ impl LatexConverter {
                             output.push(' ');
                         }
                     } else {
-                        output.push_str(text);
+                        output.push_str(&super::utils::escape_typst_text(text));
                     }
                 }
             }
@@ -590,6 +683,13 @@ impl LatexConverter {
                 }
             }
             TokenHash => output.push_str("\\#"),
+            TokenDollar => {
+                if matches!(self.state.mode, ConversionMode::Math) {
+                    output.push('$');
+                } else {
+                    output.push_str("\\$");
+                }
+            }
             TokenUnderscore => {
                 if matches!(self.state.mode, ConversionMode::Math) {
                     output.push('_');
@@ -618,7 +718,13 @@ impl LatexConverter {
                     output.push_str("\\*");
                 }
             }
-            TokenAtSign => output.push('@'),
+            TokenAtSign => {
+                if matches!(self.state.mode, ConversionMode::Math) {
+                    output.push('@');
+                } else {
+                    output.push_str("\\@");
+                }
+            }
             TokenSemicolon => output.push(';'),
             TokenDitto => output.push('"'),
             TokenLParen => output.push('('),
@@ -635,7 +741,7 @@ impl LatexConverter {
             }
 
             // Ignore these
-            TokenLBrace | TokenRBrace | TokenDollar | TokenBeginMath | TokenEndMath
+            TokenLBrace | TokenRBrace | TokenBeginMath | TokenEndMath
             | TokenComment | ItemBlockComment | ClauseCommandName | ItemBegin | ItemEnd
             | ItemBracket => {}
 
@@ -662,10 +768,16 @@ impl LatexConverter {
         let mut required_count = 0;
         for child in cmd.syntax().children() {
             if child.kind() == SyntaxKind::ClauseArgument {
-                let is_curly = child.children().any(|c| c.kind() == SyntaxKind::ItemCurly);
-                if is_curly {
+                let is_bracket = child
+                    .children()
+                    .any(|c| c.kind() == SyntaxKind::ItemBracket);
+                if !is_bracket {
+                    let preview = extract_arg_content(&child);
+                    if preview.trim() == "*" {
+                        continue;
+                    }
                     if required_count == index {
-                        return Some(extract_arg_content(&child));
+                        return Some(preview);
                     }
                     required_count += 1;
                 }
@@ -715,22 +827,20 @@ impl LatexConverter {
         let mut required_count = 0;
         for child in cmd.syntax().children() {
             if child.kind() == SyntaxKind::ClauseArgument {
-                let is_curly = child.children().any(|c| c.kind() == SyntaxKind::ItemCurly);
-                if is_curly {
+                let is_bracket = child
+                    .children()
+                    .any(|c| c.kind() == SyntaxKind::ItemBracket);
+                if !is_bracket {
+                    let preview = extract_arg_content(&child);
+                    if preview.trim() == "*" {
+                        continue;
+                    }
                     if required_count == index {
                         let mut output = String::new();
-                        for arg_child in child.children() {
-                            if arg_child.kind() == SyntaxKind::ItemCurly {
-                                for content in arg_child.children_with_tokens() {
-                                    match content.kind() {
-                                        SyntaxKind::TokenLBrace | SyntaxKind::TokenRBrace => {
-                                            continue
-                                        }
-                                        _ => {
-                                            self.visit_element(content, &mut output);
-                                        }
-                                    }
-                                }
+                        for content in child.children_with_tokens() {
+                            match content.kind() {
+                                SyntaxKind::TokenLBrace | SyntaxKind::TokenRBrace => continue,
+                                _ => self.visit_element(content, &mut output),
                             }
                         }
                         return Some(output.trim().to_string());
@@ -792,6 +902,12 @@ impl LatexConverter {
     pub fn extract_metadata_arg(&mut self, cmd: &CmdItem) -> Option<String> {
         self.get_required_arg_with_braces(cmd, 0)
             .map(|raw| convert_caption_text(&raw).trim().to_string())
+    }
+
+    /// Extract and convert argument for author fields (preserve \\ and \and, drop footnotes)
+    pub fn extract_author_arg(&mut self, cmd: &CmdItem) -> Option<String> {
+        self.get_required_arg_with_braces(cmd, 0)
+            .map(|raw| super::utils::convert_author_text(&raw).trim().to_string())
     }
 
     /// Extract inner content of a curly/bracket node, skipping its braces
@@ -1045,64 +1161,57 @@ impl LatexConverter {
     pub fn build_document(&self, content: String) -> String {
         let mut doc = String::new();
 
+        let author_for_title = self.compose_author_string();
+
         // Document metadata
-        if self.state.title.is_some() || self.state.author.is_some() {
+        if self.state.title.is_some() || author_for_title.is_some() {
             doc.push_str("#set document(\n");
             if let Some(ref title) = self.state.title {
                 let _ = writeln!(doc, "  title: \"{}\",", title.replace('"', "\\\""));
             }
-            if let Some(ref author) = self.state.author {
+            if let Some(ref author) = author_for_title {
                 let _ = writeln!(doc, "  author: \"{}\",", author.replace('"', "\\\""));
             }
             doc.push_str(")\n\n");
         }
 
-        // Page and heading setup
-        if let Some(ref class) = self.state.document_class {
-            match class.as_str() {
-                "article" => {
-                    doc.push_str("#set page(paper: \"a4\")\n");
-                    doc.push_str("#set heading(numbering: \"1.\")\n");
-                    doc.push_str("#set math.equation(numbering: \"(1)\")\n\n");
-                }
-                "report" | "book" => {
-                    doc.push_str("#set page(paper: \"a4\")\n");
-                    doc.push_str("#set heading(numbering: \"1.1\")\n");
-                    doc.push_str("#set math.equation(numbering: \"(1)\")\n\n");
-                }
-                "beamer" => {
-                    doc.push_str("#import \"@preview/polylux:0.3.1\": *\n");
-                    doc.push_str("#set page(paper: \"presentation-16-9\")\n\n");
-                }
-                _ => {
-                    doc.push_str("#set page(paper: \"a4\")\n");
-                    doc.push_str("#set heading(numbering: \"1.\")\n");
-                    doc.push_str("#set math.equation(numbering: \"(1)\")\n\n");
-                }
+        let doc_class = self
+            .state
+            .document_class_info
+            .clone()
+            .unwrap_or_default();
+        doc.push_str(&generate_typst_preamble(&doc_class));
+
+        match self.state.template_kind {
+            Some(TemplateKind::Ieee) => {
+                doc.push_str(&self.render_ieee_show_rule(
+                    self.state.title.as_deref(),
+                    self.state.author.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                    &self.state.keywords,
+                ));
             }
-        } else {
-            doc.push_str("#set page(paper: \"a4\")\n");
-            doc.push_str("#set heading(numbering: \"1.\")\n");
-            doc.push_str("#set math.equation(numbering: \"(1)\")\n\n");
+            _ => {
+                let title_block = generate_title_block(
+                    self.state.title.as_deref(),
+                    author_for_title.as_deref(),
+                    self.state.date.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                );
+                doc.push_str(&title_block);
+            }
         }
 
-        // Title block
-        if self.state.title.is_some() || self.state.author.is_some() {
-            doc.push_str("#align(center)[\n");
-            if let Some(ref title) = self.state.title {
-                let _ = writeln!(doc, "  #text(size: 2em, weight: \"bold\")[{}]", title);
-            }
-            if let Some(ref author) = self.state.author {
-                let _ = write!(doc, "  \n  #text(size: 1.2em)[{}]\n", author);
-            }
-            if let Some(ref date) = self.state.date {
-                if date == "\\today" {
-                    doc.push_str("  \n  #datetime.today().display()\n");
-                } else {
-                    let _ = write!(doc, "  \n  {}\n", date);
-                }
-            }
-            doc.push_str("]\n\n");
+        if matches!(
+            self.state.template_kind,
+            Some(
+                TemplateKind::MitThesis
+                    | TemplateKind::StanfordThesis
+                    | TemplateKind::UcbThesis
+                    | TemplateKind::Dissertate
+            )
+        ) {
+            doc.push_str(&self.render_thesis_meta_block());
         }
 
         // Clean up content
@@ -1118,6 +1227,232 @@ impl LatexConverter {
         }
 
         clean_whitespace(&doc)
+    }
+
+    fn compose_author_string(&self) -> Option<String> {
+        if !self.state.author_blocks.is_empty() {
+            let mut blocks = Vec::new();
+            for block in &self.state.author_blocks {
+                let mut lines = Vec::new();
+                if let Some(name) = block.name.as_deref() {
+                    if !name.trim().is_empty() {
+                        lines.push(name.trim().to_string());
+                    }
+                }
+                for line in &block.lines {
+                    if !line.trim().is_empty() {
+                        lines.push(line.trim().to_string());
+                    }
+                }
+                if !block.affiliation_keys.is_empty() {
+                    for key in &block.affiliation_keys {
+                        if let Some(text) = self.state.affiliation_map.get(key) {
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                lines.push(trimmed.to_string());
+                            }
+                        }
+                    }
+                }
+                if let Some(email) = block.email.as_deref() {
+                    if !email.trim().is_empty() {
+                        lines.push(email.trim().to_string());
+                    }
+                }
+                if !lines.is_empty() {
+                    blocks.push(lines.join("\\\\"));
+                }
+            }
+            if !blocks.is_empty() {
+                return Some(blocks.join(" \\and "));
+            }
+        }
+        self.state.author.clone()
+    }
+
+    pub fn push_author_block(&mut self, name: String) {
+        let mut block = AuthorBlock::default();
+        if !name.trim().is_empty() {
+            block.name = Some(name.trim().to_string());
+        }
+        self.state.author_blocks.push(block);
+        self.state.current_author_idx = Some(self.state.author_blocks.len().saturating_sub(1));
+    }
+
+    pub fn push_author_block_with_affils(&mut self, name: String, keys: Vec<String>) {
+        let mut block = AuthorBlock::default();
+        if !name.trim().is_empty() {
+            block.name = Some(name.trim().to_string());
+        }
+        block.affiliation_keys = keys;
+        self.state.author_blocks.push(block);
+        self.state.current_author_idx = Some(self.state.author_blocks.len().saturating_sub(1));
+    }
+
+    pub fn add_author_line(&mut self, line: String) {
+        let idx = match self.state.current_author_idx {
+            Some(i) => i,
+            None => return,
+        };
+        if let Some(block) = self.state.author_blocks.get_mut(idx) {
+            if !line.trim().is_empty() {
+                block.lines.push(line.trim().to_string());
+            }
+        }
+    }
+
+    pub fn add_author_email(&mut self, email: String) {
+        let idx = match self.state.current_author_idx {
+            Some(i) => i,
+            None => return,
+        };
+        if let Some(block) = self.state.author_blocks.get_mut(idx) {
+            if !email.trim().is_empty() {
+                block.email = Some(email.trim().to_string());
+            }
+        }
+    }
+
+    pub fn push_thesis_meta(&mut self, label: &str, value: String) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            self.state
+                .thesis_meta
+                .push((label.to_string(), trimmed.to_string()));
+        }
+    }
+
+    pub fn add_affiliation_mapping(&mut self, key: String, value: String) {
+        if !key.trim().is_empty() && !value.trim().is_empty() {
+            self.state
+                .affiliation_map
+                .insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+
+    pub fn set_author_email_by_name(&mut self, name: &str, email: String) -> bool {
+        let target = name.trim();
+        if target.is_empty() || email.trim().is_empty() {
+            return false;
+        }
+        for block in &mut self.state.author_blocks {
+            if let Some(block_name) = block.name.as_deref() {
+                if block_name.trim() == target {
+                    block.email = Some(email.trim().to_string());
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn capture_acm_affiliation(&mut self, raw: &str) {
+        let mut lines = Vec::new();
+        for key in ["institution", "department", "city", "country"] {
+            if let Some(value) = extract_macro_arg(raw, key) {
+                lines.push(value);
+            }
+        }
+        if lines.is_empty() {
+            let text = convert_caption_text(raw).trim().to_string();
+            if !text.is_empty() {
+                lines.push(text);
+            }
+        }
+        for line in lines {
+            self.add_author_line(line);
+        }
+    }
+
+    fn split_authors(raw: &str) -> Vec<String> {
+        let mut normalized = raw.replace("\\and", "\n\n");
+        normalized = normalized.replace("\\\\", "\n");
+        let mut authors = Vec::new();
+        for block in normalized.split("\n\n") {
+            let mut name = None;
+            for line in block.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                name = Some(trimmed.to_string());
+                break;
+            }
+            if let Some(mut name) = name {
+                if name.starts_with('{') && name.ends_with('}') && name.len() > 1 {
+                    name = name[1..name.len() - 1].trim().to_string();
+                }
+                if !name.is_empty() {
+                    authors.push(name);
+                }
+            }
+        }
+        authors
+    }
+
+    fn render_ieee_show_rule(
+        &self,
+        title: Option<&str>,
+        author: Option<&str>,
+        abstract_text: Option<&str>,
+        keywords: &[String],
+    ) -> String {
+        let mut out = String::new();
+        out.push_str("#show: ieee.with(\n");
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        let authors = author.map(Self::split_authors).unwrap_or_default();
+        if !authors.is_empty() {
+            out.push_str("  authors: (\n");
+            for name in authors {
+                let escaped = super::utils::escape_typst_string(&name);
+                let _ = writeln!(out, "    (name: \"{}\"),", escaped);
+            }
+            out.push_str("  ),\n");
+        }
+        if let Some(abs) = abstract_text {
+            let _ = writeln!(out, "  abstract: [{}],", abs.trim());
+        }
+        if !keywords.is_empty() {
+            out.push_str("  index-terms: (");
+            let mut first = true;
+            for kw in keywords {
+                let kw = kw.trim();
+                if kw.is_empty() {
+                    continue;
+                }
+                if !first {
+                    out.push_str(", ");
+                }
+                first = false;
+                let escaped = super::utils::escape_typst_string(kw);
+                out.push('"');
+                out.push_str(&escaped);
+                out.push('"');
+            }
+            out.push_str("),\n");
+        }
+        out.push_str(")\n\n");
+        out
+    }
+
+    fn render_thesis_meta_block(&self) -> String {
+        if self.state.thesis_meta.is_empty() {
+            return String::new();
+        }
+        let mut out = String::new();
+        out.push_str("#block(width: 100%, inset: 1em)[\n");
+        out.push_str("  #text(weight: \"bold\")[Thesis Metadata]\n");
+        out.push_str("  #v(0.5em)\n");
+        for (label, value) in &self.state.thesis_meta {
+            let label = super::utils::escape_typst_string(label);
+            let value = super::utils::escape_typst_text(value);
+            let _ = writeln!(out, "  - *{}:* {}", label, value);
+        }
+        out.push_str("]\n\n");
+        out
     }
 
     // ============================================================
@@ -1173,6 +1508,128 @@ impl LatexConverter {
             }
         }
     }
+}
+
+fn extract_macro_arg(raw: &str, name: &str) -> Option<String> {
+    let needle = format!("\\{}", name);
+    let mut idx = 0usize;
+    while let Some(pos) = raw[idx..].find(&needle) {
+        let mut i = idx + pos + needle.len();
+        let bytes = raw.as_bytes();
+        while i < raw.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= raw.len() || bytes[i] != b'{' {
+            idx = i;
+            continue;
+        }
+        let start = i;
+        let mut depth = 0i32;
+        let mut end = None;
+        for (off, ch) in raw[start..].char_indices() {
+            if ch == '{' {
+                depth += 1;
+                continue;
+            }
+            if ch == '}' {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(start + off);
+                    break;
+                }
+            }
+        }
+        if let Some(end_idx) = end {
+            let content = raw[start + 1..end_idx].trim();
+            if !content.is_empty() {
+                return Some(convert_caption_text(content));
+            }
+        }
+        idx = start + 1;
+    }
+    None
+}
+
+fn detect_template_from_packages(input: &str) -> Option<TemplateKind> {
+    let packages = extract_usepackage_names(input);
+    for pkg in packages {
+        let name = pkg.to_lowercase();
+        if name.starts_with("cvpr") {
+            return Some(TemplateKind::Cvpr);
+        }
+        if name.starts_with("iclr") {
+            return Some(TemplateKind::Iclr);
+        }
+        if name.starts_with("icml") {
+            return Some(TemplateKind::Icml);
+        }
+        if name.starts_with("neurips") {
+            return Some(TemplateKind::Neurips);
+        }
+        if name.starts_with("jmlr") {
+            return Some(TemplateKind::Jmlr);
+        }
+        if name.starts_with("tmlr") {
+            return Some(TemplateKind::Tmlr);
+        }
+        if name.starts_with("suthesis") {
+            return Some(TemplateKind::StanfordThesis);
+        }
+    }
+    None
+}
+
+fn extract_usepackage_names(input: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut idx = 0usize;
+    let needle = "\\usepackage";
+    while let Some(pos) = input[idx..].find(needle) {
+        let mut i = idx + pos + needle.len();
+        let bytes = input.as_bytes();
+        while i < input.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i < input.len() && bytes[i] == b'[' {
+            if let Some(end) = find_matching_bracket(&input[i..], '[', ']') {
+                i += end + 1;
+            }
+        }
+        while i < input.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= input.len() || bytes[i] != b'{' {
+            idx = i;
+            continue;
+        }
+        if let Some(end) = find_matching_bracket(&input[i..], '{', '}') {
+            let content = &input[i + 1..i + end];
+            for pkg in content.split(',') {
+                let trimmed = pkg.trim();
+                if !trimmed.is_empty() {
+                    names.push(trimmed.to_string());
+                }
+            }
+            idx = i + end + 1;
+        } else {
+            idx = i + 1;
+        }
+    }
+    names
+}
+
+fn find_matching_bracket(s: &str, open: char, close: char) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, c) in s.char_indices() {
+        if c == open {
+            depth += 1;
+        } else if c == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+    }
+    None
 }
 
 impl Default for LatexConverter {

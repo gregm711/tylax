@@ -20,7 +20,7 @@ pub mod utils;
 pub use context::{ConvertContext, T2LOptions, TokenType};
 pub use preprocess::{extract_let_definitions, preprocess_typst, TypstDefDb};
 
-use markup::convert_markup_node;
+use markup::{convert_markup_node, flush_pending_bibliography_heading};
 use math::convert_math_node;
 use typst_syntax::{parse, parse_math};
 use utils::wrap_in_document;
@@ -52,6 +52,7 @@ pub fn typst_to_latex_with_options(input: &str, options: &T2LOptions) -> String 
         // Parse as full document/markup
         let root = parse(&processed_input);
         convert_markup_node(&root, &mut ctx);
+        flush_pending_bibliography_heading(&mut ctx);
     }
 
     let mut result = ctx.finalize();
@@ -179,6 +180,24 @@ mod tests {
         let input = "=== Subsubsection";
         let result = typst_to_latex_with_options(input, &T2LOptions::default());
         assert!(result.contains("\\subsubsection"));
+    }
+
+    #[test]
+    fn test_bibliography_heading_consumed() {
+        let input = "= References\n#bibliography(\"refs.bib\", style: \"ieee\")";
+        let result = typst_to_latex_with_options(input, &T2LOptions::full_document());
+        assert!(!result.contains("\\section{References}"));
+        assert!(result.contains("\\bibliographystyle{ieee}"));
+        assert!(result.contains("\\bibliography{refs}"));
+        assert!(result.contains("\\renewcommand{\\refname}{References}"));
+    }
+
+    #[test]
+    fn test_bibliography_heading_flushes_without_bib() {
+        let input = "= References\nSome text.";
+        let result = typst_to_latex_with_options(input, &T2LOptions::default());
+        assert!(result.contains("\\section{References}"));
+        assert!(result.contains("Some text."));
     }
 
     // ========== Table Mode Tests ==========

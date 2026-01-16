@@ -91,6 +91,7 @@ impl MacroDb {
 
         // Common text macros
         db.define(Macro::simple("LaTeX", "LaTeX"));
+        db.define(Macro::simple("latex", "LaTeX"));
         db.define(Macro::simple("TeX", "TeX"));
         db.define(Macro::simple("today", ""));
 
@@ -655,6 +656,33 @@ pub fn extract_and_remove_definitions(input: &str) -> (MacroDb, String) {
 fn find_definition_end_simple(input: &str) -> Option<usize> {
     let mut depth = 0;
     let mut brace_count = 0;
+    let mut required_braces = 2;
+
+    if input.starts_with("\\def") {
+        required_braces = 1;
+    } else if input.starts_with("\\newcommand")
+        || input.starts_with("\\renewcommand")
+        || input.starts_with("\\providecommand")
+    {
+        let cmd_end = if input.starts_with("\\newcommand*") {
+            "\\newcommand*".len()
+        } else if input.starts_with("\\newcommand") {
+            "\\newcommand".len()
+        } else if input.starts_with("\\renewcommand*") {
+            "\\renewcommand*".len()
+        } else if input.starts_with("\\renewcommand") {
+            "\\renewcommand".len()
+        } else if input.starts_with("\\providecommand*") {
+            "\\providecommand*".len()
+        } else {
+            "\\providecommand".len()
+        };
+
+        let rest = input[cmd_end..].trim_start();
+        if rest.starts_with('\\') {
+            required_braces = 1;
+        }
+    }
 
     for (i, c) in input.char_indices() {
         match c {
@@ -666,7 +694,7 @@ fn find_definition_end_simple(input: &str) -> Option<usize> {
                 depth -= 1;
                 // For \newcommand{\foo}{body}, we need to find the closing of body
                 // which is the second time depth returns to 0
-                if depth == 0 && brace_count >= 2 {
+                if depth == 0 && brace_count >= required_braces {
                     return Some(i + 1);
                 }
             }
@@ -712,16 +740,21 @@ fn parse_newcommand_simple(input: &str) -> Option<Macro> {
 
     let rest = input[cmd_end..].trim_start();
 
-    // Get name from {\name}
-    if !rest.starts_with('{') {
+    // Get name from {\name} or \name
+    let (name, mut remaining) = if rest.starts_with('{') {
+        let name_end = find_matching_brace_simple(rest)?;
+        let name_content = &rest[1..name_end];
+        let name = name_content.trim().trim_start_matches('\\').to_string();
+        (name, rest[name_end + 1..].trim_start())
+    } else if let Some(after) = rest.strip_prefix('\\') {
+        let end = after
+            .find(|c: char| !c.is_alphabetic())
+            .unwrap_or(after.len());
+        let name = after[..end].to_string();
+        (name, after[end..].trim_start())
+    } else {
         return None;
-    }
-
-    let name_end = find_matching_brace_simple(rest)?;
-    let name_content = &rest[1..name_end];
-    let name = name_content.trim().trim_start_matches('\\').to_string();
-
-    let mut remaining = rest[name_end + 1..].trim_start();
+    };
 
     // Parse [numargs][default]
     let mut num_args = 0;
@@ -945,6 +978,16 @@ mod tests {
         let m = result.unwrap();
         assert_eq!(m.name, "foo");
         assert_eq!(m.num_args, 2);
+    }
+
+    #[test]
+    fn test_parse_newcommand_braceless() {
+        let db = MacroDb::new();
+        let result = db.parse_single_definition("\\newcommand\\foo{bar}");
+        assert!(result.is_some());
+        let m = result.unwrap();
+        assert_eq!(m.name, "foo");
+        assert_eq!(m.replacement, "bar");
     }
 
     #[test]

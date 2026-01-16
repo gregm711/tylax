@@ -1,0 +1,5 @@
+# name path
+mit-thesis latex-corpus/thesis/mit/MIT-Thesis.tex
+stanford-thesis latex-corpus/thesis/stanford/main.tex
+ucb-thesis latex-corpus/thesis/ucb/ucbthesis/thesis.tex
+dissertate latex-corpus/thesis/dissertate/assets/latex-base/dissertation.tex

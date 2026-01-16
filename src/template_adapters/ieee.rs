@@ -68,6 +68,7 @@ pub fn maybe_convert_ieee(input: &str) -> Option<String> {
     out.push_str("\\usepackage{graphicx}\n");
     out.push_str("\\usepackage{textcomp}\n");
     out.push_str("\\usepackage[table]{xcolor}\n");
+    out.push_str("\\usepackage{booktabs}\n");
     if hints.uses_amsthm {
         out.push_str("\\usepackage{amsthm}\n");
         out.push_str(&render_amsthm_definitions(&hints));

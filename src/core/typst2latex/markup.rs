@@ -2,7 +2,7 @@
 //!
 //! Handles document structure, text formatting, and non-math content.
 
-use super::context::{ConvertContext, EnvironmentContext, TokenType};
+use super::context::{ConvertContext, EnvironmentContext, PendingHeading, TokenType};
 use super::math::convert_math_node;
 use super::table::{LatexCell, LatexCellAlign, LatexHLine, LatexTableGenerator};
 use super::utils::{
@@ -111,6 +111,72 @@ const LISTINGS_SUPPORTED_LANGUAGES: &[&str] = &[
     "ts",
 ];
 
+fn is_bibliography_heading(text: &str) -> bool {
+    let normalized = text
+        .to_lowercase()
+        .chars()
+        .map(|ch| if ch.is_alphanumeric() { ch } else { ' ' })
+        .collect::<String>();
+    let cleaned = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+    matches!(cleaned.as_str(), "references" | "bibliography" | "works cited")
+}
+
+fn is_bibliography_func_call(node: &SyntaxNode) -> bool {
+    if node.kind() != SyntaxKind::FuncCall {
+        return false;
+    }
+    let mut children = node.children();
+    if let Some(first) = children.next() {
+        let name = match first.kind() {
+            SyntaxKind::FieldAccess => get_func_call_name(&first),
+            _ => first.text().to_string(),
+        };
+        return name == "bibliography";
+    }
+    false
+}
+
+fn emit_pending_heading(pending: PendingHeading, ctx: &mut ConvertContext) {
+    ctx.ensure_paragraph_break();
+    ctx.push(&pending.command);
+    ctx.push("{");
+    ctx.push(&escape_latex_text(&pending.title));
+    ctx.push("}\n");
+    ctx.last_token = TokenType::Newline;
+}
+
+fn maybe_flush_pending_bibliography_heading(node: &SyntaxNode, ctx: &mut ConvertContext) {
+    if ctx.pending_bibliography_heading.is_none() {
+        return;
+    }
+
+    if node.text().trim().is_empty() {
+        return;
+    }
+
+    match node.kind() {
+        SyntaxKind::Space | SyntaxKind::Linebreak | SyntaxKind::Parbreak | SyntaxKind::Hash => {
+            return
+        }
+        SyntaxKind::FuncCall => {
+            if is_bibliography_func_call(node) {
+                return;
+            }
+        }
+        _ => {}
+    }
+
+    if let Some(pending) = ctx.pending_bibliography_heading.take() {
+        emit_pending_heading(pending, ctx);
+    }
+}
+
+pub fn flush_pending_bibliography_heading(ctx: &mut ConvertContext) {
+    if let Some(pending) = ctx.pending_bibliography_heading.take() {
+        emit_pending_heading(pending, ctx);
+    }
+}
+
 /// Check if a language is supported by the listings package
 fn is_listings_supported(lang: &str) -> bool {
     let lang_lower = lang.to_lowercase();
@@ -146,6 +212,8 @@ fn has_unescaped_alignment(content: &str) -> bool {
 
 /// Convert a markup node to LaTeX
 pub fn convert_markup_node(node: &SyntaxNode, ctx: &mut ConvertContext) {
+    maybe_flush_pending_bibliography_heading(node, ctx);
+
     match node.kind() {
         SyntaxKind::Markup => {
             // Process children, but group consecutive list items into list environments
@@ -315,6 +383,24 @@ pub fn convert_markup_node(node: &SyntaxNode, ctx: &mut ConvertContext) {
         SyntaxKind::Heading => {
             let level = count_heading_markers(node);
             let section_cmd = get_heading_command(level);
+
+            let mut heading_text = String::new();
+            for child in node.children() {
+                if child.kind() != SyntaxKind::HeadingMarker {
+                    let text = get_simple_text(child);
+                    if !text.is_empty() {
+                        heading_text.push_str(&text);
+                    }
+                }
+            }
+
+            if is_bibliography_heading(&heading_text) {
+                ctx.pending_bibliography_heading = Some(PendingHeading {
+                    command: section_cmd.to_string(),
+                    title: heading_text.trim().to_string(),
+                });
+                return;
+            }
 
             ctx.ensure_paragraph_break();
             ctx.push(section_cmd);
@@ -1750,25 +1836,14 @@ fn convert_label_to_latex(children: &[&SyntaxNode], ctx: &mut ConvertContext) {
 fn convert_bibliography_to_latex(children: &[&SyntaxNode], ctx: &mut ConvertContext) {
     let mut bib_file = String::new();
     let mut style = "plain".to_string();
+    let pending_heading = ctx.pending_bibliography_heading.take();
 
-    if let Some(args) = children.get(1) {
-        for child in args.children() {
-            match child.kind() {
-                SyntaxKind::Str => {
-                    bib_file = get_string_content(child);
-                }
-                SyntaxKind::Named => {
-                    let named_children: Vec<_> = child.children().collect();
-                    if named_children.len() >= 2 {
-                        let key = named_children[0].text().to_string();
-                        if key == "style" {
-                            style = get_simple_text(named_children[1]);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+    let args = FuncArgs::from_func_call(children);
+    if let Some(path) = args.first() {
+        bib_file = path.trim_matches('"').to_string();
+    }
+    if let Some(style_arg) = args.named("style") {
+        style = style_arg.trim_matches('"').to_string();
     }
 
     // Remove .yml or .bib extension if present
@@ -1777,9 +1852,26 @@ fn convert_bibliography_to_latex(children: &[&SyntaxNode], ctx: &mut ConvertCont
         .trim_end_matches(".yaml")
         .trim_end_matches(".bib");
 
+    if bib_name.is_empty() {
+        if let Some(pending) = pending_heading {
+            emit_pending_heading(pending, ctx);
+        }
+        return;
+    }
+
     ctx.ensure_paragraph_break();
-    ctx.push_line(&format!("\\bibliographystyle{{{}}}", style));
-    ctx.push_line(&format!("\\bibliography{{{}}}", bib_name));
+    if let Some(pending) = pending_heading {
+        let escaped = escape_latex_text(&pending.title);
+        ctx.push_line("\\begingroup");
+        ctx.push_line(&format!("\\renewcommand{{\\refname}}{{{}}}", escaped));
+        ctx.push_line(&format!("\\renewcommand{{\\bibname}}{{{}}}", escaped));
+        ctx.push_line(&format!("\\bibliographystyle{{{}}}", style));
+        ctx.push_line(&format!("\\bibliography{{{}}}", bib_name));
+        ctx.push_line("\\endgroup");
+    } else {
+        ctx.push_line(&format!("\\bibliographystyle{{{}}}", style));
+        ctx.push_line(&format!("\\bibliography{{{}}}", bib_name));
+    }
 }
 
 // ============================================================================

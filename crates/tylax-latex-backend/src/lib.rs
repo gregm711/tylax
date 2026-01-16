@@ -59,13 +59,11 @@ pub fn render_document(doc: &Document, options: LatexRenderOptions) -> String {
         out.push_str("\\usepackage{graphicx}\n");
         out.push_str("\\usepackage{hyperref}\n");
         out.push_str("\\usepackage[table]{xcolor}\n");
+        out.push_str("\\usepackage{booktabs}\n");
         out.push_str("\\usepackage{enumitem}\n");
         out.push_str("\\usepackage{multirow}\n");
         out.push_str("\\usepackage{multicol}\n");
         out.push_str("\\usepackage{array}\n");
-        if options.table_style == TableStyle::Booktabs {
-            out.push_str("\\usepackage{booktabs}\n");
-        }
         if options.inline_wide_tables {
             out.push_str("\\usepackage{caption}\n");
         }
@@ -1091,6 +1089,33 @@ fn convert_math_content(input: &str) -> String {
     out
 }
 
+fn convert_math_content_inline(input: &str) -> String {
+    let converted = convert_math_content(input);
+    replace_inline_setminus(&converted)
+}
+
+fn replace_inline_setminus(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if i + 1 < bytes.len() && bytes[i] == b'\\' && bytes[i + 1] == b'\\' {
+            let prev = input[..i].chars().rev().find(|c| !c.is_whitespace());
+            let next = input[i + 2..].chars().find(|c| !c.is_whitespace());
+            let prev_is_word = prev.map_or(false, |c| c.is_alphanumeric() || c == '}' || c == ')');
+            let next_is_word = next.map_or(false, |c| c.is_alphanumeric() || c == '{' || c == '(');
+            if prev_is_word && next_is_word {
+                out.push_str("\\setminus");
+                i += 2;
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
 fn match_call_at(input: &str, idx: usize, name: &str) -> Option<usize> {
     if !input[idx..].starts_with(name) {
         return None;
@@ -1829,7 +1854,7 @@ fn render_inlines(inlines: &[Inline], options: &LatexRenderOptions) -> String {
             }
             Inline::Math(content) => {
                 out.push('$');
-                out.push_str(&convert_math_content(content));
+                out.push_str(&convert_math_content_inline(content));
                 out.push('$');
             }
             Inline::Link { text, url } => {
@@ -2097,12 +2122,20 @@ fn render_table(table: &Table, options: Option<&LatexRenderOptions>) -> String {
     };
     let stroke = stroke_value.filter(|value| !stroke_is_none(value));
     let stroke_width = stroke.and_then(parse_stroke_width);
-    let grid_lines = match opts.table_style {
+    let mut grid_lines = match opts.table_style {
         TableStyle::Grid => true,
         TableStyle::Booktabs => false,
         TableStyle::Plain => opts.table_grid || stroke_enabled,
     };
-    let use_booktabs = opts.table_style == TableStyle::Booktabs;
+    let mut use_booktabs = opts.table_style == TableStyle::Booktabs;
+    if opts.table_style == TableStyle::Plain {
+        if let Some(value) = stroke_value {
+            if stroke_prefers_booktabs(value) {
+                use_booktabs = true;
+                grid_lines = false;
+            }
+        }
+    }
     if has_style {
         out.push_str("\\begingroup\n");
         if let Some(inset) = table.inset.as_deref() {
@@ -2345,6 +2378,13 @@ fn stroke_is_none(value: &str) -> bool {
     trimmed == "none" || trimmed == "0" || trimmed == "0pt"
 }
 
+fn stroke_prefers_booktabs(value: &str) -> bool {
+    let lower = value.to_lowercase();
+    let has_horizontal = lower.contains("top") || lower.contains("bottom");
+    let has_vertical = lower.contains("left") || lower.contains("right");
+    has_horizontal && !has_vertical
+}
+
 fn parse_stroke_width(value: &str) -> Option<String> {
     let trimmed = value.trim().trim_matches('"');
     if trimmed.is_empty() || stroke_is_none(trimmed) {
@@ -2435,18 +2475,8 @@ fn apply_cell_spans(
 }
 
 fn apply_cell_alignment(cell: &TableCell, content: &str, col_idx: usize, table: &Table) -> String {
-    if cell.colspan > 1 {
-        return content.to_string();
-    }
-    let align = cell
-        .align
-        .or_else(|| table.align.as_ref().and_then(|a| a.get(col_idx).copied()))
-        .unwrap_or(Alignment::Center);
-    match align {
-        Alignment::Left => format!("\\raggedright {}", content),
-        Alignment::Right => format!("\\raggedleft {}", content),
-        Alignment::Center => content.to_string(),
-    }
+    let _ = (cell, col_idx, table);
+    content.to_string()
 }
 
 fn apply_cell_style(cell: &TableCell, content: &str) -> String {

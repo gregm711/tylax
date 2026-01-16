@@ -35,6 +35,8 @@ impl Default for GridRow {
 pub struct TableGridParser {
     /// Column coverage tracking: remaining rows each column is covered by a multirow
     col_coverage: Vec<usize>,
+    /// Maximum column count observed while parsing rows
+    max_cols: usize,
     /// Parsed rows
     pub rows: Vec<GridRow>,
     /// Default column alignments from \begin{tabular}{...}
@@ -48,6 +50,7 @@ impl TableGridParser {
     pub fn new(alignments: Vec<CellAlign>) -> Self {
         TableGridParser {
             col_coverage: Vec::new(),
+            max_cols: 0,
             rows: Vec::new(),
             default_alignments: alignments,
             pending_hlines: Vec::new(),
@@ -134,6 +137,10 @@ impl TableGridParser {
             }
         }
 
+        if current_col > self.max_cols {
+            self.max_cols = current_col;
+        }
+
         if !row.cells.is_empty() || !row.hlines_before.is_empty() {
             self.rows.push(row);
         }
@@ -145,17 +152,18 @@ impl TableGridParser {
         let mut output = String::new();
 
         // Generate columns spec
-        let col_tuple: Vec<&str> = vec!["auto"; col_count.max(1)];
+        let effective_cols = col_count.max(self.max_cols).max(1);
+        let col_tuple: Vec<&str> = vec!["auto"; effective_cols];
         let _ = writeln!(output, "#table(");
         let _ = writeln!(output, "    columns: ({}),", col_tuple.join(", "));
 
         // Generate alignment spec
         if !self.default_alignments.is_empty() {
-            let aligns: Vec<&str> = self
-                .default_alignments
-                .iter()
-                .map(|a| a.to_typst())
-                .collect();
+            let mut aligns = self.default_alignments.clone();
+            if aligns.len() < effective_cols {
+                aligns.extend(std::iter::repeat(CellAlign::Auto).take(effective_cols - aligns.len()));
+            }
+            let aligns: Vec<&str> = aligns.iter().map(|a| a.to_typst()).collect();
             let _ = writeln!(output, "    align: ({}),", aligns.join(", "));
         }
 

@@ -20,7 +20,7 @@ use mitex_spec::CommandSpecItem;
 use super::context::{
     ConversionMode, EnvironmentContext, LatexConverter, MacroDef, PendingOperator,
 };
-use super::utils::{sanitize_label, to_roman_numeral};
+use super::utils::{sanitize_citation_key, sanitize_label, to_roman_numeral};
 use crate::features::images::ImageAttributes;
 use crate::utils::loss::{LossKind, LOSS_MARKER_PREFIX};
 
@@ -197,6 +197,28 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
     // Remove leading backslash for matching
     let base_name = cmd_str.trim_start_matches('\\');
 
+    if base_name.is_empty() {
+        output.push_str("#linebreak()");
+        return;
+    }
+
+    if base_name == "degree"
+        && matches!(
+            conv.state.template_kind,
+            Some(super::context::TemplateKind::Dissertate)
+        )
+    {
+        let raw = conv
+            .get_required_arg_with_braces(&cmd, 0)
+            .or_else(|| extract_first_braced_arg(&cmd.syntax().text().to_string()))
+            .unwrap_or_default();
+        if !raw.trim().is_empty() {
+            let text = super::utils::convert_caption_text(&raw);
+            conv.push_thesis_meta("Degree", text);
+        }
+        return;
+    }
+
     // Handle preamble commands
     if conv.state.in_preamble {
         match base_name {
@@ -207,19 +229,65 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 return;
             }
             "title" => {
-                conv.state.title = conv.extract_metadata_arg(&cmd);
+                if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                    let cleaned = raw.replace("\\\\", " ");
+                    conv.state.title =
+                        Some(super::utils::convert_caption_text(&cleaned).trim().to_string());
+                }
                 return;
             }
             "author" => {
-                conv.state.author = conv.extract_metadata_arg(&cmd);
+                let author = conv.extract_author_arg(&cmd).unwrap_or_default();
+                if conv.state.template_kind == Some(super::context::TemplateKind::Acm) {
+                    conv.push_author_block(author);
+                } else {
+                    conv.state.author = Some(author);
+                }
                 return;
             }
             "date" => {
                 conv.state.date = conv.extract_metadata_arg(&cmd);
                 return;
             }
+            "affiliation" => {
+                if conv.state.template_kind == Some(super::context::TemplateKind::Acm) {
+                    if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                        conv.capture_acm_affiliation(&raw);
+                    }
+                }
+                return;
+            }
+            "institution" | "city" | "country" | "department" => {
+                if conv.state.template_kind == Some(super::context::TemplateKind::Acm) {
+                    if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                        let text = super::utils::convert_caption_text(&raw);
+                        conv.add_author_line(text);
+                    }
+                }
+                return;
+            }
+            "email" => {
+                if conv.state.template_kind == Some(super::context::TemplateKind::Acm) {
+                    if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                        let text = super::utils::convert_caption_text(&raw);
+                        conv.add_author_email(text);
+                    }
+                }
+                return;
+            }
             "newcommand" | "renewcommand" | "providecommand" => {
                 handle_newcommand(conv, &cmd);
+                return;
+            }
+            "newtheorem" => {
+                if let (Some(env), Some(title)) =
+                    (conv.get_required_arg(&cmd, 0), conv.get_required_arg(&cmd, 1))
+                {
+                    let display = super::utils::convert_caption_text(&title);
+                    conv.state
+                        .custom_theorems
+                        .insert(env.trim().to_string(), display.trim().to_string());
+                }
                 return;
             }
             "def" => {
@@ -236,9 +304,9 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
             // Preamble/setup commands to ignore
             "usepackage" | "RequirePackage" | "input" | "include" | "includeonly"
-            | "bibliography" | "bibliographystyle" | "maketitle" | "pagestyle" 
+            | "bibliographystyle" | "maketitle" | "pagestyle" 
             | "thispagestyle" | "pagenumbering" | "setcounter" | "addtocounter" 
-            | "setlength" | "addtolength" | "newtheorem" | "theoremstyle" 
+            | "setlength" | "addtolength" | "theoremstyle" 
             | "allowdisplaybreaks" | "numberwithin" | "DeclareMathOperator"
             | "DeclarePairedDelimiter" | "sisetup" | "NewDocumentCommand"
             | "RenewDocumentCommand" | "ProvideDocumentCommand" | "DeclareDocumentCommand"
@@ -285,7 +353,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             | "iftrue" | "iffalse" | "ifx" | "ifnum" | "ifdim" | "ifcat" | "ifmmode" => {
                 return;
             }
-            _ => {}
+            _ => {
+                // Ignore all other preamble commands.
+                return;
+            }
         }
     }
 
@@ -316,10 +387,13 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             output.push_str("#v(2em)\n\n");
         }
         "chapter" => {
-            let title = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let title = conv
+                .convert_required_arg(&cmd, 0)
+                .or_else(|| conv.get_required_arg(&cmd, 0))
+                .unwrap_or_default();
             output.push('\n');
             output.push_str("= ");
-            output.push_str(&title);
+            output.push_str(title.trim());
             output.push('\n');
         }
         // Sectioning - adjust level based on documentclass
@@ -383,12 +457,97 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             let _ = write!(output, "#smallcaps[{}]", content);
         }
         "textsuperscript" => {
-            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "#super[{}]", content);
+            let content = conv
+                .convert_required_arg(&cmd, 0)
+                .or_else(|| conv.get_required_arg(&cmd, 0))
+                .unwrap_or_default();
+            let _ = write!(output, "#super[{}]", content.trim());
         }
         "textsubscript" => {
-            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "#sub[{}]", content);
+            let content = conv
+                .convert_required_arg(&cmd, 0)
+                .or_else(|| conv.get_required_arg(&cmd, 0))
+                .unwrap_or_default();
+            let _ = write!(output, "#sub[{}]", content.trim());
+        }
+        "nicefrac" => {
+            let num = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let den = conv.get_required_arg(&cmd, 1).unwrap_or_default();
+            if !num.is_empty() && !den.is_empty() {
+                let _ = write!(output, "{}/{}", num.trim(), den.trim());
+            }
+        }
+        "lipsum" => {
+            let arg = conv.get_optional_arg(&cmd, 0).unwrap_or_default();
+            let mut words = 60;
+            if !arg.is_empty() {
+                let cleaned = arg.replace(['[', ']'], "");
+                let nums: Vec<i32> = cleaned
+                    .split(|c: char| !c.is_ascii_digit())
+                    .filter_map(|s| s.parse::<i32>().ok())
+                    .collect();
+                if let Some(max) = nums.iter().max() {
+                    words = (max * 40).max(40) as usize;
+                }
+            }
+            let _ = write!(output, "#lorem({})", words);
+        }
+        "doi" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                let _ = write!(output, "#link(\"https://doi.org/{}\")[{}]", text.trim(), text.trim());
+            }
+        }
+        "ce" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                let escaped = super::utils::escape_typst_string(text.trim());
+                if conv.state.mode == ConversionMode::Math {
+                    let _ = write!(output, "text(\"{}\")", escaped);
+                } else {
+                    let _ = write!(output, "#text(\"{}\")", escaped);
+                }
+            }
+        }
+        "erf" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "op(\"erf\")({})", arg);
+            } else {
+                output.push_str("op(\"erf\")");
+            }
+        }
+        "erfc" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "op(\"erfc\")({})", arg);
+            } else {
+                output.push_str("op(\"erfc\")");
+            }
+        }
+        "symbfit" | "symbfup" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                output.push_str(&arg);
+            }
+        }
+        "EntryHeading" => {
+            if let Some(title) = conv.convert_required_arg(&cmd, 0).or_else(|| conv.get_required_arg(&cmd, 0)) {
+                let _ = writeln!(output, "\n#text(weight: \"bold\")[{}]\n", title.trim());
+            }
+        }
+        "entry" => {
+            let term = conv
+                .convert_required_arg(&cmd, 0)
+                .or_else(|| conv.get_required_arg(&cmd, 0))
+                .unwrap_or_default();
+            let desc = conv
+                .convert_required_arg(&cmd, 1)
+                .or_else(|| conv.get_required_arg(&cmd, 1))
+                .unwrap_or_default();
+            let _ = writeln!(
+                output,
+                "- *{}* — {}",
+                term.trim(),
+                desc.trim()
+            );
         }
         // Text in math - these commands output text in math mode
         "text" | "textrm" | "textup" | "textnormal" => {
@@ -397,12 +556,407 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
         }
 
+        // Title/author handling that appears inside the document (IEEE templates)
+        "title" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let cleaned = raw.replace("\\\\", " ");
+                conv.state.title =
+                    Some(super::utils::convert_caption_text(&cleaned).trim().to_string());
+            }
+            return;
+        }
+        "author" => {
+            let author = conv.extract_author_arg(&cmd).unwrap_or_default();
+            if conv.state.template_kind == Some(super::context::TemplateKind::Acm) {
+                conv.push_author_block(author);
+            } else {
+                conv.state.author = Some(author);
+            }
+            return;
+        }
+        "Author" => {
+            let name = conv
+                .get_required_arg_with_braces(&cmd, 0)
+                .map(|raw| super::utils::convert_author_text(&raw))
+                .unwrap_or_default();
+            let dept = conv
+                .get_required_arg_with_braces(&cmd, 1)
+                .map(|raw| super::utils::convert_caption_text(&raw))
+                .unwrap_or_default();
+            conv.push_author_block(name);
+            if !dept.trim().is_empty() {
+                conv.add_author_line(dept);
+            }
+            for idx in 0..6 {
+                if let Some(opt) = conv.get_optional_arg(&cmd, idx) {
+                    let text = super::utils::convert_caption_text(&opt);
+                    conv.push_thesis_meta("Previous degree", text);
+                }
+            }
+            return;
+        }
+        "Degree" => {
+            let degree = conv
+                .get_required_arg_with_braces(&cmd, 0)
+                .map(|raw| super::utils::convert_caption_text(&raw))
+                .unwrap_or_default();
+            let dept = conv
+                .get_required_arg_with_braces(&cmd, 1)
+                .map(|raw| super::utils::convert_caption_text(&raw))
+                .unwrap_or_default();
+            let value = if dept.trim().is_empty() {
+                degree
+            } else {
+                format!("{} ({})", degree.trim(), dept.trim())
+            };
+            conv.push_thesis_meta("Degree", value);
+            return;
+        }
+        "Supervisor" => {
+            let name = conv
+                .get_required_arg_with_braces(&cmd, 0)
+                .map(|raw| super::utils::convert_author_text(&raw))
+                .unwrap_or_default();
+            let title = conv
+                .get_required_arg_with_braces(&cmd, 1)
+                .map(|raw| super::utils::convert_caption_text(&raw))
+                .unwrap_or_default();
+            let dept = conv.get_optional_arg(&cmd, 0).unwrap_or_default();
+            let dept = super::utils::convert_caption_text(&dept);
+            let mut parts = Vec::new();
+            if !name.trim().is_empty() {
+                parts.push(name.trim().to_string());
+            }
+            if !title.trim().is_empty() {
+                parts.push(title.trim().to_string());
+            }
+            if !dept.trim().is_empty() {
+                parts.push(dept.trim().to_string());
+            }
+            conv.push_thesis_meta("Supervisor", parts.join(", "));
+            return;
+        }
+        "Acceptor" => {
+            let name = conv
+                .get_required_arg_with_braces(&cmd, 0)
+                .map(|raw| super::utils::convert_author_text(&raw))
+                .unwrap_or_default();
+            let title = conv
+                .get_required_arg_with_braces(&cmd, 1)
+                .map(|raw| super::utils::convert_caption_text(&raw))
+                .unwrap_or_default();
+            let role = conv
+                .get_required_arg_with_braces(&cmd, 2)
+                .map(|raw| super::utils::convert_caption_text(&raw))
+                .unwrap_or_default();
+            let mut parts = Vec::new();
+            if !name.trim().is_empty() {
+                parts.push(name.trim().to_string());
+            }
+            if !title.trim().is_empty() {
+                parts.push(title.trim().to_string());
+            }
+            if !role.trim().is_empty() {
+                parts.push(role.trim().to_string());
+            }
+            conv.push_thesis_meta("Acceptor", parts.join(", "));
+            return;
+        }
+        "Reader" => {
+            let name = conv
+                .get_required_arg_with_braces(&cmd, 0)
+                .map(|raw| super::utils::convert_author_text(&raw))
+                .unwrap_or_default();
+            let title = conv
+                .get_required_arg_with_braces(&cmd, 1)
+                .map(|raw| super::utils::convert_caption_text(&raw))
+                .unwrap_or_default();
+            let dept = conv
+                .get_required_arg_with_braces(&cmd, 2)
+                .map(|raw| super::utils::convert_caption_text(&raw))
+                .unwrap_or_default();
+            let mut parts = Vec::new();
+            if !name.trim().is_empty() {
+                parts.push(name.trim().to_string());
+            }
+            if !title.trim().is_empty() {
+                parts.push(title.trim().to_string());
+            }
+            if !dept.trim().is_empty() {
+                parts.push(dept.trim().to_string());
+            }
+            conv.push_thesis_meta("Reader", parts.join(", "));
+            return;
+        }
+        "DegreeDate" => {
+            let month = conv
+                .get_required_arg_with_braces(&cmd, 0)
+                .map(|raw| super::utils::convert_caption_text(&raw))
+                .unwrap_or_default();
+            let year = conv
+                .get_required_arg_with_braces(&cmd, 1)
+                .map(|raw| super::utils::convert_caption_text(&raw))
+                .unwrap_or_default();
+            let value = format!("{} {}", month.trim(), year.trim()).trim().to_string();
+            conv.push_thesis_meta("Degree date", value);
+            return;
+        }
+        "ThesisDate" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Thesis date", text);
+            }
+            return;
+        }
+        "dept" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Department", text);
+            }
+            return;
+        }
+        "principaladviser" | "advisor" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Advisor", text);
+            }
+            return;
+        }
+        "coadvisorOne" | "coadvisorTwo" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Co-advisor", text);
+            }
+            return;
+        }
+        "firstreader" | "secondreader" | "thirdreader" | "fourthreader" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Reader", text);
+            }
+            return;
+        }
+        "committeeInternalOne" | "committeeInternalTwo" | "committeeInternal" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Committee (internal)", text);
+            }
+            return;
+        }
+        "committeeExternal" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Committee (external)", text);
+            }
+            return;
+        }
+        "chair" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Chair", text);
+            }
+            return;
+        }
+        "othermembers" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Committee members", text);
+            }
+            return;
+        }
+        "numberofmembers" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Committee size", text);
+            }
+            return;
+        }
+        "field" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Field", text);
+            }
+            return;
+        }
+        "degreeyear" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Degree year", text);
+            }
+            return;
+        }
+        "degreesemester" | "degreeterm" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Degree term", text);
+            }
+            return;
+        }
+        "degreemonth" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Degree month", text);
+            }
+            return;
+        }
+        "pdOneName" | "pdTwoName" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Previous degree", text);
+            }
+            return;
+        }
+        "pdOneSchool" | "pdTwoSchool" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Previous institution", text);
+            }
+            return;
+        }
+        "pdOneYear" | "pdTwoYear" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Previous degree year", text);
+            }
+            return;
+        }
+        "prefacesection" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                let _ = writeln!(output, "\n= {}\n", text.trim());
+            }
+            return;
+        }
+        "qauthor" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                let _ = writeln!(output, "\n#align(right)[— {}]\n", text.trim());
+            }
+            return;
+        }
+        "newthought" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                let _ = write!(output, "#smallcaps[{}]", text.trim());
+            }
+            return;
+        }
+        "lettrine" => {
+            let first = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let rest = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            output.push_str(&format!("{}{}", first, rest));
+            return;
+        }
+        "icmltitle" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let cleaned = raw.replace("\\\\", " ");
+                conv.state.title =
+                    Some(super::utils::convert_caption_text(&cleaned).trim().to_string());
+            }
+            return;
+        }
+        "icmlauthor" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let name = super::utils::convert_author_text(&raw).trim().to_string();
+                let keys_raw = conv.get_required_arg_with_braces(&cmd, 1).unwrap_or_default();
+                let keys = parse_affiliation_keys(&keys_raw);
+                conv.push_author_block_with_affils(name, keys);
+            }
+            return;
+        }
+        "icmlaffiliation" => {
+            let key = conv.get_required_arg_with_braces(&cmd, 0).unwrap_or_default();
+            let value = conv.get_required_arg_with_braces(&cmd, 1).unwrap_or_default();
+            let text = super::utils::convert_caption_text(&value);
+            conv.add_affiliation_mapping(key, text);
+            return;
+        }
+        "icmlcorrespondingauthor" => {
+            let name = conv.get_required_arg_with_braces(&cmd, 0).unwrap_or_default();
+            let email = conv.get_required_arg_with_braces(&cmd, 1).unwrap_or_default();
+            let name = super::utils::convert_author_text(&name);
+            let email = super::utils::convert_caption_text(&email);
+            conv.set_author_email_by_name(&name, email);
+            return;
+        }
+        "icmlkeywords" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.state.keywords = text
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+            return;
+        }
+        "twocolumn" => {
+            // Process optional content inside \twocolumn[...]
+            for child in cmd.syntax().children_with_tokens() {
+                if child.kind() == mitex_parser::syntax::SyntaxKind::ClauseArgument {
+                    if let SyntaxElement::Node(n) = child {
+                        let is_bracket = n
+                            .children()
+                            .any(|c| c.kind() == mitex_parser::syntax::SyntaxKind::ItemBracket);
+                        if is_bracket {
+                            for content in n.children_with_tokens() {
+                                match content.kind() {
+                                    mitex_parser::syntax::SyntaxKind::TokenLBracket
+                                    | mitex_parser::syntax::SyntaxKind::TokenRBracket => continue,
+                                    _ => conv.visit_element(content, output),
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        "affiliation" => {
+            if conv.state.template_kind == Some(super::context::TemplateKind::Acm) {
+                if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                    conv.capture_acm_affiliation(&raw);
+                }
+                return;
+            }
+        }
+        "institution" | "city" | "country" | "department" => {
+            if conv.state.template_kind == Some(super::context::TemplateKind::Acm) {
+                if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                    let text = super::utils::convert_caption_text(&raw);
+                    conv.add_author_line(text);
+                }
+                return;
+            }
+            if base_name == "department" {
+                if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                    let text = super::utils::convert_caption_text(&raw);
+                    conv.push_thesis_meta("Department", text);
+                }
+                return;
+            }
+        }
+        "email" => {
+            if conv.state.template_kind == Some(super::context::TemplateKind::Acm) {
+                if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                    let text = super::utils::convert_caption_text(&raw);
+                    conv.add_author_email(text);
+                }
+                return;
+            }
+        }
+        "maketitle" | "IEEEpeerreviewmaketitle" => {
+            // Title rendering is handled by templates or title blocks
+            return;
+        }
+
         // Labels and references
         "label" => {
             // Skip label output if we're inside equation/align environments
             // because those environments handle labels at the end of the math block
             if conv.state.is_inside(&EnvironmentContext::Equation)
                 || conv.state.is_inside(&EnvironmentContext::Align)
+                || matches!(conv.state.current_env(), EnvironmentContext::Theorem(_))
             {
                 return;
             }
@@ -413,26 +967,65 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "ref" | "autoref" | "cref" | "Cref" => {
             let label = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let clean_label = sanitize_label(&label);
-            let _ = write!(output, "@{}", clean_label);
+            let _ = write!(output, "__TYLAX_REF__{}__", clean_label);
         }
         "eqref" => {
             let label = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let sanitized = sanitize_label(&label);
-            if !sanitized.starts_with("eq-") {
-                let _ = write!(output, "@eq-{}", sanitized);
-            } else {
-                let _ = write!(output, "@{}", sanitized);
-            }
+            let _ = write!(output, "__TYLAX_EQREF__{}__", sanitized);
         }
         "pageref" => {
             let label = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let clean_label = sanitize_label(&label);
-            let _ = write!(output, "#locate(loc => {{@{}.page()}})", clean_label);
+            let _ = write!(output, "__TYLAX_PAGEREF__{}__", clean_label);
         }
         "nameref" => {
             let label = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let clean_label = sanitize_label(&label);
-            let _ = write!(output, "@{}", clean_label);
+            let _ = write!(output, "__TYLAX_REF__{}__", clean_label);
+        }
+
+        // Keywords (IEEE/ACM style)
+        "IEEEkeywords" | "keywords" => {
+            if conv.state.template_kind == Some(super::context::TemplateKind::Ieee) {
+                if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                    let text = super::utils::convert_caption_text(&raw);
+                    conv.state.keywords = text
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                }
+                return;
+            }
+        }
+
+        // Bibliography
+        "bibliography" | "addbibresource" | "bibdata" => {
+            let raw = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let entries: Vec<String> = raw
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    if s.ends_with(".bib") {
+                        s.to_string()
+                    } else {
+                        format!("{}.bib", s)
+                    }
+                })
+                .collect();
+            if !entries.is_empty() {
+                let quoted: Vec<String> = entries
+                    .into_iter()
+                    .map(|s| format!("\"{}\"", s))
+                    .collect();
+                if quoted.len() == 1 {
+                    let _ = write!(output, "#bibliography({})", quoted.join(", "));
+                } else {
+                    let _ = write!(output, "#bibliography(({}))", quoted.join(", "));
+                }
+            }
         }
 
         // Citations - Full set from l2t.rs (40+ variants)
@@ -445,23 +1038,44 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "parencites" | "Parencites" | "autocites" | "Autocites" => {
             let keys = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let opt = conv.get_optional_arg(&cmd, 0);
-            for (i, key) in keys.split(',').enumerate() {
-                if i > 0 {
-                    output.push(' ');
+            let mut cleaned_keys: Vec<String> = Vec::new();
+            for key in keys.split(',') {
+                let clean = sanitize_citation_key(key.trim());
+                if !clean.is_empty() {
+                    cleaned_keys.push(clean);
                 }
-                let _ = write!(output, "@{}", key.trim());
+            }
+            if !cleaned_keys.is_empty() {
+                output.push('[');
+                for (i, key) in cleaned_keys.iter().enumerate() {
+                    if i > 0 {
+                        output.push_str("; ");
+                    }
+                    let _ = write!(output, "@{}", key);
+                }
+                output.push(']');
             }
             if let Some(note) = opt {
-                let _ = write!(output, " [{}]", note);
+                let trimmed = note.trim();
+                if !trimmed.is_empty() {
+                    let _ = write!(output, " [{}]", trimmed);
+                }
             }
         }
         "citeauthor" | "citeauthor*" => {
             let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "#cite(<{}>, form: \"author\")", key.trim());
+            let clean = sanitize_citation_key(key.trim());
+            let _ = write!(output, "#cite(<{}>, form: \"author\")", clean);
         }
-        "citeyear" | "citeyearpar" => {
+        "citeyear" | "citeyear*" | "citeyearpar" => {
             let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "#cite(<{}>, form: \"year\")", key.trim());
+            let clean = sanitize_citation_key(key.trim());
+            let _ = write!(output, "#cite(<{}>, form: \"year\")", clean);
+        }
+        "citetitle" | "citetitle*" => {
+            let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let clean = sanitize_citation_key(key.trim());
+            let _ = write!(output, "#cite(<{}>, form: \"title\")", clean);
         }
 
         // URLs and hyperlinks
@@ -489,6 +1103,28 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             output.push_str("#super[]");
         }
 
+        // Conditional logic (best-effort)
+        "ifthenelse" => {
+            let then_branch = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            let else_branch = conv.convert_required_arg(&cmd, 2).unwrap_or_default();
+            let trimmed_then = then_branch.trim();
+            if trimmed_then.is_empty() {
+                output.push_str(else_branch.trim());
+            } else {
+                output.push_str(trimmed_then);
+            }
+        }
+        "equal" => {
+            // Used inside \ifthenelse; ignore here.
+        }
+
+        // References
+        "subref" => {
+            let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let clean = sanitize_label(key.trim());
+            let _ = write!(output, "@{}", clean);
+        }
+
         // Graphics - use images module for proper parsing
         "includegraphics" => {
             let options = conv.get_optional_arg(&cmd, 0).unwrap_or_default();
@@ -498,10 +1134,180 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             let attrs = ImageAttributes::parse(&options);
             let args = attrs.to_typst_args();
 
-            if args.is_empty() {
-                let _ = write!(output, "#image(\"{}\")", path);
+            let trimmed = path.trim();
+            if trimmed.is_empty()
+                || trimmed.contains('\\')
+                || trimmed.contains('{')
+                || trimmed.contains('}')
+            {
+                output.push_str("#box(stroke: 0.5pt, inset: 6pt)[Missing image]");
+            } else if args.is_empty() {
+                let _ = write!(output, "#image(\"{}\")", trimmed);
             } else {
-                let _ = write!(output, "#image(\"{}\", {})", path, args);
+                let _ = write!(output, "#image(\"{}\", {})", trimmed, args);
+            }
+        }
+
+        // Listings
+        "lstinputlisting" => {
+            let path = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            if path.trim().is_empty() {
+                output.push_str("#raw(block: true, lang: \"text\", \"\")");
+            } else {
+                let escaped = super::utils::escape_typst_string(path.trim());
+                let _ = write!(
+                    output,
+                    "#raw(block: true, lang: \"text\", \"Listing: {}\")",
+                    escaped
+                );
+            }
+        }
+
+        // Table header helpers (OxEngThesis)
+        "tableHeaderStart" | "tableHeaderEnd" => {
+            // Style-only commands; ignore.
+        }
+        "tableHCell" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let _ = write!(output, "*{}*", content.trim());
+        }
+        "tableHCellTwoRows" => {
+            let top = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let bottom = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            let _ = write!(output, "*{}* #linebreak() {}", top.trim(), bottom.trim());
+        }
+
+        // Simple boxes and TODOs
+        "tcbox" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let _ = write!(output, "#box(stroke: 0.5pt, inset: 2pt)[{}]", content);
+        }
+        "todo" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let _ = write!(output, "#text(fill: red)[{}]", content);
+        }
+        "ab" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            output.push_str(content.trim());
+        }
+        "dotfill" => {
+            output.push_str("...");
+        }
+        "rule" => {
+            let width = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let height = conv.get_required_arg(&cmd, 1).unwrap_or_else(|| "1pt".to_string());
+            let length = if let Some(val) = width.trim().strip_suffix("\\linewidth") {
+                let factor = val.trim();
+                if factor.is_empty() {
+                    "100%".to_string()
+                } else if let Ok(num) = factor.parse::<f64>() {
+                    format!("{}%", num * 100.0)
+                } else {
+                    width.trim().to_string()
+                }
+            } else if let Some(val) = width.trim().strip_suffix("\\textwidth") {
+                let factor = val.trim();
+                if factor.is_empty() {
+                    "100%".to_string()
+                } else if let Ok(num) = factor.parse::<f64>() {
+                    format!("{}%", num * 100.0)
+                } else {
+                    width.trim().to_string()
+                }
+            } else {
+                width.trim().to_string()
+            };
+            let stroke = height.trim();
+            let _ = write!(output, "#line(length: {}, stroke: {})", length, stroke);
+        }
+
+        // Page/section helpers
+        "clearpage" | "cleardoublepage" | "cleartooddpage" | "myclearpage" => {
+            output.push_str("#pagebreak()");
+        }
+        "mypagestyle" | "mylisthead" => {
+            // Consume args, ignore styling
+        }
+        "makefrontmatterpages" | "listofreferences" => {
+            // Ignore
+        }
+        "input" | "include" => {
+            // Already expanded during preprocessing; ignore any remaining.
+        }
+        "onehalfspacing" | "doublespacing" | "singlespacing" => {
+            // Ignore spacing commands in body.
+        }
+        "fill" => {
+            output.push_str("#v(1fr)");
+        }
+        "nomname" => {
+            output.push_str("Nomenclature");
+        }
+        "printnomenclature" => {
+            // Ignore output; Typst doesn't generate nomenclature here.
+        }
+        "pagenumbering" | "thesistitlepage" | "addcontentsline" => {
+            // Ignore pagination and TOC wiring.
+        }
+        "endfirsthead" | "endfoot" | "endlastfoot" => {
+            // longtable control commands; ignore.
+        }
+        "blindmathtrue" | "blindmathfalse" => {
+            // Ignore blindtext math toggle.
+        }
+        "blindtext" => {
+            output.push_str("#lorem(60)");
+        }
+        "blinditemize" => {
+            output.push_str("\n- Lorem ipsum\n- Dolor sit amet\n- Consectetur\n");
+        }
+        "chapterprecis" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let _ = write!(output, "#quote[{}]", content.trim());
+        }
+        "makeintropages" => {
+            // UCLA intro pages macro; ignore.
+        }
+        "date" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Date", text);
+            }
+        }
+        "Year" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Year", text);
+            }
+        }
+        "trnumber" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                if !text.trim().is_empty() {
+                    conv.push_thesis_meta("Report Number", text);
+                }
+            }
+        }
+        "committee" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Committee", text);
+            }
+        }
+        "support" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                if !text.trim().is_empty() {
+                    conv.push_thesis_meta("Support", text);
+                }
+            }
+        }
+        "disclaimer" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                if !text.trim().is_empty() {
+                    conv.push_thesis_meta("Disclaimer", text);
+                }
             }
         }
 
@@ -945,11 +1751,15 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         // Spacing commands
         "hspace" | "hspace*" => {
             let dim = conv.get_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "#h({})", convert_dimension(&dim));
+            if !dim.trim().is_empty() {
+                let _ = write!(output, "#h({})", convert_dimension(&dim));
+            }
         }
         "vspace" | "vspace*" => {
             let dim = conv.get_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "#v({})", convert_dimension(&dim));
+            if !dim.trim().is_empty() {
+                let _ = write!(output, "#v({})", convert_dimension(&dim));
+            }
         }
         "quad" => output.push_str("  "),
         "qquad" => output.push_str("    "),
@@ -994,9 +1804,27 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "textasciicircum" => output.push('^'),
         "%" => output.push('%'),
         "&" => output.push('&'),
-        "$" => output.push('$'),
-        "#" => output.push('#'),
-        "_" => output.push('_'),
+        "$" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                output.push('$');
+            } else {
+                output.push_str("\\$");
+            }
+        }
+        "#" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                output.push('#');
+            } else {
+                output.push_str("\\#");
+            }
+        }
+        "_" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                output.push('_');
+            } else {
+                output.push_str("\\_");
+            }
+        }
         "{" => output.push('{'),
         "}" => output.push('}'),
 
@@ -1097,7 +1925,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
 
         // Big operators - trailing space prevents merging with following content
         "sum" => output.push_str("sum "),
-        "prod" => output.push_str("product "),
+        "prod" | "product" => output.push_str("product "),
+        "limits" | "nolimits" => {
+            // Limits control; ignore and rely on Typst defaults.
+        }
         "int" => output.push_str("integral "),
         "iint" => output.push_str("integral.double "),
         "iiint" => output.push_str("integral.triple "),
@@ -1752,7 +2583,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
 
         // Page breaks
-        "newpage" | "clearpage" | "cleardoublepage" => {
+        "newpage" => {
             output.push_str("\n#pagebreak()\n");
         }
 
@@ -1786,6 +2617,16 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "IEEEauthorblockN" | "IEEEauthorblockA" | "IEEEoverridecommandlockouts"
         | "IEEEaftertitletext" | "IEEEmembership" | "IEEEspecialpapernotice"
         | "markboth" | "markright" | "thanks" | "and"
+        | "icmltitlerunning" | "icmlsetsymbol" | "printAffiliationsAndNotice" | "icmlEqualContribution"
+        | "iclrfinalcopy"
+        // Thesis template setup
+        | "DocumentMetadata" | "IfPackageAtLeastTF" | "newcolumntype" | "AtEveryBibitem"
+        | "renewbibmacro" | "DeclarePairedDelimiterXPP" | "pdfbookmark"
+        | "jot" | "ifpdftex" | "else" | "fi" | "setstretch" | "dnormalspacing"
+        | "hbadness" | "hyphenation" | "textwidth" | "setcounter"
+        | "beforepreface" | "afterpreface" | "onlinesignature"
+        | "lstset" | "lstdefinestyle" | "chaptermark" | "MakeOuterQuote" | "tolerance"
+        | "approvalpage" | "copyrightpage" | "pagestyle" | "thispagestyle"
         // Additional formatting switches (excluding already handled: it, bf, tt, sc, rm)
         | "em" | "sf" | "sl"
         // Floats and placement
@@ -1799,14 +2640,28 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "expandafter" | "global" | "long" | "outer" | "inner"
         | "noexpand" | "csname" | "endcsname" | "string" | "number" 
         // More bibliography
-        | "addbibresource" | "bibdata" | "bibstyle" 
+        | "bibstyle" | "bibliographystyle"
         // Index
-        | "makeindex" | "printindex" | "index" | "glossary" => {
+        | "makeindex" | "printindex" | "index" | "glossary"
+        // Equation numbering control
+        | "nonumber" => {
             // Ignore these
         }
 
         // Try symbol maps for unknown commands
         _ => {
+            let lookup = format!("\\{}", base_name);
+            if let Some(val) = crate::siunitx::SI_UNITS.get(lookup.as_str()) {
+                output.push_str(val);
+                output.push(' ');
+                return;
+            }
+            if let Some(val) = crate::siunitx::SI_PREFIXES.get(lookup.as_str()) {
+                output.push_str(val);
+                output.push(' ');
+                return;
+            }
+
             // Try symbol lookup
             if let Some(typst) = lookup_symbol(base_name) {
                 output.push_str(typst);
@@ -1836,7 +2691,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 Some(cmd.syntax().text().to_string()),
                 context,
             );
-            let loss_marker = format!("/* {}{} */", LOSS_MARKER_PREFIX, loss_id);
+            let loss_marker = format!(" /* {}{} */ ", LOSS_MARKER_PREFIX, loss_id);
 
             // Pass through unknown commands using AST-based processing
             // This preserves the behavior of convert_default_command from old version
@@ -1845,30 +2700,24 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
 
                 if matches!(conv.state.mode, ConversionMode::Math) {
                     output.push_str(&loss_marker);
-                    // In math mode, output as function call: \cmd{arg} -> cmd(arg)
-                    let has_args = cmd
-                        .syntax()
-                        .children()
-                        .any(|c| c.kind() == SyntaxKind::ClauseArgument);
-                    if has_args {
-                        output.push_str(base_name);
-                        output.push('(');
-                        let mut first = true;
-                        for child in cmd.syntax().children_with_tokens() {
-                            if child.kind() == SyntaxKind::ClauseArgument {
-                                if !first {
-                                    output.push_str(", ");
-                                }
-                                first = false;
-                                if let SyntaxElement::Node(n) = child {
-                                    conv.visit_node(&n, output);
-                                }
+                    // In math mode, unknown commands often represent styling macros.
+                    // Prefer emitting just the arguments (if any) to avoid undefined functions.
+                    let mut has_args = false;
+                    let mut first = true;
+                    for child in cmd.syntax().children_with_tokens() {
+                        if child.kind() == SyntaxKind::ClauseArgument {
+                            if !first {
+                                output.push(' ');
+                            }
+                            first = false;
+                            has_args = true;
+                            if let SyntaxElement::Node(n) = child {
+                                conv.visit_node(&n, output);
                             }
                         }
-                        output.push(')');
-                    } else {
-                        // No arguments - just output the name as identifier
-                        output.push_str(base_name);
+                    }
+                    if !has_args {
+                        let _ = write!(output, "\"{}\"", base_name);
                     }
                 } else {
                     // In text mode, output name as comment to avoid garbage text
@@ -2179,7 +3028,10 @@ fn apply_cedilla(content: &str) -> String {
 
 /// Convert section heading with proper level
 fn convert_section(conv: &mut LatexConverter, cmd: &CmdItem, level: u8, output: &mut String) {
-    if let Some(title) = conv.get_required_arg(cmd, 0) {
+    if let Some(title) = conv
+        .convert_required_arg(cmd, 0)
+        .or_else(|| conv.get_required_arg(cmd, 0))
+    {
         output.push('\n');
         for _ in 0..=level {
             output.push('=');
@@ -2188,4 +3040,33 @@ fn convert_section(conv: &mut LatexConverter, cmd: &CmdItem, level: u8, output: 
         output.push_str(&title);
         output.push('\n');
     }
+}
+
+fn parse_affiliation_keys(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .filter(|s| !s.eq_ignore_ascii_case("equal"))
+        .filter(|s| *s != "*")
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn extract_first_braced_arg(raw: &str) -> Option<String> {
+    let start = raw.find('{')?;
+    let mut depth = 0i32;
+    for (idx, ch) in raw[start..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let end = start + idx;
+                    return Some(raw[start + 1..end].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }

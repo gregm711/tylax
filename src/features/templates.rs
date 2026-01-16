@@ -129,7 +129,7 @@ lazy_static! {
             name: "IEEE",
             columns: 2,
             paper: "us-letter",
-            typst_template: Some("@preview/charged-ieee:0.1.0"),
+            typst_template: Some("@preview/charged-ieee:0.1.4"),
             font_family: Some("Times New Roman"),
             font_size: 10.0,
             abstract_style: AbstractStyle::Bold,
@@ -140,7 +140,7 @@ lazy_static! {
             name: "ACM",
             columns: 2,
             paper: "us-letter",
-            typst_template: Some("@preview/acm-article:0.1.0"),
+            typst_template: None,
             font_family: Some("Linux Libertine"),
             font_size: 10.0,
             abstract_style: AbstractStyle::Bold,
@@ -373,6 +373,8 @@ fn find_matching_bracket(s: &str, open: char, close: char) -> Option<usize> {
 /// Generate Typst preamble from document class
 pub fn generate_typst_preamble(doc_class: &DocumentClass) -> String {
     let mut preamble = String::new();
+    let mut heading_set = false;
+    let mut math_set = false;
 
     // Check for academic template first
     if let Some(template) = doc_class.academic_template() {
@@ -425,12 +427,21 @@ pub fn generate_typst_preamble(doc_class: &DocumentClass) -> String {
             } else {
                 preamble.push_str("#set heading(numbering: \"1.\")\n");
             }
+            heading_set = true;
         }
 
         // Math equation numbering
         if let Some(numbering) = cfg.math_numbering {
             let _ = writeln!(preamble, "#set math.equation(numbering: \"{}\")", numbering);
+            math_set = true;
         }
+    }
+
+    if !heading_set {
+        preamble.push_str("#set heading(numbering: \"1.\")\n");
+    }
+    if !math_set {
+        preamble.push_str("#set math.equation(numbering: \"(1)\")\n");
     }
 
     // Draft watermark
@@ -498,6 +509,21 @@ fn generate_academic_preamble(
     output.push('\n');
 }
 
+fn render_author_content(text: &str) -> String {
+    let parts: Vec<&str> = text.split(r"\\").map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    if parts.len() <= 1 {
+        return text.trim().to_string();
+    }
+    let mut out = String::new();
+    for (idx, part) in parts.iter().enumerate() {
+        if idx > 0 {
+            out.push_str(" #linebreak() ");
+        }
+        out.push_str(part);
+    }
+    out
+}
+
 /// Generate title block from metadata
 pub fn generate_title_block(
     title: Option<&str>,
@@ -517,14 +543,17 @@ pub fn generate_title_block(
         }
 
         if let Some(a) = author {
-            // Handle multiple authors separated by \and
-            let authors: Vec<&str> = a.split(r"\and").collect();
+            // Handle multiple authors separated by \and/\And/\AND
+            let normalized = a.replace(r"\And", r"\and").replace(r"\AND", r"\and");
+            let authors: Vec<&str> = normalized.split(r"\and").collect();
             if authors.len() == 1 {
-                let _ = writeln!(output, "  #text(size: 12pt)[{}]", a.trim());
+                let content = render_author_content(a.trim());
+                let _ = writeln!(output, "  #text(size: 12pt)[{}]", content);
             } else {
                 output.push_str("  #stack(dir: ltr, spacing: 2em,\n");
                 for auth in authors {
-                    let _ = writeln!(output, "    text(size: 12pt)[{}],", auth.trim());
+                    let content = render_author_content(auth.trim());
+                    let _ = writeln!(output, "    text(size: 12pt)[{}],", content);
                 }
                 output.push_str("  )\n");
             }

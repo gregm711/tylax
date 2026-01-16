@@ -1,0 +1,14 @@
+# name path
+mit-thesis latex-corpus/thesis/mit/MIT-Thesis.tex
+stanford-thesis latex-corpus/thesis/stanford/main.tex
+ucb-thesis latex-corpus/thesis/ucb/ucbthesis/thesis.tex
+princeton-thesis latex-corpus/thesis/princeton/main.tex
+harvard-thesis latex-corpus/thesis/harvard/thesis.tex
+caltech-thesis latex-corpus/thesis/caltech/caltech-thesis-example.tex
+michigan-thesis latex-corpus/thesis/michigan/thesis-sample.tex
+ucla-thesis latex-corpus/thesis/ucla/demo.tex
+imperial-thesis latex-corpus/thesis/imperial/thesis.tex
+cmu-thesis latex-corpus/thesis/cmu/cmuthesis_template.tex
+ethz-thesis latex-corpus/thesis/ethz/thesis.tex
+oxford-thesis latex-corpus/thesis/oxford-cambridge/sample_dphil_thesis.tex
+dissertate-thesis latex-corpus/thesis/dissertate/assets/latex-base/dissertation.tex

@@ -3,6 +3,7 @@
 //! This module contains pure utility functions that don't depend on converter state.
 
 use mitex_parser::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
+use std::collections::HashSet;
 
 // =============================================================================
 // Text Processing Utilities
@@ -68,6 +69,935 @@ pub fn normalize_cell_text(text: &str) -> String {
 /// Converts colons to hyphens since Typst labels work better with hyphens
 pub fn sanitize_label(label: &str) -> String {
     label.replace([':', ' ', '_'], "-")
+}
+
+/// Sanitize citation keys for Typst compatibility (allow only alphanumeric and hyphen).
+pub fn sanitize_citation_key(key: &str) -> String {
+    let mut out = String::with_capacity(key.len());
+    let mut prev_dash = false;
+    for ch in key.chars() {
+        let mapped = if ch.is_ascii_alphanumeric() || ch == '-' {
+            ch
+        } else {
+            '-'
+        };
+        if mapped == '-' {
+            if prev_dash {
+                continue;
+            }
+            prev_dash = true;
+        } else {
+            prev_dash = false;
+        }
+        out.push(mapped);
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        key.trim().to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// Collect bibliography entries from LaTeX source.
+pub fn collect_bibliography_entries(input: &str) -> Vec<String> {
+    let mut entries = Vec::new();
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && (input[i..].starts_with("\\bibliography")
+                || input[i..].starts_with("\\addbibresource")
+                || input[i..].starts_with("\\bibdata"))
+        {
+            let (cmd, after) = if input[i..].starts_with("\\bibliography") {
+                ("\\bibliography", i + "\\bibliography".len())
+            } else if input[i..].starts_with("\\addbibresource") {
+                ("\\addbibresource", i + "\\addbibresource".len())
+            } else {
+                ("\\bibdata", i + "\\bibdata".len())
+            };
+            // Avoid \bibliographystyle
+            if cmd == "\\bibliography" && after < bytes.len() && bytes[after].is_ascii_alphabetic() {
+                i += 1;
+                continue;
+            }
+            let mut j = after;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'{' {
+                let (content, used) = extract_braced_content(&input[j..]);
+                if let Some(raw) = content {
+                    for part in raw.split(',') {
+                        let trimmed = part.trim();
+                        if !trimmed.is_empty() {
+                            entries.push(trimmed.to_string());
+                        }
+                    }
+                    i = j + used;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    entries
+}
+
+/// Collect \graphicspath{{...}{...}} entries from LaTeX source.
+pub fn collect_graphicspath_entries(input: &str) -> Vec<String> {
+    let mut entries = Vec::new();
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && input[i..].starts_with("\\graphicspath") {
+            let after = i + "\\graphicspath".len();
+            if after < bytes.len() && bytes[after].is_ascii_alphabetic() {
+                i += 1;
+                continue;
+            }
+            let mut j = after;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'{' {
+                let (content, used) = extract_braced_content(&input[j..]);
+                if let Some(raw) = content {
+                    let mut groups = parse_braced_groups(&raw);
+                    if groups.is_empty() {
+                        let trimmed = raw.trim();
+                        if !trimmed.is_empty() {
+                            groups.push(trimmed.to_string());
+                        }
+                    }
+                    for group in groups {
+                        let trimmed = group.trim();
+                        if !trimmed.is_empty() {
+                            entries.push(trimmed.to_string());
+                        }
+                    }
+                    i = j + used;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    entries
+}
+
+/// Collect \includegraphics{...} paths from LaTeX source.
+pub fn collect_includegraphics_paths(input: &str) -> Vec<String> {
+    let mut entries = Vec::new();
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && input[i..].starts_with("\\includegraphics") {
+            let mut j = i + "\\includegraphics".len();
+            if j < bytes.len() && bytes[j] == b'*' {
+                j += 1;
+            }
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'[' {
+                let mut depth = 0i32;
+                while j < bytes.len() {
+                    match bytes[j] {
+                        b'[' => depth += 1,
+                        b']' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                j += 1;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+            }
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'{' {
+                let (content, used) = extract_braced_content(&input[j..]);
+                if let Some(path) = content {
+                    let trimmed = path.trim();
+                    if !trimmed.is_empty() {
+                        entries.push(trimmed.to_string());
+                    }
+                    i = j + used;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    entries
+}
+
+/// Sanitize BibTeX content for Typst compatibility.
+pub fn sanitize_bibtex_content(input: &str) -> String {
+    let converted = convert_string_entries(input);
+    sanitize_bibtex_keys(&converted)
+}
+
+/// Strip stars from common sectioning commands (e.g., \chapter* -> \chapter).
+pub fn strip_sectioning_stars(input: &str) -> String {
+    let mut out = input.to_string();
+    for cmd in ["chapter", "section", "subsection", "subsubsection", "part"] {
+        let needle = format!("\\{}*", cmd);
+        let replacement = format!("\\{}", cmd);
+        out = out.replace(&needle, &replacement);
+    }
+    out
+}
+
+/// Strip optional bracket arguments from specific environments (e.g., nomenclature).
+pub fn strip_env_options(input: &str, envs: &[&str]) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if i + 7 <= bytes.len() && &bytes[i..i + 7] == b"\\begin{" {
+            let start = i;
+            let mut j = i + 7;
+            while j < bytes.len() && bytes[j] != b'}' {
+                j += 1;
+            }
+            if j < bytes.len() {
+                if let Ok(env_name) = std::str::from_utf8(&bytes[i + 7..j]) {
+                    if envs.iter().any(|e| *e == env_name) {
+                        let end = j + 1;
+                        out.extend_from_slice(&bytes[start..end]);
+                        i = end;
+                        // Skip optional bracket groups after \begin{env}
+                        loop {
+                            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                                out.push(bytes[i]);
+                                i += 1;
+                            }
+                            if i < bytes.len() && bytes[i] == b'[' {
+                                let mut depth = 0i32;
+                                let mut k = i;
+                                while k < bytes.len() {
+                                    match bytes[k] {
+                                        b'[' => depth += 1,
+                                        b']' => {
+                                            depth -= 1;
+                                            if depth == 0 {
+                                                k += 1;
+                                                break;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                    k += 1;
+                                }
+                                i = k;
+                                continue;
+                            }
+                            break;
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
+}
+
+/// Strip optional bracket arguments from specific commands (e.g., \blindtext[2]).
+pub fn strip_command_optional_arg(input: &str, commands: &[&str]) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            for cmd in commands {
+                let needle = cmd.as_bytes();
+                if i + 1 + needle.len() <= bytes.len()
+                    && &bytes[i + 1..i + 1 + needle.len()] == needle
+                {
+                    let mut j = i + 1 + needle.len();
+                    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                        out.push(bytes[j]);
+                        j += 1;
+                    }
+                    if j < bytes.len() && bytes[j] == b'[' {
+                        let mut depth = 0i32;
+                        let mut k = j;
+                        while k < bytes.len() {
+                            match bytes[k] {
+                                b'[' => depth += 1,
+                                b']' => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        k += 1;
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                            k += 1;
+                        }
+                        out.extend_from_slice(&bytes[i..i + 1 + needle.len()]);
+                        i = k;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
+}
+
+/// Replace inline math blocks that only contain a superscript (e.g., $^{th}$) with \textsuperscript{...}.
+pub fn replace_empty_math_superscripts(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            if i + 1 < bytes.len() {
+                out.push(bytes[i] as char);
+                out.push(bytes[i + 1] as char);
+                i += 2;
+                continue;
+            }
+        }
+        if bytes[i] == b'$' {
+            if i > 0 && bytes[i - 1] == b'\\' {
+                out.push('$');
+                i += 1;
+                continue;
+            }
+            let mut j = i + 1;
+            while j < bytes.len() {
+                if bytes[j] == b'$' && bytes[j - 1] != b'\\' {
+                    break;
+                }
+                j += 1;
+            }
+            if j < bytes.len() && j > i + 1 {
+                let inner = &input[i + 1..j];
+                let trimmed = inner.trim_start();
+                if trimmed.starts_with('^') {
+                    let mut content = trimmed.trim_start_matches('^').trim();
+                    if content.starts_with('{') && content.ends_with('}') && content.len() >= 2 {
+                        content = &content[1..content.len() - 1];
+                        content = content.trim();
+                    }
+                    out.push_str("\\textsuperscript{");
+                    out.push_str(content);
+                    out.push('}');
+                    i = j + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Avoid accidental "*/" sequences before loss markers (e.g. "*/* tylax:loss:" -> "* /* tylax:loss:")
+pub fn sanitize_loss_comment_boundaries(input: &str) -> String {
+    input.replace("*/* tylax:loss:", "* /* tylax:loss:")
+}
+
+fn convert_string_entries(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'@' {
+            let tail = &input[i..];
+            if tail.len() >= 8 && tail[..8].eq_ignore_ascii_case("@string(") {
+                out.push_str("@string{");
+                let mut j = i + 8;
+                let mut depth = 1usize;
+                while j < bytes.len() {
+                    match bytes[j] as char {
+                        '(' => depth += 1,
+                        ')' => {
+                            depth = depth.saturating_sub(1);
+                            if depth == 0 {
+                                out.push_str(&input[i + 8..j]);
+                                out.push('}');
+                                i = j + 1;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                if j >= bytes.len() {
+                    out.push_str(&input[i + 8..]);
+                    break;
+                }
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+fn sanitize_bibtex_keys(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'@' {
+            let start = i;
+            i += 1;
+            let mut entry_type = String::new();
+            while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+                entry_type.push(bytes[i] as char);
+                i += 1;
+            }
+            let mut j = i;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && (bytes[j] == b'{' || bytes[j] == b'(') {
+                let open = bytes[j] as char;
+                j += 1;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let key_start = j;
+                while j < bytes.len() && bytes[j] != b',' && bytes[j] != b'\n' && bytes[j] != b'\r' {
+                    j += 1;
+                }
+                let key_raw = input[key_start..j].trim();
+                let mut k = j;
+                while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                    k += 1;
+                }
+                if k < bytes.len() && bytes[k] == b',' {
+                    let sanitized = sanitize_citation_key(key_raw);
+                    out.push('@');
+                    out.push_str(&entry_type);
+                    out.push(open);
+                    out.push_str(&sanitized);
+                    out.push(',');
+                    i = k + 1;
+                    continue;
+                }
+            }
+            out.push_str(&input[start..i]);
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Escape plain text for Typst markup.
+/// This is applied to non-math text tokens to avoid accidental markup (e.g., emails, underscores).
+pub fn escape_typst_text(text: &str) -> String {
+    let mut out = String::new();
+    for ch in text.chars() {
+        match ch {
+            '@' | '_' | '*' | '#' | '$' | '`' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Escape content for Typst string literals.
+pub fn escape_typst_string(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "")
+}
+
+/// Escape '@' occurrences that are not valid Typst references or citations.
+pub fn escape_at_in_words(input: &str) -> String {
+    let labels = collect_emitted_labels(input);
+    let mut out = String::with_capacity(input.len());
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len();
+    let mut i = 0usize;
+
+    while i < len {
+        let ch = chars[i];
+        if ch == '@' {
+            let prev = if i > 0 { Some(chars[i - 1]) } else { None };
+            let prev_is_escape = prev == Some('\\');
+            let mut k = i;
+            while k > 0 && chars[k - 1].is_whitespace() {
+                k -= 1;
+            }
+            let prev_nonspace = if k > 0 { Some(chars[k - 1]) } else { None };
+            let prev_is_cite = matches!(prev_nonspace, Some('[') | Some(';') | Some(','));
+
+            // Extract candidate label after '@'
+            let mut j = i + 1;
+            while j < len && (chars[j].is_ascii_alphanumeric() || chars[j] == '-') {
+                j += 1;
+            }
+            let candidate: String = chars[i + 1..j].iter().collect();
+
+            if !prev_is_escape && !prev_is_cite && !candidate.is_empty() && !labels.contains(&candidate) {
+                out.push('\\');
+                out.push('@');
+                i += 1;
+                continue;
+            }
+        }
+        out.push(ch);
+        i += 1;
+    }
+    out
+}
+
+/// Normalize LaTeX-style quotes to plain double quotes.
+pub fn normalize_latex_quotes(input: &str) -> String {
+    let mut out = input.replace("\\`\\`", "\"");
+    out = out.replace("``", "\"");
+    out = out.replace("''", "\"");
+    out
+}
+
+/// Replace \verb delimiters with a brace-based \texttt{...} form so the parser can handle it.
+pub fn replace_verb_commands(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            if input[i..].starts_with("\\verb") {
+                let mut j = i + 5;
+                if j < bytes.len() && bytes[j] == b'*' {
+                    j += 1;
+                }
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j >= bytes.len() {
+                    out.push_str(&input[i..]);
+                    break;
+                }
+                let delim = bytes[j] as char;
+                j += 1;
+                let start = j;
+                while j < bytes.len() && bytes[j] as char != delim {
+                    j += 1;
+                }
+                if j >= bytes.len() {
+                    out.push_str(&input[i..]);
+                    break;
+                }
+                let content = &input[start..j];
+                let mut escaped = String::with_capacity(content.len());
+                for ch in content.chars() {
+                    match ch {
+                        '{' => escaped.push_str("\\{"),
+                        '}' => escaped.push_str("\\}"),
+                        _ => escaped.push(ch),
+                    }
+                }
+                out.push_str("\\texttt{");
+                out.push_str(&escaped);
+                out.push('}');
+                i = j + 1;
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Collect all \label{...} occurrences from LaTeX source.
+pub fn collect_labels(input: &str) -> HashSet<String> {
+    let mut labels = HashSet::new();
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        // Skip comments
+        if bytes[i] == b'%' {
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'\\' && input[i..].starts_with("\\label") {
+            let after = i + 6;
+            if after < bytes.len() && bytes[after].is_ascii_alphabetic() {
+                i += 1;
+                continue;
+            }
+            let mut j = after;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'{' {
+                let (content, consumed) = extract_braced_content(&input[j..]);
+                if let Some(label) = content {
+                    labels.insert(sanitize_label(label.trim()));
+                    i = j + consumed;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    labels
+}
+
+fn extract_braced_content(input: &str) -> (Option<String>, usize) {
+    let mut depth = 0usize;
+    let mut start = None;
+    for (idx, ch) in input.char_indices() {
+        match ch {
+            '{' => {
+                depth += 1;
+                if depth == 1 {
+                    start = Some(idx + 1);
+                }
+            }
+            '}' => {
+                if depth > 0 {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(s) = start {
+                            return (Some(input[s..idx].to_string()), idx + 1);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    (None, 0)
+}
+
+fn parse_braced_groups(input: &str) -> Vec<String> {
+    let mut groups = Vec::new();
+    let mut depth = 0usize;
+    let mut start: Option<usize> = None;
+    for (idx, ch) in input.char_indices() {
+        match ch {
+            '{' => {
+                if depth == 0 {
+                    start = Some(idx + 1);
+                }
+                depth += 1;
+            }
+            '}' => {
+                if depth > 0 {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(s) = start {
+                            groups.push(input[s..idx].to_string());
+                        }
+                        start = None;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    groups
+}
+
+/// Resolve reference placeholders emitted during conversion using labels present in the output.
+pub fn resolve_reference_markers(input: &str) -> String {
+    const REF_MARKER: &str = "__TYLAX_REF__";
+    const EQREF_MARKER: &str = "__TYLAX_EQREF__";
+    const PAGEREF_MARKER: &str = "__TYLAX_PAGEREF__";
+
+    let labels = collect_emitted_labels(input);
+
+    let mut out = replace_marker(input, REF_MARKER, |label| {
+        if labels.contains(label) {
+            format!("@{}", label)
+        } else {
+            format!("\\@{}", label)
+        }
+    });
+    out = replace_marker(&out, EQREF_MARKER, |label| {
+        if labels.contains(label) {
+            format!("(@{})", label)
+        } else {
+            format!("(\\@{})", label)
+        }
+    });
+    out = replace_marker(&out, PAGEREF_MARKER, |label| {
+        if labels.contains(label) {
+            format!("#context locate(<{}>).page()", label)
+        } else {
+            format!("\\@{}", label)
+        }
+    });
+    out
+}
+
+/// Attach standalone label lines to the previous non-empty line.
+pub fn attach_orphan_labels(input: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut last_content_idx: Option<usize> = None;
+
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if is_label_only(trimmed) {
+            if let Some(idx) = last_content_idx {
+                let prev_raw = lines[idx].trim_end().to_string();
+                let mut merged = prev_raw.clone();
+                if !merged.ends_with('>') {
+                    if let Some(last) = prev_raw.chars().last() {
+                        if last == '_' || last == '*' {
+                            let count = prev_raw.chars().filter(|c| *c == last).count();
+                            if count % 2 == 1 {
+                                // Likely opening emphasis marker - insert label before it.
+                                let core = &prev_raw[..prev_raw.len() - 1];
+                                let tail = &prev_raw[prev_raw.len() - 1..];
+                                merged = format!("{} {}{}", core, trimmed, tail);
+                                lines[idx] = merged;
+                                continue;
+                            }
+                        }
+                    }
+                    merged.push(' ');
+                    merged.push_str(trimmed);
+                    lines[idx] = merged;
+                } else {
+                    lines.push(line.to_string());
+                }
+            } else {
+                lines.push(line.to_string());
+            }
+        } else {
+            if !trimmed.is_empty() {
+                last_content_idx = Some(lines.len());
+            }
+            lines.push(line.to_string());
+        }
+    }
+
+    lines.join("\n")
+}
+
+fn is_label_only(s: &str) -> bool {
+    s.starts_with('<')
+        && s.ends_with('>')
+        && !s.contains(' ')
+        && s.len() > 2
+        && s[1..s.len() - 1]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+fn collect_emitted_labels(input: &str) -> HashSet<String> {
+    let mut labels = HashSet::new();
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != b'>' && !bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'>' && j > i + 1 {
+                let candidate = &input[i + 1..j];
+                if candidate
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-')
+                {
+                    labels.insert(candidate.to_string());
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    labels
+}
+
+fn replace_marker<F>(input: &str, marker: &str, mut f: F) -> String
+where
+    F: FnMut(&str) -> String,
+{
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0usize;
+    while let Some(pos) = input[i..].find(marker) {
+        let start = i + pos;
+        out.push_str(&input[i..start]);
+        let label_start = start + marker.len();
+        if let Some(end_rel) = input[label_start..].find("__") {
+            let label_end = label_start + end_rel;
+            let label = &input[label_start..label_end];
+            out.push_str(&f(label));
+            i = label_end + 2;
+        } else {
+            out.push_str(&input[start..]);
+            return out;
+        }
+    }
+    out.push_str(&input[i..]);
+    out
+}
+
+/// Expand \input{...} and \include{...} directives using the filesystem.
+pub fn expand_latex_inputs(input: &str, base_dir: &std::path::Path) -> String {
+    let mut seen = HashSet::new();
+    expand_latex_inputs_inner(input, base_dir, 0, &mut seen)
+}
+
+fn expand_latex_inputs_inner(
+    input: &str,
+    base_dir: &std::path::Path,
+    depth: usize,
+    seen: &mut HashSet<std::path::PathBuf>,
+) -> String {
+    const MAX_DEPTH: usize = 12;
+    if depth > MAX_DEPTH {
+        return input.to_string();
+    }
+
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            let remaining = &input[i..];
+            let (_cmd, cmd_len) = if remaining.starts_with("\\input") {
+                ("\\input", 6usize)
+            } else if remaining.starts_with("\\include") {
+                ("\\include", 8usize)
+            } else {
+                ("", 0usize)
+            };
+            if cmd_len > 0 {
+                // Avoid matching commands like \inputenc
+                if i + cmd_len < bytes.len() && bytes[i + cmd_len].is_ascii_alphabetic() {
+                    out.push(bytes[i] as char);
+                    i += 1;
+                    continue;
+                }
+                let mut j = i + cmd_len;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let mut path_str = String::new();
+                let mut end_idx = 0usize;
+                if j < bytes.len() && bytes[j] == b'{' {
+                    let (content, used) = extract_braced_content(&input[j..]);
+                    if let Some(c) = content {
+                        path_str = c;
+                        end_idx = j + used;
+                    }
+                } else {
+                    let start = j;
+                    while j < bytes.len() && !bytes[j].is_ascii_whitespace() {
+                        j += 1;
+                    }
+                    if j > start {
+                        path_str = input[start..j].to_string();
+                        end_idx = j;
+                    }
+                }
+
+                if !path_str.is_empty() {
+                    let mut path = std::path::PathBuf::from(path_str.trim());
+                    if path.extension().is_none() {
+                        path.set_extension("tex");
+                    }
+                    let full_path = if path.is_absolute() {
+                        path
+                    } else {
+                        base_dir.join(path)
+                    };
+
+                    if seen.contains(&full_path) {
+                        if end_idx > i {
+                            out.push_str(&input[i..end_idx]);
+                            i = end_idx;
+                            continue;
+                        }
+                    }
+
+                    if let Ok(content) = std::fs::read_to_string(&full_path) {
+                        seen.insert(full_path.clone());
+                        let next_base = full_path.parent().unwrap_or(base_dir);
+                        let expanded = expand_latex_inputs_inner(&content, next_base, depth + 1, seen);
+                        out.push_str(&expanded);
+                        if end_idx > 0 {
+                            i = end_idx;
+                        } else {
+                            i = j;
+                        }
+                        continue;
+                    } else if end_idx > i {
+                        out.push_str(&input[i..end_idx]);
+                        i = end_idx;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Strip occurrences of \command{...} (single braced argument) from LaTeX source.
+pub fn strip_command_with_braced_arg(input: &str, cmd: &str) -> String {
+    let needle = format!("\\{}", cmd);
+    let mut out = String::with_capacity(input.len());
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            let remaining: String = chars[i..].iter().collect();
+            if remaining.starts_with(&needle) {
+                let mut j = i + needle.len();
+                while j < chars.len() && chars[j].is_whitespace() {
+                    j += 1;
+                }
+                if j < chars.len() && chars[j] == '{' {
+                    let mut depth = 1usize;
+                    j += 1;
+                    while j < chars.len() && depth > 0 {
+                        match chars[j] {
+                            '{' => depth += 1,
+                            '}' => depth = depth.saturating_sub(1),
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                    i = j;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
 }
 
 /// Convert integer to Roman numeral
@@ -483,4 +1413,155 @@ pub fn convert_caption_text(text: &str) -> String {
     }
 
     result
+}
+
+/// Convert author text while preserving \\ and \and separators and dropping footnotes.
+pub fn convert_author_text(text: &str) -> String {
+    fn read_braced(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
+        while let Some(&' ') = chars.peek() {
+            chars.next();
+        }
+        if chars.peek() != Some(&'{') {
+            return None;
+        }
+        chars.next(); // consume '{'
+        let mut depth = 1i32;
+        let mut content = String::new();
+        for ch in chars.by_ref() {
+            match ch {
+                '{' => {
+                    depth += 1;
+                    content.push(ch);
+                }
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    content.push(ch);
+                }
+                _ => content.push(ch),
+            }
+        }
+        Some(content)
+    }
+
+    let mut result = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '$' {
+            // Preserve inline math by converting to Typst math.
+            let mut math_content = String::new();
+            while let Some(&next) = chars.peek() {
+                if next == '$' {
+                    chars.next();
+                    break;
+                }
+                math_content.push(chars.next().unwrap());
+            }
+            let converted = super::latex_math_to_typst(&math_content);
+            result.push('$');
+            result.push_str(&converted);
+            result.push('$');
+        } else if ch == '\\' {
+            let mut cmd = String::new();
+            while let Some(&next) = chars.peek() {
+                if next.is_ascii_alphabetic() {
+                    cmd.push(chars.next().unwrap());
+                } else {
+                    break;
+                }
+            }
+
+            match cmd.as_str() {
+                "" => {
+                    if let Some(&next) = chars.peek() {
+                        match next {
+                            '\\' => {
+                                chars.next();
+                                result.push_str("\\\\");
+                            }
+                            '&' => {
+                                chars.next();
+                                result.push('&');
+                            }
+                            '%' => {
+                                chars.next();
+                                result.push('%');
+                            }
+                            '_' => {
+                                chars.next();
+                                result.push('_');
+                            }
+                            '#' => {
+                                chars.next();
+                                result.push('#');
+                            }
+                            '{' => {
+                                chars.next();
+                                result.push('{');
+                            }
+                            '}' => {
+                                chars.next();
+                                result.push('}');
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                "and" | "And" | "AND" => {
+                    result.push_str("\\and");
+                }
+                "thanks" | "footnote" | "footnotemark" | "footnotetext" => {
+                    let _ = read_braced(&mut chars);
+                }
+                "texttt" | "textbf" | "textit" | "emph" | "textsc" | "underline" | "textrm"
+                | "text" | "mbox" | "hbox" | "textsf" => {
+                    if let Some(content) = read_braced(&mut chars) {
+                        result.push_str(&convert_author_text(&content));
+                    }
+                }
+                "LaTeX" => result.push_str("LaTeX"),
+                "TeX" => result.push_str("TeX"),
+                "XeTeX" => result.push_str("XeTeX"),
+                "LuaTeX" => result.push_str("LuaTeX"),
+                "pdfTeX" => result.push_str("pdfTeX"),
+                "BibTeX" => result.push_str("BibTeX"),
+                _ => {
+                    if let Some(content) = read_braced(&mut chars) {
+                        result.push_str(&convert_author_text(&content));
+                    }
+                }
+            }
+        } else if ch == '%' {
+            // Skip LaTeX comments inside author blocks.
+            while let Some(next) = chars.next() {
+                if next == '\n' {
+                    break;
+                }
+            }
+        } else if ch == '~' {
+            result.push(' ');
+        } else {
+            result.push(ch);
+        }
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::convert_author_text;
+
+    #[test]
+    fn author_text_drops_thanks_and_comments() {
+        let input = "John Doe\\thanks{note} \\\\\nDept\\And Jane % comment\n";
+        let out = convert_author_text(input);
+        assert!(!out.contains("note"));
+        assert!(!out.contains('%'));
+        assert!(out.contains("\\\\"));
+        assert!(out.contains("\\and"));
+    }
 }

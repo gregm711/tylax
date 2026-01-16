@@ -19,6 +19,7 @@ test_outputs/*
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+__pycache__/
 
 # IDEs & Editors
 .idea/

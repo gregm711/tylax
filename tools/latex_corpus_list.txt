@@ -1,0 +1,11 @@
+# name path
+ieee latex-corpus/ieee/main.tex
+acm latex-corpus/acm/main.tex
+lncs latex-corpus/lncs/main.tex
+elsarticle latex-corpus/elsarticle/main.tex
+cvpr latex-corpus/cvpr/main.tex
+eccv latex-corpus/eccv/main.tex
+iclr latex-corpus/iclr/main.tex
+icml latex-corpus/icml/main.tex
+neurips latex-corpus/neurips/main.tex
+aaai latex-corpus/aaai/main.tex
