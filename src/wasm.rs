@@ -135,7 +135,14 @@ pub fn latex_to_typst_wasm(input: &str) -> String {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(js_name = "typstToLatex")]
 pub fn typst_to_latex_wasm(input: &str) -> String {
-    crate::typst_to_latex(input)
+    // Use math_only mode for bare math expressions (without $ delimiters)
+    crate::typst_to_latex_with_options(
+        input,
+        &crate::T2LOptions {
+            math_only: true,
+            ..Default::default()
+        },
+    )
 }
 
 /// Convert LaTeX document to Typst document
