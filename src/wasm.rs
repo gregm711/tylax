@@ -45,6 +45,12 @@ pub struct T2LConvertOptions {
     /// Whether we're in block math mode (affects display/inline conversion)
     #[serde(default = "default_true")]
     pub block_math_mode: bool,
+    /// Whether to expand Typst macros/scripts using MiniEval (default: true)
+    /// Only applies when full_document is true (document mode).
+    /// When enabled, #let, #for, #if, and function calls will be evaluated.
+    /// Math mode (full_document: false) never uses MiniEval for better performance.
+    #[serde(default = "default_true")]
+    pub expand_macros: bool,
 }
 
 /// Legacy conversion options for backwards compatibility
@@ -65,6 +71,24 @@ pub struct ConvertOptions {
 #[cfg(feature = "wasm")]
 fn default_true() -> bool {
     true
+}
+
+/// Safely serialize a value to JsValue, returning an error object on failure.
+///
+/// This prevents panics from `unwrap()` when serialization fails.
+#[cfg(feature = "wasm")]
+fn to_js_value<T: Serialize>(value: &T) -> JsValue {
+    serde_wasm_bindgen::to_value(value).unwrap_or_else(|e| {
+        // Create a minimal error object that JavaScript can handle
+        let error_obj = ConvertResult {
+            output: String::new(),
+            success: false,
+            error: Some(format!("Serialization error: {}", e)),
+            warnings: vec![],
+        };
+        // This inner serialization should always succeed for simple structs
+        serde_wasm_bindgen::to_value(&error_obj).unwrap_or(JsValue::NULL)
+    })
 }
 
 /// Conversion result with additional metadata
@@ -133,11 +157,12 @@ pub fn latex_document_to_typst_wasm(input: &str) -> String {
 /// * `input` - Full Typst document
 ///
 /// # Returns
-/// LaTeX document
+/// LaTeX document (with MiniEval macro expansion)
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(js_name = "typstDocumentToLatex")]
 pub fn typst_document_to_latex_wasm(input: &str) -> String {
-    crate::typst_document_to_latex(input)
+    // Use MiniEval for full document conversion to handle #let, #for, etc.
+    crate::typst_to_latex_with_eval(input, &crate::T2LOptions::full_document())
 }
 
 /// Convert LaTeX to Typst with options
@@ -146,14 +171,15 @@ pub fn typst_document_to_latex_wasm(input: &str) -> String {
 pub fn latex_to_typst_with_options_wasm(input: &str, options: JsValue) -> JsValue {
     let opts: L2TConvertOptions = serde_wasm_bindgen::from_value(options).unwrap_or_default();
 
-    // Convert WASM options to internal L2TOptions
+    // Convert WASM options to internal L2TOptions using struct update syntax.
+    // This ensures new fields with defaults don't cause compile errors.
     let l2t_opts = crate::L2TOptions {
         prefer_shorthands: opts.prefer_shorthands,
         frac_to_slash: opts.frac_to_slash,
         infty_to_oo: opts.infty_to_oo,
-        keep_spaces: false,
         non_strict: opts.non_strict,
         optimize: opts.optimize,
+        ..Default::default()
     };
 
     let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -191,7 +217,7 @@ pub fn latex_to_typst_with_options_wasm(input: &str, options: JsValue) -> JsValu
         }
     };
 
-    serde_wasm_bindgen::to_value(&result).unwrap()
+    to_js_value(&result)
 }
 
 /// Convert Typst to LaTeX with options
@@ -211,7 +237,13 @@ pub fn typst_to_latex_with_options_wasm(input: &str, options: JsValue) -> JsValu
     };
 
     let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        crate::typst_to_latex_with_options(input, &t2l_opts)
+        // Use MiniEval only for document mode (full_document: true) when expand_macros is enabled.
+        // Math mode (full_document: false) never uses MiniEval for performance.
+        if opts.full_document && opts.expand_macros {
+            crate::typst_to_latex_with_eval(input, &t2l_opts)
+        } else {
+            crate::typst_to_latex_with_options(input, &t2l_opts)
+        }
     })) {
         Ok(output) => ConvertResult {
             output,
@@ -237,7 +269,7 @@ pub fn typst_to_latex_with_options_wasm(input: &str, options: JsValue) -> JsValu
         }
     };
 
-    serde_wasm_bindgen::to_value(&result).unwrap()
+    to_js_value(&result)
 }
 
 /// Detect input format (latex or typst)
@@ -302,7 +334,7 @@ pub fn check_latex_wasm(input: &str) -> JsValue {
         infos,
         has_errors: result.has_errors(),
     };
-    serde_wasm_bindgen::to_value(&summary).unwrap()
+    to_js_value(&summary)
 }
 
 /// Summary of LaTeX check results
@@ -403,31 +435,28 @@ pub fn preview_table_wasm(input: &str, format: &str) -> JsValue {
             if let Some(table) = parse_latex_table(input) {
                 table_to_preview_data(&table)
             } else {
-                return serde_wasm_bindgen::to_value(&TablePreviewError {
+                return to_js_value(&TablePreviewError {
                     error: "Failed to parse LaTeX table".to_string(),
-                })
-                .unwrap();
+                });
             }
         }
         "typst" => {
             if let Some(table) = parse_typst_table(input) {
                 table_to_preview_data(&table)
             } else {
-                return serde_wasm_bindgen::to_value(&TablePreviewError {
+                return to_js_value(&TablePreviewError {
                     error: "Failed to parse Typst table".to_string(),
-                })
-                .unwrap();
+                });
             }
         }
         _ => {
-            return serde_wasm_bindgen::to_value(&TablePreviewError {
+            return to_js_value(&TablePreviewError {
                 error: format!("Unknown format: {}", format),
-            })
-            .unwrap()
+            });
         }
     };
 
-    serde_wasm_bindgen::to_value(&result).unwrap()
+    to_js_value(&result)
 }
 
 /// Error response for table preview

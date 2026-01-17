@@ -1,6 +1,6 @@
 [package]
 name = "tylax"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Tylax - High-performance bidirectional LaTeX ↔ Typst converter"
 license = "Apache-2.0"
@@ -34,7 +34,7 @@ mitex-spec = "0.2"
 mitex-spec-gen = "0.2"
 
 # Typst dependencies
-typst-syntax = "0.11"
+typst-syntax = "0.14"
 
 # Utilities
 clap = { version = "4.4", features = ["derive"], optional = true }
@@ -43,6 +43,8 @@ lazy_static = "1.4"
 phf = { version = "0.11", features = ["macros"] }
 regex = "1.10"
 rowan = "0.15"
+chrono = "0.4"
+indexmap = "2.2"
 
 # WASM dependencies
 wasm-bindgen = { version = "0.2", optional = true }
@@ -50,10 +52,17 @@ console_error_panic_hook = { version = "0.1", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
 
+# Data loading (optional, for MiniEval data loading functions)
+serde_json = { version = "1.0", optional = true }
+serde_yaml = { version = "0.9", optional = true }
+csv = { version = "1.3", optional = true }
+toml = { version = "0.8", optional = true }
+
 [features]
 default = ["cli"]
 cli = ["dep:clap"]
 wasm = ["dep:wasm-bindgen", "dep:console_error_panic_hook", "dep:serde", "dep:serde-wasm-bindgen"]
+data-loading = ["dep:serde", "dep:serde_json", "dep:serde_yaml", "dep:csv", "dep:toml"]
 
 [dev-dependencies]
 pretty_assertions = "1.4"

@@ -7,6 +7,7 @@ use crate::core::typst2latex::markup::convert_markup_node;
 use crate::core::typst2latex::utils::{get_simple_text, is_color_name, typst_color_to_latex};
 
 /// LaTeX cell alignment options
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum LatexCellAlign {
     Left,
@@ -19,7 +20,7 @@ pub enum LatexCellAlign {
 
 impl LatexCellAlign {
     /// Convert to LaTeX column specification character
-    pub fn to_char(&self) -> char {
+    pub fn to_char(self) -> char {
         match self {
             LatexCellAlign::Left => 'l',
             LatexCellAlign::Center => 'c',
@@ -86,6 +87,7 @@ impl LatexCell {
     }
 
     /// Create a cell with all attributes
+    #[allow(dead_code)]
     pub fn with_spans(content: String, rowspan: usize, colspan: usize) -> Self {
         LatexCell {
             content,

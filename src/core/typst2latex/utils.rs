@@ -193,24 +193,6 @@ lazy_static! {
     };
 }
 
-/// Convert Unicode math characters to LaTeX commands
-pub fn unicode_to_latex(text: &str) -> String {
-    let mut result = String::with_capacity(text.len() * 2);
-
-    for ch in text.chars() {
-        if let Some(latex) = UNICODE_TO_LATEX.get(&ch) {
-            result.push_str(latex);
-            // Add space after command if next char is a letter
-            result.push(' ');
-        } else {
-            result.push(ch);
-        }
-    }
-
-    // Clean up extra spaces
-    result.replace("  ", " ").trim_end().to_string()
-}
-
 /// Escape special LaTeX characters in text
 pub fn escape_latex_text(text: &str) -> String {
     text.replace('\\', "\\textbackslash{}")
@@ -379,12 +361,6 @@ pub fn is_display_math(node: &SyntaxNode) -> bool {
     false
 }
 
-/// Get raw text content from a raw node (strips backticks and language tag)
-pub fn get_raw_text(node: &SyntaxNode) -> String {
-    let (content, _lang) = get_raw_text_with_lang(node);
-    content
-}
-
 /// Get raw text content and language from a raw node
 pub fn get_raw_text_with_lang(node: &SyntaxNode) -> (String, Option<String>) {
     // Try to get text from node directly
@@ -474,43 +450,6 @@ pub fn collect_text(node: &SyntaxNode, output: &mut String) {
     }
 }
 
-/// Wrap LaTeX content in a complete document structure
-pub fn wrap_in_document(content: &str, options: &super::context::T2LOptions) -> String {
-    let mut doc = String::new();
-
-    doc.push_str(&format!("\\documentclass{{{}}}\n", options.document_class));
-    doc.push_str("\\usepackage[utf8]{inputenc}\n");
-    doc.push_str("\\usepackage{amsmath}\n");
-    doc.push_str("\\usepackage{amssymb}\n");
-    doc.push_str("\\usepackage{graphicx}\n");
-    doc.push_str("\\usepackage{hyperref}\n");
-    doc.push_str("\\usepackage{listings}\n");
-    doc.push_str("\\usepackage[table]{xcolor}\n");
-    doc.push_str("\\usepackage{multirow}\n");
-    doc.push_str("\\usepackage{booktabs}\n");
-    doc.push_str("\\usepackage{ctex}\n");
-    doc.push('\n');
-
-    if let Some(ref title) = options.title {
-        doc.push_str(&format!("\\title{{{}}}\n", escape_latex_text(title)));
-    }
-    if let Some(ref author) = options.author {
-        doc.push_str(&format!("\\author{{{}}}\n", escape_latex_text(author)));
-    }
-
-    doc.push_str("\n\\begin{document}\n");
-
-    if options.title.is_some() {
-        doc.push_str("\\maketitle\n");
-    }
-
-    doc.push('\n');
-    doc.push_str(content);
-    doc.push_str("\n\\end{document}\n");
-
-    doc
-}
-
 /// Extract a length value from Typst spacing (e.g., "1em", "10pt", "2cm")
 /// Returns the value in LaTeX-compatible format, or None if not recognized
 pub fn extract_length_value(text: &str) -> Option<String> {
@@ -549,6 +488,7 @@ pub fn extract_length_value(text: &str) -> Option<String> {
 // ============================================================================
 
 /// Parsed function argument with extracted values
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ParsedArg {
     /// The argument value as text
@@ -562,6 +502,7 @@ pub struct ParsedArg {
 /// Generic function arguments parser for Typst AST
 /// Provides a unified way to extract named and positional arguments from FuncCall nodes
 /// This version stores extracted values rather than node references for simplicity
+#[allow(dead_code)]
 pub struct FuncArgs {
     /// Named arguments: key -> value text
     named: std::collections::HashMap<String, String>,
@@ -571,6 +512,7 @@ pub struct FuncArgs {
     all: Vec<ParsedArg>,
 }
 
+#[allow(dead_code)]
 impl FuncArgs {
     /// Create a new FuncArgs parser from a FuncCall node's children
     /// The children should be the children of the FuncCall node (first is function name)

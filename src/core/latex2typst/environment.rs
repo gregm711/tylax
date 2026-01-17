@@ -1017,6 +1017,55 @@ fn get_tabular_col_spec(node: &SyntaxNode) -> Option<String> {
     None
 }
 
+/// Skip over a braced group {...} if present.
+/// Handles nested braces correctly.
+fn skip_braced_group(chars: &mut std::iter::Peekable<std::str::Chars>) {
+    if chars.peek() == Some(&'{') {
+        let mut depth = 0;
+        for ch in chars.by_ref() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Extract content from a braced group {...} if present.
+/// Returns the content without the braces.
+fn extract_braced_group(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option<String> {
+    if chars.peek() != Some(&'{') {
+        return None;
+    }
+    chars.next(); // consume '{'
+
+    let mut content = String::new();
+    let mut depth = 1;
+    for ch in chars.by_ref() {
+        match ch {
+            '{' => {
+                depth += 1;
+                content.push(ch);
+            }
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+                content.push(ch);
+            }
+            _ => content.push(ch),
+        }
+    }
+    Some(content)
+}
+
 /// Parse column specification from LaTeX format (e.g., "l|ccc" -> ["l", "c", "c", "c"])
 fn parse_column_spec(spec: &str) -> Vec<String> {
     let mut columns = Vec::new();
@@ -1026,51 +1075,14 @@ fn parse_column_spec(spec: &str) -> Vec<String> {
         match c {
             'l' | 'c' | 'r' => columns.push(c.to_string()),
             'p' | 'm' | 'b' | 'X' => {
-                // Skip width specification
-                if chars.peek() == Some(&'{') {
-                    let mut depth = 0;
-                    for ch in chars.by_ref() {
-                        if ch == '{' {
-                            depth += 1;
-                        } else if ch == '}' {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                    }
-                }
+                skip_braced_group(&mut chars); // Skip width specification
                 columns.push("l".to_string()); // Default to left
             }
             '*' => {
                 // Repeat specification *{n}{spec}
-                if chars.peek() == Some(&'{') {
-                    chars.next();
-                    let mut count_str = String::new();
-                    for ch in chars.by_ref() {
-                        if ch == '}' {
-                            break;
-                        }
-                        count_str.push(ch);
-                    }
+                if let Some(count_str) = extract_braced_group(&mut chars) {
                     let count: usize = count_str.parse().unwrap_or(1);
-
-                    if chars.peek() == Some(&'{') {
-                        chars.next();
-                        let mut spec_str = String::new();
-                        let mut depth = 1;
-                        for ch in chars.by_ref() {
-                            if ch == '{' {
-                                depth += 1;
-                            } else if ch == '}' {
-                                depth -= 1;
-                                if depth == 0 {
-                                    break;
-                                }
-                            }
-                            spec_str.push(ch);
-                        }
-
+                    if let Some(spec_str) = extract_braced_group(&mut chars) {
                         let inner_cols = parse_column_spec(&spec_str);
                         for _ in 0..count {
                             columns.extend(inner_cols.clone());
@@ -1078,22 +1090,9 @@ fn parse_column_spec(spec: &str) -> Vec<String> {
                     }
                 }
             }
-            '|' | '@' | '!' => {
-                // Skip separators and @{} expressions
-                if (c == '@' || c == '!') && chars.peek() == Some(&'{') {
-                    let mut depth = 0;
-                    for ch in chars.by_ref() {
-                        if ch == '{' {
-                            depth += 1;
-                        } else if ch == '}' {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
+            '|' => {}                                   // Skip vertical separators
+            '@' | '!' => skip_braced_group(&mut chars), // Skip @{} and !{} expressions
+            '>' | '<' => skip_braced_group(&mut chars), // Skip column modifiers
             _ => {}
         }
     }

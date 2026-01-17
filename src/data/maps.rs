@@ -546,7 +546,7 @@ lazy_static! {
         }));
         m.insert("langle".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::None },
-            alias: Some("angle.l".to_string()),
+            alias: Some("chevron.l".to_string()),
         }));
         m.insert("lbrace".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::None },
@@ -830,7 +830,7 @@ lazy_static! {
         }));
         m.insert("rangle".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::None },
-            alias: Some("angle.r".to_string()),
+            alias: Some("chevron.r".to_string()),
         }));
         m.insert("rbrace".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::None },
@@ -1939,6 +1939,8 @@ pub static TYPST_TO_TEX: phf::Map<&'static str, &'static str> = phf_map! {
     "bracket.r" => "]",
     "brace.l" => "\\{",
     "brace.r" => "\\}",
+    "chevron.l" => "langle",
+    "chevron.r" => "rangle",
     "angle.l" => "langle",
     "angle.r" => "rangle",
     "floor.l" => "lfloor",
@@ -2126,4 +2128,60 @@ pub static TYPST_TO_TEX: phf::Map<&'static str, &'static str> = phf_map! {
 
     // Additional unique symbols
     "star.op" => "*",
+};
+
+// =============================================================================
+// DELIMITER_MAP: Single source of truth for lr() delimiter conversion
+// Maps Typst delimiter representations to LaTeX output
+// =============================================================================
+
+/// Map from Typst delimiter names/chars to LaTeX
+/// Key: Typst representation (symbol name or Unicode char)
+/// Value: LaTeX output string
+pub static DELIMITER_MAP: phf::Map<&'static str, &'static str> = phf_map! {
+    // Parentheses
+    "(" => "(",
+    ")" => ")",
+    "paren.l" => "(",
+    "paren.r" => ")",
+    // Brackets
+    "[" => "[",
+    "]" => "]",
+    "bracket.l" => "[",
+    "bracket.r" => "]",
+    // Braces
+    "{" => "\\{",
+    "}" => "\\}",
+    "brace.l" => "\\{",
+    "brace.r" => "\\}",
+    // Single bars
+    "|" => "|",
+    "bar.v" => "|",
+    "vert" => "|",
+    // Double bars
+    "||" => "\\|",
+    "bar.v.double" => "\\|",
+    "vert.double" => "\\|",
+    // Angle brackets (Unicode)
+    "⟨" => "\\langle",
+    "⟩" => "\\rangle",
+    "〈" => "\\langle",
+    "〉" => "\\rangle",
+    // Angle brackets (Typst names)
+    "angle.l" => "\\langle",
+    "angle.r" => "\\rangle",
+    "chevron.l" => "\\langle",
+    "chevron.r" => "\\rangle",
+    // Floor (Unicode)
+    "⌊" => "\\lfloor",
+    "⌋" => "\\rfloor",
+    // Floor (Typst names)
+    "floor.l" => "\\lfloor",
+    "floor.r" => "\\rfloor",
+    // Ceiling (Unicode)
+    "⌈" => "\\lceil",
+    "⌉" => "\\rceil",
+    // Ceiling (Typst names)
+    "ceil.l" => "\\lceil",
+    "ceil.r" => "\\rceil",
 };

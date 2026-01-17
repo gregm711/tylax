@@ -14,6 +14,9 @@ use crate::data::maps::TEX_COMMAND_SPEC;
 use fxhash::FxHashMap;
 use lazy_static::lazy_static;
 
+use super::engine::{ArgumentErrorType, EngineWarning};
+use super::{ConversionResult, ConversionWarning, WarningKind};
+
 use super::utils::{
     clean_whitespace, convert_caption_text, extract_arg_content, extract_arg_content_with_braces,
     extract_curly_inner_content, protect_zero_arg_commands, restore_protected_commands,
@@ -50,6 +53,11 @@ pub struct L2TOptions {
     /// Apply output optimizations (e.g., `floor.l x floor.r` → `floor(x)`)
     /// Default: true
     pub optimize: bool,
+
+    /// Expand LaTeX macros before parsing
+    /// When true, macros defined with \newcommand, \def, etc. are expanded
+    /// Default: true
+    pub expand_macros: bool,
 }
 
 impl Default for L2TOptions {
@@ -61,6 +69,7 @@ impl Default for L2TOptions {
             keep_spaces: false,
             non_strict: true,
             optimize: true,
+            expand_macros: true,
         }
     }
 }
@@ -80,6 +89,7 @@ impl L2TOptions {
             keep_spaces: false,
             non_strict: true,
             optimize: true,
+            expand_macros: true,
         }
     }
 
@@ -92,6 +102,7 @@ impl L2TOptions {
             keep_spaces: false,
             non_strict: true,
             optimize: false,
+            expand_macros: true,
         }
     }
 
@@ -99,6 +110,14 @@ impl L2TOptions {
     pub fn strict() -> Self {
         Self {
             non_strict: false,
+            ..Self::default()
+        }
+    }
+
+    /// Create options with macro expansion disabled
+    pub fn no_expand() -> Self {
+        Self {
+            expand_macros: false,
             ..Self::default()
         }
     }
@@ -187,7 +206,9 @@ pub struct ConversionState {
     pub author: Option<String>,
     pub date: Option<String>,
     pub document_class: Option<String>,
-    /// Collected errors/warnings
+    /// Collected structured warnings
+    pub structured_warnings: Vec<ConversionWarning>,
+    /// Legacy string warnings (for compatibility)
     pub warnings: Vec<String>,
     /// Counter for theorems, equations, etc.
     pub counters: HashMap<String, u32>,
@@ -199,6 +220,18 @@ pub struct ConversionState {
     pub used_acronyms: HashSet<String>,
     /// Conversion options
     pub options: L2TOptions,
+}
+
+impl ConversionState {
+    /// Add a structured warning
+    pub fn add_warning(&mut self, warning: ConversionWarning) {
+        self.structured_warnings.push(warning);
+    }
+
+    /// Take all structured warnings
+    pub fn take_structured_warnings(&mut self) -> Vec<ConversionWarning> {
+        std::mem::take(&mut self.structured_warnings)
+    }
 }
 
 impl ConversionState {
@@ -334,23 +367,133 @@ impl LatexConverter {
         &mut self.state.options
     }
 
+    /// Preprocess input with optional macro expansion
+    ///
+    /// If `expand_macros` is enabled in options, this will:
+    /// 1. Tokenize the input
+    /// 2. Expand all macro definitions and invocations
+    /// 3. Collect any warnings from the expansion process
+    /// 4. Return the expanded string
+    ///
+    /// Otherwise, returns the input unchanged.
+    fn preprocess_expansion(&mut self, input: &str, math_mode: bool) -> String {
+        if self.state.options.expand_macros {
+            let result =
+                crate::core::latex2typst::engine::expand_latex_with_warnings(input, math_mode);
+
+            // Convert structured engine warnings to conversion warnings (type-safe!)
+            for engine_warning in result.warnings {
+                let warning = Self::convert_engine_warning(&engine_warning);
+                // Keep legacy string warning for compatibility
+                self.state.warnings.push(engine_warning.message());
+                self.state.structured_warnings.push(warning);
+            }
+
+            result.output
+        } else {
+            input.to_string()
+        }
+    }
+
+    /// Convert a structured engine warning to a conversion warning.
+    ///
+    /// This is a type-safe mapping - no string parsing required!
+    fn convert_engine_warning(warning: &EngineWarning) -> ConversionWarning {
+        match warning {
+            EngineWarning::DepthExceeded { max_depth } => ConversionWarning::new(
+                WarningKind::MacroLoop,
+                format!(
+                    "Macro expansion depth exceeded maximum ({}). Possible infinite recursion.",
+                    max_depth
+                ),
+            ),
+            EngineWarning::TokenLimitExceeded { max_tokens } => ConversionWarning::new(
+                WarningKind::MacroLoop,
+                format!(
+                    "Macro expansion produced too many tokens (exceeded {}). Possible infinite loop or exponential expansion.",
+                    max_tokens
+                ),
+            ),
+            EngineWarning::ArgumentParsingFailed {
+            macro_name,
+            error_kind,
+        } => {
+            let kind = match error_kind {
+                ArgumentErrorType::RunawayArgument => WarningKind::RunawayArgument,
+                ArgumentErrorType::PatternMismatch => WarningKind::PatternMismatch,
+                ArgumentErrorType::Other(_) => WarningKind::ParseError,
+            };
+            ConversionWarning::new(
+                kind,
+                format!(
+                    "Macro '\\{}' argument parsing failed: {}",
+                    macro_name, error_kind
+                ),
+            )
+            .with_location(format!("\\{}", macro_name))
+        }
+            EngineWarning::LaTeX3Skipped { token_count } => ConversionWarning::new(
+                WarningKind::LaTeX3Skipped,
+                format!(
+                    "LaTeX3 block (\\ExplSyntaxOn ... \\ExplSyntaxOff) skipped ({} tokens). \
+                        LaTeX3/expl3 syntax is not supported.",
+                    token_count
+                ),
+            ),
+            EngineWarning::UnsupportedPrimitive { name } => ConversionWarning::new(
+                WarningKind::UnsupportedPrimitive,
+                format!(
+                    "Unsupported TeX primitive '\\{}' encountered. \
+                        This may produce incorrect output.",
+                    name
+                ),
+            )
+            .with_location(format!("\\{}", name)),
+            EngineWarning::LetTargetNotFound { name, target } => ConversionWarning::new(
+                WarningKind::UnsupportedMacro,
+                format!(
+                    "\\let\\{}\\{}: target '\\{}' not found. \
+                        Built-in LaTeX commands cannot be copied with \\let.",
+                    name, target, target
+                ),
+            )
+            .with_location(format!("\\let\\{}\\{}", name, target)),
+        }
+    }
+
+    /// Check if input contains a real `\begin{document}` that is not commented out.
+    ///
+    /// This function scans line-by-line, ignoring lines where `\begin{document}`
+    /// appears after a `%` comment marker.
+    fn has_real_begin_document(input: &str) -> bool {
+        for line in input.lines() {
+            // Find position of \begin{document} in this line
+            if let Some(doc_pos) = line.find("\\begin{document}") {
+                // Check if there's a % comment before it
+                let before_doc = &line[..doc_pos];
+                // If % exists before \begin{document}, this line is commented
+                if !before_doc.contains('%') {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Convert a complete LaTeX document to Typst
     pub fn convert_document(&mut self, input: &str) -> String {
-        self.state.in_preamble = true;
+        // Only enter preamble mode if there's actually a \begin{document}
+        // that is NOT inside a comment. This avoids false positives from:
+        //   % \begin{document}  (commented out)
+        //   \begin{verbatim}\begin{document}\end{verbatim}  (inside verbatim - rare edge case)
+        self.state.in_preamble = Self::has_real_begin_document(input);
 
         // Preprocess: protect zero-argument commands that MiTeX would otherwise lose
         let protected_input = protect_zero_arg_commands(input);
 
-        // Preprocess: extract and expand macro definitions
-        let (mut macro_db, processed_input) =
-            crate::features::macros::extract_and_remove_definitions(&protected_input);
-
-        // Remove macros that we handle natively to avoid expansion issues
-        for op in crate::data::constants::NATIVE_MATH_OPERATORS.iter() {
-            macro_db.undefine(op);
-        }
-
-        let expanded_input = crate::features::macros::expand_macros(&processed_input, &macro_db);
+        // Optionally expand macros using the SOTA token-based engine
+        // This correctly handles nested braces and complex macro arguments
+        let expanded_input = self.preprocess_expansion(&protected_input, false);
 
         // Parse with mitex-parser
         let tree = mitex_parser::parse(&expanded_input, self.spec.clone());
@@ -374,11 +517,14 @@ impl LatexConverter {
         self.state.mode = ConversionMode::Math;
         self.state.in_preamble = false;
 
+        // Optionally expand macros with math mode enabled
+        let expanded_input = self.preprocess_expansion(input, true);
+
         // Parse
-        let tree = mitex_parser::parse(input, self.spec.clone());
+        let tree = mitex_parser::parse(&expanded_input, self.spec.clone());
 
         // Convert with pre-allocated buffer
-        let mut output = String::with_capacity(input.len().max(256));
+        let mut output = String::with_capacity(expanded_input.len().max(256));
         self.visit_node(&tree, &mut output);
 
         // Post-process
@@ -748,6 +894,8 @@ impl LatexConverter {
         result = self.fix_blackboard_bold(&result);
         result = self.fix_empty_accent_args(&result);
 
+        result = self.fix_symbol_spacing(&result);
+
         while result.contains("  ") {
             result = result.replace("  ", " ");
         }
@@ -776,6 +924,131 @@ impl LatexConverter {
         result = result.replace(" [", "[");
         result = result.replace(" ^", "^");
         result = result.replace(" _", "_");
+
+        result
+    }
+
+    /// Fix missing spaces before Typst symbol names.
+    ///
+    /// When a non-letter character (digit, `/`, `)`, `]`, etc.) is immediately followed
+    /// by a Typst symbol name (e.g., `angle.l`, `pi`, `theta`), insert a space.
+    pub fn fix_symbol_spacing(&self, input: &str) -> String {
+        // Common Typst symbol prefixes that need space separation
+        // These are symbols that often appear after expressions without spaces
+        static SYMBOL_PREFIXES: &[&str] = &[
+            "chevron.l",
+            "chevron.r",
+            "floor.l",
+            "floor.r",
+            "ceil.l",
+            "ceil.r",
+            "bracket.l",
+            "bracket.r",
+            "paren.l",
+            "paren.r",
+            "alpha",
+            "beta",
+            "gamma",
+            "delta",
+            "epsilon",
+            "zeta",
+            "eta",
+            "theta",
+            "iota",
+            "kappa",
+            "lambda",
+            "mu",
+            "nu",
+            "xi",
+            "omicron",
+            "pi",
+            "rho",
+            "sigma",
+            "tau",
+            "upsilon",
+            "phi",
+            "chi",
+            "psi",
+            "omega",
+            "Alpha",
+            "Beta",
+            "Gamma",
+            "Delta",
+            "Epsilon",
+            "Zeta",
+            "Eta",
+            "Theta",
+            "Iota",
+            "Kappa",
+            "Lambda",
+            "Mu",
+            "Nu",
+            "Xi",
+            "Omicron",
+            "Pi",
+            "Rho",
+            "Sigma",
+            "Tau",
+            "Upsilon",
+            "Phi",
+            "Chi",
+            "Psi",
+            "Omega",
+            "infty",
+            "infinity",
+            "partial",
+            "nabla",
+            "forall",
+            "exists",
+            "emptyset",
+            "nothing",
+            "dots",
+            "cdots",
+            "ldots",
+            "vdots",
+            "ddots",
+        ];
+
+        let mut result = input.to_string();
+
+        for symbol in SYMBOL_PREFIXES {
+            // Pattern: non-letter/non-space followed by symbol
+            // We need to find cases like "2angle.r" or ")pi"
+            let mut i = 0;
+            while i < result.len() {
+                if let Some(pos) = result[i..].find(symbol) {
+                    let abs_pos = i + pos;
+                    if abs_pos > 0 {
+                        let prev_char = result.chars().nth(abs_pos - 1).unwrap_or(' ');
+                        // Insert space if previous char is not a letter, space, or opening paren/bracket
+                        if !prev_char.is_alphabetic()
+                            && prev_char != ' '
+                            && prev_char != '('
+                            && prev_char != '['
+                            && prev_char != '{'
+                            && prev_char != '\n'
+                            && prev_char != '\t'
+                        {
+                            // Check that we're not in the middle of a word
+                            // e.g., don't change "tangent" when looking for "angle"
+                            let after_symbol = abs_pos + symbol.len();
+                            let next_char = result.chars().nth(after_symbol);
+                            let is_word_boundary =
+                                next_char.is_none_or(|c| !c.is_alphanumeric() && c != '.');
+
+                            if is_word_boundary {
+                                result.insert(abs_pos, ' ');
+                                i = abs_pos + symbol.len() + 2; // Skip past inserted space and symbol
+                                continue;
+                            }
+                        }
+                    }
+                    i = abs_pos + 1;
+                } else {
+                    break;
+                }
+            }
+        }
 
         result
     }
@@ -1109,6 +1382,28 @@ impl LatexConverter {
                 _ => self.visit_element(child, output),
             }
         }
+    }
+
+    // ============================================================
+    // Diagnostic conversion methods
+    // ============================================================
+
+    /// Convert a complete LaTeX document to Typst with full diagnostics
+    ///
+    /// Returns both the converted output and any warnings generated during conversion.
+    pub fn convert_document_with_diagnostics(&mut self, input: &str) -> ConversionResult {
+        let output = self.convert_document(input);
+        let warnings = self.state.take_structured_warnings();
+        ConversionResult::with_warnings(output, warnings)
+    }
+
+    /// Convert math-only LaTeX to Typst with full diagnostics
+    ///
+    /// Returns both the converted output and any warnings generated during conversion.
+    pub fn convert_math_with_diagnostics(&mut self, input: &str) -> ConversionResult {
+        let output = self.convert_math(input);
+        let warnings = self.state.take_structured_warnings();
+        ConversionResult::with_warnings(output, warnings)
     }
 }
 

@@ -4,7 +4,7 @@
 
 use super::context::{ConvertContext, TokenType};
 use super::utils::{get_simple_text, is_content_node, UNICODE_TO_LATEX};
-use crate::data::maps::TYPST_TO_TEX;
+use crate::data::maps::{DELIMITER_MAP, TYPST_TO_TEX};
 use crate::data::typst_compat::{MathHandler, TYPST_MATH_HANDLERS};
 use typst_syntax::{SyntaxKind, SyntaxNode};
 
@@ -51,6 +51,27 @@ pub fn convert_math_node(node: &SyntaxNode, ctx: &mut ConvertContext) {
                 "thick" => {
                     ctx.push("\\; ");
                     ctx.last_token = TokenType::Command;
+                    return;
+                }
+                // Basic arithmetic operators (Typst keywords)
+                "plus" => {
+                    ctx.push_with_spacing("+", TokenType::Operator);
+                    return;
+                }
+                "minus" => {
+                    ctx.push_with_spacing("-", TokenType::Operator);
+                    return;
+                }
+                "eq" => {
+                    ctx.push_with_spacing("=", TokenType::Operator);
+                    return;
+                }
+                "lt" => {
+                    ctx.push_with_spacing("<", TokenType::Operator);
+                    return;
+                }
+                "gt" => {
+                    ctx.push_with_spacing(">", TokenType::Operator);
                     return;
                 }
                 _ => {}
@@ -387,57 +408,45 @@ pub fn convert_math_node(node: &SyntaxNode, ctx: &mut ConvertContext) {
         }
 
         // Math delimited (parentheses with content)
+        // Uses unified delimiter detection via DELIMITER_MAP
         SyntaxKind::MathDelimited => {
-            let children: Vec<&SyntaxNode> = node.children().collect();
+            // Filter out Space nodes (consistent with lr() path)
+            let children: Vec<&SyntaxNode> = node
+                .children()
+                .filter(|n| n.kind() != SyntaxKind::Space)
+                .collect();
 
-            // Check for lr() function with smart delimiter handling
-            // This handles cases like lr(| x |) -> \left| x \right|
-            let mut left_delim: Option<String> = None;
-            let mut right_delim: Option<String> = None;
-            let mut body_nodes: Vec<&SyntaxNode> = Vec::new();
-
-            for (i, child) in children.iter().enumerate() {
-                let kind = child.kind();
-                let text = child.text().to_string();
-
-                // Check for delimiters by kind or text content
-                let is_left_delim = matches!(
-                    kind,
-                    SyntaxKind::LeftParen | SyntaxKind::LeftBracket | SyntaxKind::LeftBrace
-                ) || (kind == SyntaxKind::Text
-                    && matches!(
-                        text.as_str(),
-                        "(" | "[" | "{" | "|" | "||" | "⟨" | "〈" | "⌊" | "⌈"
-                    ));
-                let is_right_delim = matches!(
-                    kind,
-                    SyntaxKind::RightParen | SyntaxKind::RightBracket | SyntaxKind::RightBrace
-                ) || (kind == SyntaxKind::Text
-                    && matches!(
-                        text.as_str(),
-                        ")" | "]" | "}" | "|" | "||" | "⟩" | "〉" | "⌋" | "⌉"
-                    ));
-
-                if is_left_delim && i == 0 {
-                    left_delim = Some(get_latex_delimiter(child, true));
-                } else if is_right_delim && i == children.len() - 1 {
-                    right_delim = Some(get_latex_delimiter(child, false));
-                } else {
-                    body_nodes.push(child);
-                }
+            if children.is_empty() {
+                return;
             }
 
-            // Output with \left and \right if we have matching delimiters
-            if let (Some(left), Some(right)) = (&left_delim, &right_delim) {
+            // Use unified delimiter detection (same as lr() path)
+            let first = children[0];
+            let last = children.last().unwrap_or(&first);
+
+            let first_text = get_node_delimiter_text(first);
+            let last_text = get_node_delimiter_text(last);
+
+            let first_is_delim = is_delimiter(&first_text);
+            let last_is_delim = is_delimiter(&last_text);
+
+            if first_is_delim && last_is_delim {
+                // Output \left<delim> ... \right<delim>
                 ctx.push("\\left");
-                ctx.push(left);
-                for child in &body_nodes {
+                let left_delim = get_latex_delimiter(&first_text, true);
+                ctx.push(left_delim);
+                set_last_token_after_delimiter(ctx, left_delim);
+
+                // Output content (skip first and last delimiter nodes)
+                for child in &children[1..children.len() - 1] {
                     convert_math_node(child, ctx);
                 }
+
                 ctx.push("\\right");
-                ctx.push(right);
+                let right_delim = get_latex_delimiter(&last_text, false);
+                ctx.push(right_delim);
             } else {
-                // Fallback: just output children
+                // Fallback: just output all children
                 for child in children {
                     convert_math_node(child, ctx);
                 }
@@ -655,64 +664,7 @@ fn handle_special_math_func(func_str: &str, children: &[&SyntaxNode], ctx: &mut 
         // lr(delim1 content delim2) -> \left<delim1> content \right<delim2>
         "lr" => {
             if let Some(args_node) = children.get(1) {
-                let args: Vec<&SyntaxNode> = args_node.children().collect();
-
-                // Try to find delimiters
-                let mut has_delim = false;
-                for child in &args {
-                    if matches!(
-                        child.kind(),
-                        SyntaxKind::LeftParen
-                            | SyntaxKind::RightParen
-                            | SyntaxKind::LeftBracket
-                            | SyntaxKind::RightBracket
-                            | SyntaxKind::LeftBrace
-                            | SyntaxKind::RightBrace
-                    ) {
-                        has_delim = true;
-                        break;
-                    }
-                    // Also check for text delimiters like |
-                    let text = child.text().to_string();
-                    if matches!(
-                        text.as_str(),
-                        "|" | "||" | "⟨" | "⟩" | "⌊" | "⌋" | "⌈" | "⌉"
-                    ) {
-                        has_delim = true;
-                        break;
-                    }
-                }
-
-                if has_delim && !args.is_empty() {
-                    // Get first delimiter
-                    let first = &args[0];
-                    ctx.push("\\left");
-                    ctx.push(&get_latex_delimiter(first, true));
-
-                    // Content (middle nodes)
-                    for child in &args[1..args.len().saturating_sub(1)] {
-                        convert_math_node(child, ctx);
-                    }
-
-                    // Get last delimiter
-                    if args.len() > 1 {
-                        if let Some(last) = args.last() {
-                            ctx.push("\\right");
-                            ctx.push(&get_latex_delimiter(last, false));
-                        }
-                    } else {
-                        ctx.push("\\right.");
-                    }
-                } else {
-                    // No delimiters found, just output content
-                    ctx.push("\\left(");
-                    for child in &args {
-                        if is_content_node(child) {
-                            convert_math_node(child, ctx);
-                        }
-                    }
-                    ctx.push("\\right)");
-                }
+                convert_lr_to_latex(args_node, ctx);
             }
             ctx.last_token = TokenType::Command;
         }
@@ -1264,35 +1216,353 @@ pub fn convert_cases(node: &SyntaxNode, ctx: &mut ConvertContext) {
     ctx.last_token = TokenType::Command;
 }
 
-/// Get LaTeX delimiter string from a Typst delimiter node
-fn get_latex_delimiter(node: &SyntaxNode, is_left: bool) -> String {
-    let text = node.text().to_string();
-    match text.as_str() {
-        "(" => "(".to_string(),
-        ")" => ")".to_string(),
-        "[" => "[".to_string(),
-        "]" => "]".to_string(),
-        "{" => "\\{".to_string(),
-        "}" => "\\}".to_string(),
-        "|" => "|".to_string(),
-        "||" => "\\|".to_string(),
-        "⟨" | "〈" => "\\langle".to_string(),
-        "⟩" | "〉" => "\\rangle".to_string(),
-        "⌊" => "\\lfloor".to_string(),
-        "⌋" => "\\rfloor".to_string(),
-        "⌈" => "\\lceil".to_string(),
-        "⌉" => "\\rceil".to_string(),
-        _ => {
-            // Try to look up in symbol map
-            let symbol = text.trim();
-            if let Some(tex) = TYPST_TO_TEX.get(symbol) {
-                format!("\\{}", tex)
-            } else if is_left {
-                "(".to_string()
-            } else {
-                ")".to_string()
+// =============================================================================
+// Delimiter Helper Functions (using DELIMITER_MAP as single source of truth)
+// =============================================================================
+
+/// Check if a text string represents a recognized delimiter for lr()
+fn is_delimiter(text: &str) -> bool {
+    DELIMITER_MAP.contains_key(text)
+}
+
+/// Get LaTeX delimiter string from text, with fallback
+fn get_latex_delimiter(text: &str, is_left: bool) -> &'static str {
+    DELIMITER_MAP
+        .get(text)
+        .copied()
+        .unwrap_or(if is_left { "(" } else { ")" })
+}
+
+/// Update last token type after emitting a delimiter
+fn set_last_token_after_delimiter(ctx: &mut ConvertContext, delim: &str) {
+    if delim.starts_with('\\') {
+        ctx.last_token = TokenType::Command;
+    } else {
+        ctx.last_token = TokenType::OpenParen;
+    }
+}
+
+// =============================================================================
+// lr() Conversion Functions
+// =============================================================================
+
+/// Convert Typst lr() function to LaTeX \left...\right
+/// Extracted to a separate function for clarity and maintainability
+fn convert_lr_to_latex(args_node: &SyntaxNode, ctx: &mut ConvertContext) {
+    let args: Vec<&SyntaxNode> = args_node.children().collect();
+    let content_nodes = collect_lr_content_nodes(&args);
+
+    if content_nodes.is_empty() {
+        ctx.push("\\left(\\right)");
+        return;
+    }
+
+    convert_lr_content_nodes(&content_nodes, ctx);
+}
+
+/// Collect lr() content nodes while preserving separators
+fn collect_lr_content_nodes<'a>(args: &'a [&'a SyntaxNode]) -> Vec<&'a SyntaxNode> {
+    let mut content = Vec::new();
+
+    for child in args {
+        match child.kind() {
+            SyntaxKind::LeftParen | SyntaxKind::RightParen | SyntaxKind::Space => {}
+            SyntaxKind::Math | SyntaxKind::MathDelimited => {
+                push_lr_inner_nodes(child, &mut content);
+            }
+            SyntaxKind::Comma | SyntaxKind::Semicolon => {
+                content.push(*child);
+            }
+            _ => {
+                if is_content_node(child) {
+                    content.push(*child);
+                }
             }
         }
+    }
+
+    content
+}
+
+fn push_lr_inner_nodes<'a>(node: &'a SyntaxNode, content: &mut Vec<&'a SyntaxNode>) {
+    for inner in node.children().filter(|n| n.kind() != SyntaxKind::Space) {
+        if inner.kind() == SyntaxKind::MathDelimited {
+            for nested in inner.children().filter(|n| n.kind() != SyntaxKind::Space) {
+                content.push(nested);
+            }
+        } else {
+            content.push(inner);
+        }
+    }
+}
+
+/// Convert lr() content nodes with delimiter detection.
+/// Only looks at edge nodes for delimiters - does NOT scan interior to avoid
+/// mistakenly treating inner symbols as delimiters and losing content.
+fn convert_lr_content_nodes(content: &[&SyntaxNode], ctx: &mut ConvertContext) {
+    let left_delim = find_lr_edge_delimiter(content, true);
+    let right_delim = find_lr_edge_delimiter(content, false);
+
+    if left_delim.is_some() || right_delim.is_some() {
+        let left_text = left_delim
+            .as_ref()
+            .map(|delim| delim.text.as_str())
+            .unwrap_or(".");
+        let right_text = right_delim
+            .as_ref()
+            .map(|delim| delim.text.as_str())
+            .unwrap_or(".");
+
+        // Output \left<first_delim>
+        ctx.push("\\left");
+        let left_latex = get_latex_delimiter(left_text, true);
+        ctx.push(left_latex);
+        set_last_token_after_delimiter(ctx, left_latex);
+
+        for (idx, child) in content.iter().enumerate() {
+            if should_skip_lr_index(idx, left_delim.as_ref(), right_delim.as_ref()) {
+                continue;
+            }
+            convert_math_node(child, ctx);
+        }
+
+        // Output \right<last_delim>
+        ctx.push("\\right");
+        ctx.push(get_latex_delimiter(right_text, false));
+    } else {
+        // No recognizable delimiters at edges, use default parentheses
+        // and output ALL content (safe fallback, no data loss)
+        ctx.push("\\left(");
+        for child in content {
+            convert_math_node(child, ctx);
+        }
+        ctx.push("\\right)");
+    }
+}
+
+/// Represents a detected delimiter in lr() content.
+/// Used to track which nodes should be skipped during content output.
+struct LrDelimiter {
+    /// The delimiter text (e.g., "angle.l", "(", "||")
+    text: String,
+    /// Start index in content array (inclusive)
+    start: usize,
+    /// End index in content array (inclusive)
+    /// For single-token delimiters: start == end
+    /// For multi-token delimiters like "angle.l": start < end
+    end: usize,
+}
+
+/// Scan direction for delimiter collection
+#[derive(Clone, Copy, PartialEq)]
+enum ScanDirection {
+    Forward,
+    Backward,
+}
+
+/// Find delimiter at edge of lr() content (first non-separator from start or end).
+/// Only inspects the edge - does NOT scan interior to avoid data loss.
+fn find_lr_edge_delimiter(content: &[&SyntaxNode], from_start: bool) -> Option<LrDelimiter> {
+    if content.is_empty() {
+        return None;
+    }
+
+    let direction = if from_start {
+        ScanDirection::Forward
+    } else {
+        ScanDirection::Backward
+    };
+
+    // Find first non-separator index from the appropriate edge
+    let edge_idx = find_first_content_index(content, direction)?;
+
+    // Try to collect delimiter tokens starting from that index
+    let (text, other_idx) = try_collect_delimiter(content, edge_idx, direction)?;
+
+    if is_delimiter(&text) {
+        let (start, end) = if direction == ScanDirection::Forward {
+            (edge_idx, other_idx)
+        } else {
+            (other_idx, edge_idx)
+        };
+        Some(LrDelimiter { text, start, end })
+    } else {
+        None
+    }
+}
+
+/// Find the first content index (skipping separators) from the given direction.
+fn find_first_content_index(content: &[&SyntaxNode], direction: ScanDirection) -> Option<usize> {
+    let is_separator = |node: &SyntaxNode| {
+        matches!(
+            node.kind(),
+            SyntaxKind::Comma | SyntaxKind::Semicolon | SyntaxKind::Space
+        )
+    };
+
+    match direction {
+        ScanDirection::Forward => {
+            for (idx, node) in content.iter().enumerate() {
+                if !is_separator(node) {
+                    return Some(idx);
+                }
+            }
+        }
+        ScanDirection::Backward => {
+            for (idx, node) in content.iter().enumerate().rev() {
+                if !is_separator(node) {
+                    return Some(idx);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Try to collect a delimiter starting from `idx` in the given direction.
+/// Returns (delimiter_text, other_boundary_index) where:
+/// - Forward: other_boundary_index is the end index
+/// - Backward: other_boundary_index is the start index
+fn try_collect_delimiter(
+    content: &[&SyntaxNode],
+    idx: usize,
+    direction: ScanDirection,
+) -> Option<(String, usize)> {
+    let node = content[idx];
+
+    // FieldAccess nodes (e.g., angle.l as a single node)
+    if node.kind() == SyntaxKind::FieldAccess {
+        return Some((collect_field_access_text(node), idx));
+    }
+
+    // Bracket-type delimiters
+    if matches!(
+        node.kind(),
+        SyntaxKind::LeftParen
+            | SyntaxKind::RightParen
+            | SyntaxKind::LeftBracket
+            | SyntaxKind::RightBracket
+            | SyntaxKind::LeftBrace
+            | SyntaxKind::RightBrace
+    ) {
+        return Some((get_node_delimiter_text(node), idx));
+    }
+
+    // Identifier-based delimiters (may span multiple tokens like angle + l)
+    if matches!(node.kind(), SyntaxKind::MathIdent | SyntaxKind::Ident) {
+        return collect_ident_delimiter(content, idx, direction);
+    }
+
+    // Fallback: use node text directly
+    Some((get_node_delimiter_text(node), idx))
+}
+
+/// Collect identifier-based delimiter tokens (handles patterns like "angle l" or "angle.l").
+fn collect_ident_delimiter(
+    content: &[&SyntaxNode],
+    idx: usize,
+    direction: ScanDirection,
+) -> Option<(String, usize)> {
+    let node = content[idx];
+    let node_text = node.text().to_string();
+
+    match direction {
+        ScanDirection::Forward => {
+            // Check for "ident l/r" pattern (no dot, adjacent tokens)
+            if idx + 1 < content.len()
+                && matches!(
+                    content[idx + 1].kind(),
+                    SyntaxKind::MathIdent | SyntaxKind::Ident
+                )
+                && matches!(content[idx + 1].text().as_str(), "l" | "r")
+            {
+                let candidate = format!("{}.{}", node_text, content[idx + 1].text());
+                if is_delimiter(&candidate) {
+                    return Some((candidate, idx + 1));
+                }
+            }
+            // Check for "ident.ident..." pattern
+            let mut parts = vec![node_text];
+            let mut end = idx;
+            let mut i = idx;
+            while i + 2 < content.len()
+                && content[i + 1].kind() == SyntaxKind::Dot
+                && matches!(
+                    content[i + 2].kind(),
+                    SyntaxKind::MathIdent | SyntaxKind::Ident
+                )
+            {
+                parts.push(content[i + 2].text().to_string());
+                i += 2;
+                end = i;
+            }
+            Some((parts.join("."), end))
+        }
+        ScanDirection::Backward => {
+            // Check for "ident l/r" pattern (current node is l/r)
+            if idx >= 1
+                && matches!(
+                    content[idx - 1].kind(),
+                    SyntaxKind::MathIdent | SyntaxKind::Ident
+                )
+                && matches!(node.text().as_str(), "l" | "r")
+            {
+                let candidate = format!("{}.{}", content[idx - 1].text(), node_text);
+                if is_delimiter(&candidate) {
+                    return Some((candidate, idx - 1));
+                }
+            }
+            // Check for "...ident.ident" pattern
+            let mut parts = vec![node_text];
+            let mut start = idx;
+            let mut i = idx;
+            while i >= 2
+                && content[i - 1].kind() == SyntaxKind::Dot
+                && matches!(
+                    content[i - 2].kind(),
+                    SyntaxKind::MathIdent | SyntaxKind::Ident
+                )
+            {
+                parts.insert(0, content[i - 2].text().to_string());
+                i -= 2;
+                start = i;
+            }
+            Some((parts.join("."), start))
+        }
+    }
+}
+
+fn should_skip_lr_index(
+    idx: usize,
+    left: Option<&LrDelimiter>,
+    right: Option<&LrDelimiter>,
+) -> bool {
+    if let Some(delim) = left {
+        if idx >= delim.start && idx <= delim.end {
+            return true;
+        }
+    }
+    if let Some(delim) = right {
+        if idx >= delim.start && idx <= delim.end {
+            return true;
+        }
+    }
+    false
+}
+
+/// Get delimiter text from a node, handling FieldAccess and SyntaxKind specially
+fn get_node_delimiter_text(node: &SyntaxNode) -> String {
+    match node.kind() {
+        SyntaxKind::FieldAccess => collect_field_access_text(node),
+        // Handle delimiter tokens by their SyntaxKind
+        SyntaxKind::LeftParen => "(".to_string(),
+        SyntaxKind::RightParen => ")".to_string(),
+        SyntaxKind::LeftBracket => "[".to_string(),
+        SyntaxKind::RightBracket => "]".to_string(),
+        SyntaxKind::LeftBrace => "{".to_string(),
+        SyntaxKind::RightBrace => "}".to_string(),
+        // Default: use text content
+        _ => node.text().to_string(),
     }
 }
 

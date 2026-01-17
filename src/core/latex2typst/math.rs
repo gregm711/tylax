@@ -6,12 +6,7 @@ use mitex_parser::syntax::{FormulaItem, SyntaxElement, SyntaxKind};
 use rowan::ast::AstNode;
 use std::fmt::Write;
 
-use crate::data::extended_symbols::EXTENDED_SYMBOLS;
-use crate::data::maps::TEX_COMMAND_SPEC;
-use crate::data::symbols::GREEK_LETTERS;
-use mitex_spec::CommandSpecItem;
-
-use super::context::{ConversionMode, EnvironmentContext, LatexConverter};
+use super::context::{ConversionMode, LatexConverter};
 
 /// Convert a math formula ($..$ or $$..$$)
 pub fn convert_formula(conv: &mut LatexConverter, elem: SyntaxElement, output: &mut String) {
@@ -143,14 +138,14 @@ pub fn convert_lr(conv: &mut LatexConverter, elem: SyntaxElement, output: &mut S
                 let text = cn.text().to_string();
                 if text.starts_with("\\left") && left_delim.is_none() {
                     // Extract delimiter from inside the ClauseLR
-                    for sub in cn.children_with_tokens() {
-                        if let SyntaxElement::Token(t) = sub {
-                            let tok_text = t.text();
-                            // Skip the command name, get the delimiter token
-                            if t.kind() != SyntaxKind::ClauseCommandName {
-                                left_delim = Some(convert_delimiter(tok_text));
-                                break;
-                            }
+                    // The delimiter can be a Token (like "(") or a Node (like \lVert command)
+                    // First try to find it in the full text after \left
+                    if let Some(delim_text) = text.strip_prefix("\\left") {
+                        let delim_text = delim_text.trim();
+                        if !delim_text.is_empty() {
+                            // Extract just the delimiter part (first command or symbol)
+                            let delim = extract_delimiter_from_text(delim_text);
+                            left_delim = Some(convert_delimiter(delim));
                         }
                     }
                     body_start = i + 1;
@@ -175,13 +170,13 @@ pub fn convert_lr(conv: &mut LatexConverter, elem: SyntaxElement, output: &mut S
                 let text = cn.text().to_string();
                 if text.starts_with("\\right") && right_delim.is_none() {
                     // Extract delimiter from inside the ClauseLR
-                    for sub in cn.children_with_tokens() {
-                        if let SyntaxElement::Token(t) = sub {
-                            // Skip the command name, get the delimiter token
-                            if t.kind() != SyntaxKind::ClauseCommandName {
-                                right_delim = Some(convert_delimiter(t.text()));
-                                break;
-                            }
+                    // First try to find it in the full text after \right
+                    if let Some(delim_text) = text.strip_prefix("\\right") {
+                        let delim_text = delim_text.trim();
+                        if !delim_text.is_empty() {
+                            // Extract just the delimiter part (first command or symbol)
+                            let delim = extract_delimiter_from_text(delim_text);
+                            right_delim = Some(convert_delimiter(delim));
                         }
                     }
                     body_end = i;
@@ -225,13 +220,23 @@ pub fn convert_lr(conv: &mut LatexConverter, elem: SyntaxElement, output: &mut S
     if left_delim.as_deref() == Some("bar.v.double")
         && right_delim.as_deref() == Some("bar.v.double")
     {
-        output.push_str("norm(");
+        // Collect content first to check for commas
+        let mut content = String::new();
         for child in children.iter().take(body_end).skip(body_start) {
             match child {
                 SyntaxElement::Token(t) if t.text() == "." => {}
                 SyntaxElement::Token(t) if t.text().starts_with("\\right") => {}
-                _ => conv.visit_element(child.clone(), output),
+                _ => conv.visit_element(child.clone(), &mut content),
             }
+        }
+        // Wrap in {} if content contains comma to prevent parsing as function args
+        output.push_str("norm(");
+        if content.contains(',') {
+            output.push('{');
+            output.push_str(content.trim());
+            output.push('}');
+        } else {
+            output.push_str(&content);
         }
         output.push_str(") ");
         return;
@@ -239,13 +244,23 @@ pub fn convert_lr(conv: &mut LatexConverter, elem: SyntaxElement, output: &mut S
 
     // Check for abs: \left| ... \right| -> abs(...)
     if left_delim.as_deref() == Some("bar.v") && right_delim.as_deref() == Some("bar.v") {
-        output.push_str("abs(");
+        // Collect content first to check for commas
+        let mut content = String::new();
         for child in children.iter().take(body_end).skip(body_start) {
             match child {
                 SyntaxElement::Token(t) if t.text() == "." => {}
                 SyntaxElement::Token(t) if t.text().starts_with("\\right") => {}
-                _ => conv.visit_element(child.clone(), output),
+                _ => conv.visit_element(child.clone(), &mut content),
             }
+        }
+        // Wrap in {} if content contains comma to prevent parsing as function args
+        output.push_str("abs(");
+        if content.contains(',') {
+            output.push('{');
+            output.push_str(content.trim());
+            output.push('}');
+        } else {
+            output.push_str(&content);
         }
         output.push_str(") ");
         return;
@@ -367,6 +382,44 @@ pub fn convert_attachment(conv: &mut LatexConverter, elem: SyntaxElement, output
 // Helper functions
 // =============================================================================
 
+/// Extract delimiter from text after \left or \right.
+///
+/// This function handles all LaTeX delimiter forms:
+/// - Single character: `(`, `)`, `[`, `]`, `|`, `.`
+/// - Letter-based commands: `\langle`, `\rangle`, `\lVert`, `\lfloor`, etc.
+/// - Non-letter commands: `\|`, `\{`, `\}`
+fn extract_delimiter_from_text(text: &str) -> &str {
+    if text.is_empty() {
+        return ".";
+    }
+
+    if let Some(after_backslash) = text.strip_prefix('\\') {
+        // Check if the character after \ is a letter
+        if after_backslash.is_empty() {
+            return "\\";
+        }
+
+        let first_char = after_backslash.chars().next().unwrap();
+        if first_char.is_ascii_alphabetic() {
+            // Letter-based command: \langle, \lVert, etc.
+            // Find where the command name ends
+            let end = after_backslash
+                .find(|c: char| !c.is_ascii_alphabetic())
+                .unwrap_or(after_backslash.len());
+            &text[..end + 1] // +1 for the backslash
+        } else {
+            // Non-letter command: \|, \{, \}
+            // The command is exactly \ + one character
+            let char_len = first_char.len_utf8();
+            &text[..1 + char_len]
+        }
+    } else {
+        // Single character delimiter: (, ), [, ], |, .
+        let first_char = text.chars().next().unwrap();
+        &text[..first_char.len_utf8()]
+    }
+}
+
 /// Convert a LaTeX delimiter to Typst equivalent
 fn convert_delimiter(delim: &str) -> String {
     match delim.trim() {
@@ -377,8 +430,8 @@ fn convert_delimiter(delim: &str) -> String {
         "]" => "]".to_string(),
         "\\{" | "\\lbrace" => "{".to_string(),
         "\\}" | "\\rbrace" => "}".to_string(),
-        "|" | "\\vert" => "bar.v".to_string(),
-        "\\|" | "\\Vert" => "bar.v.double".to_string(),
+        "|" | "\\vert" | "\\lvert" | "\\rvert" => "bar.v".to_string(),
+        "\\|" | "\\Vert" | "\\lVert" | "\\rVert" => "bar.v.double".to_string(),
         "\\langle" => "chevron.l".to_string(),
         "\\rangle" => "chevron.r".to_string(),
         "\\lfloor" => "floor.l".to_string(),
@@ -389,33 +442,4 @@ fn convert_delimiter(delim: &str) -> String {
         "\\rgroup" => "paren.r.flat".to_string(),
         other => other.to_string(),
     }
-}
-
-/// Convert a math symbol command
-pub fn convert_math_symbol(name: &str) -> Option<&'static str> {
-    // First check TEX_COMMAND_SPEC for aliases - these give proper Typst symbol names
-    if let Some(CommandSpecItem::Cmd(shape)) = TEX_COMMAND_SPEC.get(name) {
-        if let Some(ref alias) = shape.alias {
-            return Some(Box::leak(alias.clone().into_boxed_str()));
-        }
-    }
-
-    // Check extended symbols
-    if let Some(typst) = EXTENDED_SYMBOLS.get(name) {
-        return Some(*typst);
-    }
-
-    let key = format!("\\{}", name);
-
-    // Check Greek letters (fallback - returns Unicode)
-    if let Some(typst) = GREEK_LETTERS.get(key.as_str()) {
-        return Some(*typst);
-    }
-
-    None
-}
-
-/// Check if we're in a matrix-like environment
-pub fn is_matrix_env(env: &EnvironmentContext) -> bool {
-    matches!(env, EnvironmentContext::Matrix | EnvironmentContext::Cases)
 }

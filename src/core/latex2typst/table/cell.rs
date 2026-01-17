@@ -11,7 +11,7 @@ pub enum CellAlign {
 
 impl CellAlign {
     /// Convert to Typst alignment string
-    pub fn to_typst(&self) -> &'static str {
+    pub fn to_typst(self) -> &'static str {
         match self {
             CellAlign::Left => "left",
             CellAlign::Center => "center",

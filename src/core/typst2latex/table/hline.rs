@@ -5,6 +5,7 @@ use typst_syntax::SyntaxNode;
 use crate::core::typst2latex::utils::get_simple_text;
 
 /// Style of horizontal line
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum HLineStyle {
     /// Standard \hline or \cline
@@ -29,6 +30,7 @@ pub struct LatexHLine {
     pub style: HLineStyle,
 }
 
+#[allow(dead_code)]
 impl LatexHLine {
     /// Create a full-width horizontal line
     pub fn full() -> Self {

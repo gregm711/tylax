@@ -28,5 +28,5 @@ mod tests;
 
 // Re-export public API
 pub use cell::{LatexCell, LatexCellAlign};
-pub use generator::{LatexRow, LatexTableGenerator};
-pub use hline::{HLineStyle, LatexHLine};
+pub use generator::LatexTableGenerator;
+pub use hline::LatexHLine;

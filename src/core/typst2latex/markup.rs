@@ -549,6 +549,51 @@ pub fn convert_markup_node(node: &SyntaxNode, ctx: &mut ConvertContext) {
             ctx.last_token = TokenType::Command;
         }
 
+        // Primitive types - output their text representation
+        // These may appear when MiniEval evaluates expressions to primitives
+        SyntaxKind::Int => {
+            let text = node.text().to_string();
+            ctx.push(&text);
+            ctx.last_token = TokenType::Number;
+        }
+
+        SyntaxKind::Float => {
+            let text = node.text().to_string();
+            ctx.push(&text);
+            ctx.last_token = TokenType::Number;
+        }
+
+        SyntaxKind::Numeric => {
+            // Numeric includes lengths like "10pt", "2em", etc.
+            let text = node.text().to_string();
+            ctx.push(&text);
+            ctx.last_token = TokenType::Number;
+        }
+
+        SyntaxKind::Str => {
+            // String literals - output without quotes (content only)
+            let text = node.text().to_string();
+            // Remove surrounding quotes if present
+            let content = text
+                .trim_start_matches('"')
+                .trim_end_matches('"')
+                .trim_start_matches('\'')
+                .trim_end_matches('\'');
+            ctx.push(&escape_latex_text(content));
+            ctx.last_token = TokenType::Text;
+        }
+
+        SyntaxKind::Bool => {
+            // Boolean values
+            let text = node.text().to_string();
+            ctx.push(&text);
+            ctx.last_token = TokenType::Letter;
+        }
+
+        SyntaxKind::None => {
+            // None value - don't output anything
+        }
+
         _ => {
             // Recursively process children
             let child_count = node.children().count();
@@ -1224,7 +1269,7 @@ fn convert_table_to_latex(children: &[&SyntaxNode], ctx: &mut ConvertContext) {
                         }
                     }
                 }
-                SyntaxKind::ContentBlock | SyntaxKind::Markup => {
+                SyntaxKind::ContentBlock | SyntaxKind::Markup | SyntaxKind::Equation => {
                     let mut cell_ctx = ConvertContext::new();
                     cell_ctx.push_env(EnvironmentContext::Table);
                     convert_markup_node(child, &mut cell_ctx);
@@ -1245,8 +1290,10 @@ fn convert_table_to_latex(children: &[&SyntaxNode], ctx: &mut ConvertContext) {
                             if let Some(func_args) = func_children.get(1) {
                                 for header_child in func_args.children() {
                                     match header_child.kind() {
-                                        SyntaxKind::ContentBlock | SyntaxKind::Markup => {
-                                            // Plain content like [Type A]
+                                        SyntaxKind::ContentBlock
+                                        | SyntaxKind::Markup
+                                        | SyntaxKind::Equation => {
+                                            // Plain content like [Type A] or $x$
                                             let mut cell_ctx = ConvertContext::new();
                                             cell_ctx.push_env(EnvironmentContext::Table);
                                             convert_markup_node(header_child, &mut cell_ctx);
@@ -1351,6 +1398,22 @@ fn convert_table_to_latex(children: &[&SyntaxNode], ctx: &mut ConvertContext) {
                                 cells.push(LatexCell::new(content));
                             }
                         }
+                    }
+                }
+                // Handle string arguments as table cells (from MiniEval expansion)
+                SyntaxKind::Str => {
+                    let text = child.text().to_string();
+                    // Remove quotes from string literal
+                    let content = text.trim_matches('"').to_string();
+                    if !content.is_empty() {
+                        cells.push(LatexCell::new(content));
+                    }
+                }
+                // Handle other expression types as table cells
+                SyntaxKind::Int | SyntaxKind::Float | SyntaxKind::Bool => {
+                    let content = child.text().to_string();
+                    if !content.is_empty() {
+                        cells.push(LatexCell::new(content));
                     }
                 }
                 _ => {

@@ -24,8 +24,8 @@
 //! let typst = latex_to_typst(r"\frac{1}{2}");
 //! assert!(typst.contains("frac") || typst.contains("/"));
 //!
-//! // Typst → LaTeX
-//! let latex = typst_to_latex("frac(1, 2)");
+//! // Typst → LaTeX  
+//! let latex = typst_to_latex("$frac(1, 2)$");
 //! assert!(latex.contains(r"\frac"));
 //! ```
 //!
@@ -69,12 +69,18 @@ pub mod wasm;
 // Re-export core conversion functions
 pub use core::typst2latex;
 pub use core::typst2latex::T2LOptions;
-pub use core::typst2latex::{typst_document_to_latex, typst_to_latex, typst_to_latex_with_options};
+pub use core::typst2latex::{
+    typst_document_to_latex, typst_to_latex, typst_to_latex_with_diagnostics,
+    typst_to_latex_with_eval, typst_to_latex_with_options, ConversionResult as T2LConversionResult,
+};
 
 pub use core::latex2typst::{
     convert_document_with_ast, convert_document_with_ast_options, convert_math_with_ast,
-    convert_math_with_ast_options, convert_with_ast, convert_with_ast_options, ConversionMode,
-    ConversionState, EnvironmentContext, L2TOptions, LatexConverter,
+    convert_math_with_ast_options, convert_with_ast, convert_with_ast_options,
+    latex_math_to_typst_with_diagnostics, latex_math_to_typst_with_eval,
+    latex_to_typst_with_diagnostics, latex_to_typst_with_eval, ConversionMode,
+    ConversionResult as L2TConversionResult, ConversionState, EnvironmentContext, L2TOptions,
+    LatexConverter, WarningKind,
 };
 
 // Re-export data modules
@@ -84,7 +90,6 @@ pub use data::maps;
 // Re-export feature modules
 pub use features::bibtex;
 pub use features::images;
-pub use features::macros;
 pub use features::refs;
 pub use features::tables;
 pub use features::templates;
@@ -98,8 +103,16 @@ pub use data::symbols;
 
 // Re-export utilities
 pub use utils::diagnostics;
-pub use utils::error::{ConversionError, ConversionOutput, ConversionResult, ConversionWarning};
+pub use utils::error::{
+    CliDiagnostic, ConversionError, ConversionOutput, ConversionResult, ConversionWarning,
+    DiagnosticSeverity,
+};
 pub use utils::files;
+
+// Re-export main types and functions from eval (MiniEval) - now located in typst2latex
+pub use core::typst2latex::engine::{
+    self, expand_macros, ContentNode, EvalError, EvalResult, MiniEval, Value,
+};
 
 /// Convert LaTeX math code to Typst math code
 ///
@@ -121,7 +134,7 @@ pub fn latex_to_typst(input: &str) -> String {
 /// # Returns
 /// Typst math code
 pub fn latex_to_typst_with_options(input: &str, options: &L2TOptions) -> String {
-    convert_math_with_ast_options(input, options)
+    convert_math_with_ast_options(input, options.clone())
 }
 
 /// Convert a complete LaTeX document to Typst
@@ -131,7 +144,7 @@ pub fn latex_document_to_typst(input: &str) -> String {
 
 /// Convert a complete LaTeX document to Typst with custom options
 pub fn latex_document_to_typst_with_options(input: &str, options: &L2TOptions) -> String {
-    convert_document_with_ast_options(input, options)
+    convert_document_with_ast_options(input, options.clone())
 }
 
 /// Convert with automatic direction detection
@@ -381,5 +394,132 @@ mod tests {
         let result_inline = typst_to_latex_with_options("display(sum)", &opts_inline);
         // In inline mode, display() outputs \displaystyle and restores to \textstyle
         assert!(result_inline.contains("displaystyle"));
+    }
+
+    #[test]
+    fn test_ifmmode_nested_full_conversion() {
+        // Test the full L2T conversion with nested \ifmmode macros
+        // This is the EXACT pattern from the user's test document
+        let input = r#"\documentclass{article}
+\usepackage{amsmath}
+
+\newcommand{\RR}{\mathbb{R}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\langle #1, #2 \rangle}
+\newcommand{\strong}[1]{\ifmmode \mathbf{#1} \else \textbf{#1} \fi}
+\newcommand{\xvec}{\strong{x}}
+
+\begin{document}
+\section{Test}
+Text: \xvec.
+
+Math: $\norm{\xvec} = \sqrt{\inner{\xvec}{\xvec}}$
+\end{document}
+"#;
+        let result = latex_document_to_typst(input);
+        eprintln!("Full conversion result:\n{}", result);
+
+        // In math mode ($...$), \xvec should expand to \mathbf{x}
+        // which should become bold(...) or upright(bold(...)), NOT *x*
+        // *x* in math mode would be multiplication!
+
+        // Check that the math section contains bold(x) not *x*
+        let math_section = result.split("Math:").nth(1).unwrap_or("");
+        eprintln!("Math section: {}", math_section);
+
+        assert!(
+            !math_section.contains("*x*"),
+            "Math section should not have *x* (which is multiplication in Typst math), got: {}",
+            math_section
+        );
+        assert!(
+            math_section.contains("bold(x)") || math_section.contains("bold(x"),
+            "Math section should have bold(x), got: {}",
+            math_section
+        );
+    }
+
+    #[test]
+    fn test_ifmmode_bracket_display_math_full() {
+        // Test the full L2T conversion with \[...\] display math
+        // This is the EXACT pattern that was failing in the user's document
+        let input = r#"\documentclass{article}
+\usepackage{amsmath}
+
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\langle #1, #2 \rangle}
+\newcommand{\strong}[1]{\ifmmode \mathbf{#1} \else \textbf{#1} \fi}
+\newcommand{\xvec}{\strong{x}}
+
+\begin{document}
+\section{Test}
+
+\[
+    \norm{\xvec} = \sqrt{\inner{\xvec}{\xvec}}
+\]
+\end{document}
+"#;
+        let result = latex_document_to_typst(input);
+        eprintln!("Bracket display math result:\n{}", result);
+
+        // In \[...\] display math, \xvec should expand to \mathbf{x}
+        // which should become bold(...), NOT *x*
+        assert!(
+            !result.contains("*x*"),
+            "Should not have *x* in result (would be multiplication in Typst math), got: {}",
+            result
+        );
+        assert!(
+            result.contains("bold(x)"),
+            "Should have bold(x) in display math, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_langle_rangle_in_sqrt() {
+        // Test that \langle x, y \rangle inside \sqrt doesn't break
+        // The comma should not be parsed as a function argument separator
+        let input = r#"\sqrt{\langle x, y \rangle}"#;
+        let result = latex_to_typst(input);
+        eprintln!("langle in sqrt result: {}", result);
+
+        // Should have {} wrapper around the content to protect the comma
+        // sqrt({angle.l x, y angle.r}) instead of sqrt(angle.l x, y angle.r)
+        assert!(
+            result.contains("sqrt({"),
+            "Should have sqrt({{...}}) wrapper to protect comma, got: {}",
+            result
+        );
+        assert!(
+            result.contains("chevron.l"),
+            "Should have chevron.l, got: {}",
+            result
+        );
+        assert!(
+            result.contains("chevron.r"),
+            "Should have chevron.r, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_sqrt_without_comma_no_braces() {
+        // When no comma, should not have extra braces
+        let input = r#"\sqrt{x + y}"#;
+        let result = latex_to_typst(input);
+        eprintln!("sqrt without comma result: {}", result);
+
+        // Should NOT have {} wrapper since no comma
+        assert!(
+            !result.contains("sqrt({"),
+            "Should not have extra braces when no comma, got: {}",
+            result
+        );
+        assert!(
+            result.contains("sqrt("),
+            "Should have sqrt(...), got: {}",
+            result
+        );
     }
 }

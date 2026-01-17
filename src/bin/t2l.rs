@@ -8,9 +8,10 @@ use std::path::Path;
 use tylax::{
     convert_auto, convert_auto_document, detect_format,
     diagnostics::{check_latex, format_diagnostics},
-    latex_document_to_typst, latex_to_typst,
+    latex_document_to_typst, latex_to_typst, latex_to_typst_with_diagnostics,
     tikz::{convert_cetz_to_tikz, convert_tikz_to_cetz, is_cetz_code},
-    typst_document_to_latex, typst_to_latex,
+    typst_document_to_latex, typst_to_latex, typst_to_latex_with_diagnostics, CliDiagnostic,
+    T2LOptions,
 };
 
 #[cfg(feature = "cli")]
@@ -54,6 +55,23 @@ struct Cli {
     /// Use colored output (for check mode)
     #[arg(long, default_value_t = true)]
     color: bool,
+
+    /// Disable MiniEval preprocessing for Typst scripting features (loops, functions)
+    /// By default, MiniEval is enabled for T2L conversions to expand #let, #for, #if, etc.
+    #[arg(long)]
+    no_eval: bool,
+
+    /// Strict mode: exit with error if any conversion warnings occur
+    #[arg(long)]
+    strict: bool,
+
+    /// Quiet mode: suppress warning output to stderr
+    #[arg(short, long)]
+    quiet: bool,
+
+    /// Embed warnings as comments in the output file
+    #[arg(long)]
+    embed_warnings: bool,
 }
 
 #[cfg(feature = "cli")]
@@ -218,19 +236,72 @@ fn main() -> io::Result<()> {
         d => d,
     };
 
-    // Convert
-    let result = if cli.full_document {
-        match direction {
-            Direction::L2t => latex_document_to_typst(&input),
-            Direction::T2l => typst_document_to_latex(&input),
-            Direction::Auto => convert_auto_document(&input).0,
+    // Determine if this is a full document based on content or flag
+    let is_full_document = cli.full_document || is_latex_document(&input);
+
+    // Convert with diagnostics - collect warnings as unified CliDiagnostic
+    let (result, diagnostics): (String, Vec<CliDiagnostic>) = match direction {
+        Direction::L2t => {
+            let conv_result = latex_to_typst_with_diagnostics(&input);
+            let diags = conv_result
+                .warnings
+                .into_iter()
+                .map(CliDiagnostic::from)
+                .collect();
+            (conv_result.output, diags)
         }
+        Direction::T2l => {
+            let options = if is_full_document {
+                T2LOptions::full_document()
+            } else {
+                T2LOptions::default()
+            };
+            if !cli.no_eval {
+                let conv_result = typst_to_latex_with_diagnostics(&input, &options);
+                let diags = conv_result
+                    .warnings
+                    .into_iter()
+                    .map(CliDiagnostic::from)
+                    .collect();
+                (conv_result.output, diags)
+            } else {
+                let output = if is_full_document {
+                    typst_document_to_latex(&input)
+                } else {
+                    typst_to_latex(&input)
+                };
+                (output, Vec::new())
+            }
+        }
+        Direction::Auto => {
+            let (output, _) = if is_full_document {
+                convert_auto_document(&input)
+            } else {
+                convert_auto(&input)
+            };
+            (output, Vec::new())
+        }
+    };
+
+    // Print diagnostics to stderr (unless quiet mode)
+    if !cli.quiet && !diagnostics.is_empty() {
+        print_diagnostics_to_stderr(&diagnostics, cli.color);
+    }
+
+    // Check strict mode
+    if cli.strict && !diagnostics.is_empty() {
+        eprintln!(
+            "Error: {} conversion warning(s) in strict mode",
+            diagnostics.len()
+        );
+        std::process::exit(1);
+    }
+
+    // Embed diagnostics as comments if requested
+    let result = if cli.embed_warnings && !diagnostics.is_empty() {
+        embed_diagnostics_as_comments(&result, &diagnostics)
     } else {
-        match direction {
-            Direction::L2t => latex_to_typst(&input),
-            Direction::T2l => typst_to_latex(&input),
-            Direction::Auto => convert_auto(&input).0,
-        }
+        result
     };
 
     // Pretty print if requested
@@ -245,7 +316,15 @@ fn main() -> io::Result<()> {
         Some(path) => {
             let mut file = fs::File::create(&path)?;
             writeln!(file, "{}", result)?;
-            eprintln!("✓ Output written to: {}", path);
+            if diagnostics.is_empty() {
+                eprintln!("✓ Output written to: {}", path);
+            } else {
+                eprintln!(
+                    "⚠ Output written to: {} ({} warning(s))",
+                    path,
+                    diagnostics.len()
+                );
+            }
         }
         None => {
             println!("{}", result);
@@ -506,6 +585,19 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
     Ok(())
 }
 
+/// Detect if input is a full LaTeX document (vs math snippet)
+#[cfg(feature = "cli")]
+fn is_latex_document(input: &str) -> bool {
+    // Check for document structure indicators
+    input.contains("\\documentclass")
+        || input.contains("\\begin{document}")
+        || input.contains("\\section")
+        || input.contains("\\chapter")
+        || input.contains("\\title")
+        || input.contains("\\maketitle")
+        || input.contains("\\usepackage")
+}
+
 #[cfg(feature = "cli")]
 fn pretty_print(input: &str) -> String {
     // Simple pretty printing: normalize indentation and spacing
@@ -540,6 +632,53 @@ fn pretty_print(input: &str) -> String {
     }
 
     result.trim().to_string()
+}
+
+/// Print diagnostics to stderr with optional color coding (unified for L2T and T2L).
+#[cfg(feature = "cli")]
+fn print_diagnostics_to_stderr(diagnostics: &[CliDiagnostic], use_color: bool) {
+    eprintln!();
+    eprintln!(
+        "{}Conversion Warnings ({}):{}",
+        if use_color { "\x1b[33m" } else { "" },
+        diagnostics.len(),
+        if use_color { "\x1b[0m" } else { "" }
+    );
+    eprintln!();
+
+    for diag in diagnostics {
+        let color = if use_color { diag.color_code() } else { "" };
+        let reset = if use_color { "\x1b[0m" } else { "" };
+
+        if let Some(ref loc) = diag.location {
+            eprintln!(
+                "  {}[{}]{} {}: {}",
+                color, diag.kind, reset, loc, diag.message
+            );
+        } else {
+            eprintln!("  {}[{}]{} {}", color, diag.kind, reset, diag.message);
+        }
+    }
+    eprintln!();
+}
+
+/// Embed diagnostics as comments at the end of the output (unified for L2T and T2L).
+#[cfg(feature = "cli")]
+fn embed_diagnostics_as_comments(output: &str, diagnostics: &[CliDiagnostic]) -> String {
+    let mut result = output.to_string();
+    result.push_str("\n\n// ═══════════════════════════════════════════════════════════════\n");
+    result.push_str("// Conversion Warnings\n");
+    result.push_str("// ═══════════════════════════════════════════════════════════════\n");
+
+    for diag in diagnostics {
+        if let Some(ref loc) = diag.location {
+            result.push_str(&format!("// [{}] {}: {}\n", diag.kind, loc, diag.message));
+        } else {
+            result.push_str(&format!("// [{}] {}\n", diag.kind, diag.message));
+        }
+    }
+
+    result
 }
 
 #[cfg(not(feature = "cli"))]

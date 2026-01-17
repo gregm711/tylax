@@ -8,62 +8,6 @@ use mitex_parser::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 // Text Processing Utilities
 // =============================================================================
 
-/// Normalize table cell text by cleaning up whitespace issues
-/// This handles cases where MiTeX tokenizer may have added extra spaces between characters
-pub fn normalize_cell_text(text: &str) -> String {
-    // If the text contains special Typst cell markers, leave it as is
-    if text.starts_with("___TYPST_CELL___:") {
-        return text.to_string();
-    }
-
-    let mut result = String::new();
-    let mut chars = text.chars().peekable();
-    let mut last_was_space = false;
-
-    while let Some(ch) = chars.next() {
-        if ch.is_whitespace() {
-            // Check if this might be spurious space between word characters
-            // Pattern: "letter space letter" with single char before space suggests bad tokenization
-            if !result.is_empty() && !last_was_space {
-                // Look ahead to see if next non-space is a letter
-                let next_non_space = chars.clone().find(|c| !c.is_whitespace());
-
-                // Check if last char in result is part of a word and next char continues it
-                let last_char = result.chars().last();
-                if let (Some(last), Some(next)) = (last_char, next_non_space) {
-                    // If both are alphanumeric characters and result ends with a single character after space,
-                    // this might indicate spurious tokenization (e.g. "T e X").
-                    // We only collapse single-char spaces between alphanumeric characters to preserve intentional spacing.
-                    if ch == ' ' && last.is_alphanumeric() && next.is_alphanumeric() {
-                        // Check if this looks like broken-up text (single chars separated by spaces)
-                        // by looking at context - if result has "X " pattern repeatedly, collapse
-                        let result_chars: Vec<char> = result.chars().collect();
-                        if result_chars.len() >= 2 {
-                            let prev_prev = result_chars.get(result_chars.len() - 2);
-                            // If pattern is: "char space char space" - likely broken tokenization
-                            if prev_prev == Some(&' ') {
-                                // Skip this space to collapse
-                                last_was_space = true;
-                                continue;
-                            }
-                        }
-                    }
-                }
-                result.push(' ');
-                last_was_space = true;
-            } else if !last_was_space {
-                result.push(' ');
-                last_was_space = true;
-            }
-        } else {
-            result.push(ch);
-            last_was_space = false;
-        }
-    }
-
-    result.trim().to_string()
-}
-
 /// Sanitize a label name for Typst compatibility
 /// Converts colons to hyphens since Typst labels work better with hyphens
 pub fn sanitize_label(label: &str) -> String {
