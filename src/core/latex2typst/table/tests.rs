@@ -141,3 +141,34 @@ fn test_empty_table() {
     assert!(output.contains("table("));
     assert!(output.contains("columns:"));
 }
+
+#[test]
+fn test_longtable_controls_ignored() {
+    let content = "Head1|||CELL|||Head2|||ROW|||\\endhead|||ROW|||A|||CELL|||B";
+    let alignments = vec![CellAlign::Left; 2];
+    let output = parse_with_grid_parser(content, alignments);
+
+    assert!(output.contains("[Head1]"));
+    assert!(output.contains("[Head2]"));
+    assert!(output.contains("[A]"));
+    assert!(output.contains("[B]"));
+    assert!(!output.to_lowercase().contains("endhead"));
+}
+
+#[test]
+fn test_row_padding_for_short_rows() {
+    let content = "Only|||ROW|||A|||CELL|||B";
+    let alignments = vec![CellAlign::Left; 2];
+    let output = parse_with_grid_parser(content, alignments);
+
+    assert!(output.contains("[Only], []"));
+}
+
+#[test]
+fn test_max_cols_from_content() {
+    let content = "A|||CELL|||B|||CELL|||C";
+    let alignments = vec![CellAlign::Left; 2];
+    let output = parse_with_grid_parser(content, alignments);
+
+    assert!(output.contains("columns: (auto, auto, auto)"));
+}

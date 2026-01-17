@@ -8,7 +8,7 @@ use std::fmt::Write;
 
 use super::context::{ConversionMode, EnvironmentContext, LatexConverter, TemplateKind};
 use super::table::{parse_with_grid_parser, CellAlign};
-use super::utils::{escape_typst_string, sanitize_label};
+use super::utils::{convert_caption_text, escape_typst_string, sanitize_label, strip_label_from_text};
 use crate::data::constants::{CodeBlockOptions, TheoremStyle, LANGUAGE_MAP, THEOREM_TYPES};
 use crate::utils::loss::{LossKind, LOSS_MARKER_PREFIX};
 
@@ -359,18 +359,24 @@ fn convert_program(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut St
 fn convert_figure(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut String) {
     conv.state.push_env(EnvironmentContext::Figure);
 
-    output.push_str("\n#figure(\n");
-
     // Find image and caption using AST
-    let mut has_image = false;
+    let mut image_expr: Option<String> = None;
     let mut caption_cmd: Option<CmdItem> = None;
     let mut label_text = String::new();
+    let mut subfigs: Vec<String> = Vec::new();
 
     for child in node.children_with_tokens() {
         if let SyntaxElement::Node(n) = &child {
             if let Some(cmd) = CmdItem::cast(n.clone()) {
                 if let Some(name_tok) = cmd.name_tok() {
                     let name = name_tok.text();
+                    if name == "\\subcaptionbox" {
+                        let sub = render_subcaptionbox(conv, &cmd);
+                        if !sub.trim().is_empty() {
+                            subfigs.push(sub);
+                        }
+                        continue;
+                    }
                     if name == "\\includegraphics" {
                         if let Some(path) = conv.get_required_arg(&cmd, 0) {
                             let trimmed = path.trim();
@@ -379,10 +385,7 @@ fn convert_figure(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Str
                                 && !trimmed.contains('{')
                                 && !trimmed.contains('}')
                             {
-                                has_image = true;
-                                output.push_str("  image(\"");
-                                output.push_str(trimmed);
-                                output.push_str("\")");
+                                image_expr = Some(format!("  image(\"{}\")", trimmed));
                             }
                         }
                     } else if name == "\\caption" {
@@ -398,10 +401,18 @@ fn convert_figure(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Str
         }
     }
 
+    output.push_str("\n#figure(\n");
+    let has_image = image_expr.is_some();
     let mut wrote_arg = has_image;
-    if !has_image {
+    let has_subfigs = !subfigs.is_empty();
+    if !has_image && !has_subfigs {
         output.push_str("  []");
         wrote_arg = true;
+    }
+    if has_image && !has_subfigs {
+        if let Some(expr) = image_expr.take() {
+            output.push_str(&expr);
+        }
     }
 
     // Convert caption content (may contain math like $\downarrow$)
@@ -423,6 +434,22 @@ fn convert_figure(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Str
 
     output.push(')');
 
+    if has_subfigs {
+        output.push_str("[\n");
+        if subfigs.len() > 1 {
+            let columns = if subfigs.len() >= 3 { 3 } else { 2 };
+            let _ = writeln!(output, "#grid(columns: {}, gutter: 1em)[", columns);
+            for sub in &subfigs {
+                let _ = writeln!(output, "  {},", sub.trim());
+            }
+            output.push_str("]\n");
+        } else if let Some(first) = subfigs.first() {
+            output.push_str(first.trim());
+            output.push('\n');
+        }
+        output.push_str("]\n");
+    }
+
     if !label_text.is_empty() {
         let _ = write!(output, " <{}>", sanitize_label(&label_text));
     }
@@ -430,6 +457,32 @@ fn convert_figure(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Str
     output.push('\n');
 
     conv.state.pop_env();
+}
+
+fn render_subcaptionbox(conv: &mut LatexConverter, cmd: &CmdItem) -> String {
+    let raw_caption = conv.get_required_arg_with_braces(cmd, 0).unwrap_or_default();
+    let (caption, label) = strip_label_from_text(&raw_caption);
+    let caption_text = convert_caption_text(&caption);
+    let content = conv.convert_required_arg(cmd, 1).unwrap_or_default();
+
+    let mut out = String::new();
+    out.push_str("#figure(kind: \"subfigure\", supplement: none");
+    if !caption_text.trim().is_empty() {
+        let _ = write!(out, ", caption: [{}]", caption_text.trim());
+    }
+    out.push_str(")[\n");
+    if !content.trim().is_empty() {
+        out.push_str(content.trim());
+        out.push('\n');
+    }
+    out.push_str("]");
+    if let Some(lbl) = label {
+        let clean = sanitize_label(&lbl);
+        if !clean.is_empty() {
+            let _ = write!(out, " <{}>", clean);
+        }
+    }
+    out
 }
 
 /// Convert a table environment
@@ -1224,6 +1277,23 @@ fn parse_column_spec(spec: &str) -> Vec<String> {
                         }
                     }
                 }
+            }
+            _ if c.is_ascii_alphabetic() => {
+                // Custom column types (e.g., j{3.2}) - treat as a single column
+                if chars.peek() == Some(&'{') {
+                    let mut depth = 0;
+                    for ch in chars.by_ref() {
+                        if ch == '{' {
+                            depth += 1;
+                        } else if ch == '}' {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                    }
+                }
+                columns.push("l".to_string());
             }
             _ => {}
         }

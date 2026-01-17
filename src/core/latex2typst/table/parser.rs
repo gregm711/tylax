@@ -167,8 +167,10 @@ impl TableGridParser {
             let _ = writeln!(output, "    align: ({}),", aligns.join(", "));
         }
 
+        let normalized_rows = self.normalized_rows(effective_cols);
+
         // Generate rows
-        for row in &self.rows {
+        for row in &normalized_rows {
             // Emit hlines before this row
             for hline in &row.hlines_before {
                 let _ = writeln!(output, "    {},", hline.to_typst());
@@ -189,6 +191,56 @@ impl TableGridParser {
         output.push_str(")\n");
         output
     }
+
+    fn normalized_rows(&self, effective_cols: usize) -> Vec<GridRow> {
+        let mut normalized = Vec::with_capacity(self.rows.len());
+        let mut coverage = vec![0usize; effective_cols];
+
+        for row in &self.rows {
+            let mut out_row = GridRow::new();
+            out_row.hlines_before = row.hlines_before.clone();
+
+            let mut col = 0usize;
+            let mut cell_idx = 0usize;
+
+            while col < effective_cols {
+                if coverage[col] > 0 {
+                    coverage[col] -= 1;
+                    col += 1;
+                    continue;
+                }
+
+                if cell_idx < row.cells.len() {
+                    let mut cell = row.cells[cell_idx].clone();
+                    if cell.colspan == 0 {
+                        cell.colspan = 1;
+                    }
+                    let remaining = effective_cols - col;
+                    if cell.colspan > remaining {
+                        cell.colspan = remaining;
+                    }
+
+                    let rows_to_cover = cell.rowspan.saturating_sub(1);
+                    for i in 0..cell.colspan {
+                        if col + i < coverage.len() {
+                            coverage[col + i] = rows_to_cover;
+                        }
+                    }
+
+                    out_row.cells.push(cell);
+                    col += out_row.cells.last().map(|c| c.colspan).unwrap_or(1);
+                    cell_idx += 1;
+                } else {
+                    out_row.cells.push(GridCell::empty());
+                    col += 1;
+                }
+            }
+
+            normalized.push(out_row);
+        }
+
+        normalized
+    }
 }
 
 /// Parse table content using the state-aware TableGridParser
@@ -201,6 +253,7 @@ pub fn parse_with_grid_parser(content: &str, alignments: Vec<CellAlign>) -> Stri
         if row_str.is_empty() {
             continue;
         }
+        let has_longtable_control = contains_longtable_control(row_str);
 
         // Check for HLINE markers and extract partial line info
         if row_str.contains("|||HLINE|||") {
@@ -225,6 +278,14 @@ pub fn parse_with_grid_parser(content: &str, alignments: Vec<CellAlign>) -> Stri
             .map(clean_cell_content)
             .collect();
 
+        let has_cell_markers = clean_row.contains("|||CELL|||");
+        if has_longtable_control
+            && !has_cell_markers
+            && raw_cells.iter().all(|c| c.trim().is_empty())
+        {
+            continue;
+        }
+
         parser.process_row(raw_cells);
     }
 
@@ -239,4 +300,12 @@ pub fn parse_with_grid_parser(content: &str, alignments: Vec<CellAlign>) -> Stri
     }
 
     parser.generate_typst(col_count)
+}
+
+fn contains_longtable_control(s: &str) -> bool {
+    let s = s.to_ascii_lowercase();
+    s.contains("endfirsthead")
+        || s.contains("endhead")
+        || s.contains("endfoot")
+        || s.contains("endlastfoot")
 }

@@ -205,7 +205,7 @@ pub fn find_cmd_args_end(s: &str) -> Option<usize> {
 
 /// Clean a cell string by removing booktabs commands
 pub fn clean_cell_content(cell: &str) -> String {
-    let mut clean = cell.to_string();
+    let mut clean = strip_longtable_controls(cell);
 
     clean = clean.replace("\\toprule", "");
     clean = clean.replace("\\midrule", "");
@@ -228,4 +228,39 @@ pub fn clean_cell_content(cell: &str) -> String {
     }
 
     clean.trim().to_string()
+}
+
+fn strip_longtable_controls(input: &str) -> String {
+    let mut out = strip_control_comments(input);
+    for name in ["endfirsthead", "endhead", "endfoot", "endlastfoot"] {
+        let with_slash = format!("\\{}", name);
+        out = out.replace(&with_slash, "");
+        out = out.replace(name, "");
+    }
+    out
+}
+
+fn strip_control_comments(input: &str) -> String {
+    let keywords = ["endfirsthead", "endhead", "endfoot", "endlastfoot"];
+    let mut out = String::new();
+    let mut rest = input;
+
+    while let Some(start) = rest.find("/*") {
+        let (before, after_start) = rest.split_at(start);
+        out.push_str(before);
+        if let Some(end) = after_start.find("*/") {
+            let (comment, after) = after_start.split_at(end + 2);
+            if !keywords.iter().any(|k| comment.contains(k)) {
+                out.push_str(comment);
+            }
+            rest = after;
+        } else {
+            // Unterminated comment: keep the remainder.
+            out.push_str(after_start);
+            rest = "";
+        }
+    }
+
+    out.push_str(rest);
+    out
 }

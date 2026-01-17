@@ -500,11 +500,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
         "ce" => {
             if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
-                let text = super::utils::convert_caption_text(&raw);
-                let escaped = super::utils::escape_typst_string(text.trim());
                 if conv.state.mode == ConversionMode::Math {
-                    let _ = write!(output, "text(\"{}\")", escaped);
+                    let formatted = super::utils::format_chemical_formula_math(&raw);
+                    if !formatted.is_empty() {
+                        let _ = write!(output, "{} ", formatted);
+                    }
                 } else {
+                    let text = super::utils::convert_caption_text(&raw);
+                    let escaped = super::utils::escape_typst_string(text.trim());
                     let _ = write!(output, "#text(\"{}\")", escaped);
                 }
             }
@@ -551,8 +554,13 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
         // Text in math - these commands output text in math mode
         "text" | "textrm" | "textup" | "textnormal" => {
-            if let Some(arg) = conv.get_required_arg(&cmd, 0) {
-                let _ = write!(output, "\"{}\" ", arg);
+            let raw = conv
+                .get_required_arg_with_braces(&cmd, 0)
+                .or_else(|| conv.get_required_arg(&cmd, 0));
+            if let Some(raw) = raw {
+                let text = super::utils::convert_caption_text(&raw);
+                let escaped = super::utils::escape_typst_string(text.trim());
+                let _ = write!(output, "\"{}\" ", escaped);
             }
         }
 
@@ -1163,6 +1171,30 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
         }
 
+        "subcaptionbox" => {
+            let raw_caption = conv.get_required_arg_with_braces(&cmd, 0).unwrap_or_default();
+            let (caption, label) = super::utils::strip_label_from_text(&raw_caption);
+            let caption_text = super::utils::convert_caption_text(&caption);
+            let content = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+
+            output.push_str("#figure(kind: \"subfigure\", supplement: none");
+            if !caption_text.trim().is_empty() {
+                let _ = write!(output, ", caption: [{}]", caption_text.trim());
+            }
+            output.push_str(")[\n");
+            if !content.trim().is_empty() {
+                output.push_str(content.trim());
+                output.push('\n');
+            }
+            output.push_str("]");
+            if let Some(lbl) = label {
+                let clean = sanitize_label(&lbl);
+                if !clean.is_empty() {
+                    let _ = write!(output, " <{}>", clean);
+                }
+            }
+        }
+
         // Table header helpers (OxEngThesis)
         "tableHeaderStart" | "tableHeaderEnd" => {
             // Style-only commands; ignore.
@@ -1358,6 +1390,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         // Math operators (in math mode)
         // \operatorname and \operatorname* - handled via pending_op state machine
         "operatorname" | "operatorname*" => {
+            let is_limits = base_name.ends_with('*')
+                || cmd
+                    .syntax()
+                    .text()
+                    .to_string()
+                    .starts_with("\\operatorname*");
             // Try to get the argument (if parsed as part of the command)
             if let Some(content) = conv.convert_required_arg(&cmd, 0) {
                 // Clean up: remove spaces
@@ -1372,11 +1410,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                     &clean_content
                 };
 
-                // operatorname* usually implies limits
-                let _ = write!(output, "limits(op(\"{}\")) ", op_name);
+                if is_limits {
+                    let _ = write!(output, "limits(op(\"{}\")) ", op_name);
+                } else {
+                    let _ = write!(output, "op(\"{}\") ", op_name);
+                }
             } else {
                 // Argument not captured, set pending state for next ItemCurly
-                conv.state.pending_op = Some(PendingOperator { is_limits: false });
+                conv.state.pending_op = Some(PendingOperator { is_limits });
             }
         }
 
@@ -1894,8 +1935,16 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "lim" => output.push_str("lim "),
         "sup" => output.push_str("sup "),
         "inf" => output.push_str("inf "),
-        "max" => output.push_str("max "),
-        "min" => output.push_str("min "),
+        "max" => {
+            if !super::utils::merge_arg_operator(output, "max") {
+                output.push_str("max ");
+            }
+        }
+        "min" => {
+            if !super::utils::merge_arg_operator(output, "min") {
+                output.push_str("min ");
+            }
+        }
         "arg" => output.push_str("arg "),
         "det" => output.push_str("det "),
         "gcd" => output.push_str("gcd "),
@@ -1926,7 +1975,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         // Big operators - trailing space prevents merging with following content
         "sum" => output.push_str("sum "),
         "prod" | "product" => output.push_str("product "),
-        "limits" | "nolimits" => {
+        "limits" => {
+            let _ = super::utils::apply_limits_to_trailing_operator(output);
+        }
+        "nolimits" => {
             // Limits control; ignore and rely on Typst defaults.
         }
         "int" => output.push_str("integral "),
@@ -2047,8 +2099,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
         "multirow" => {
             let nrows = conv.get_required_arg(&cmd, 0).unwrap_or("1".to_string());
-            let _width = conv.get_required_arg(&cmd, 1);
-            let content = conv.convert_required_arg(&cmd, 2).unwrap_or_default();
+            let width_raw = conv.get_required_arg_with_braces(&cmd, 1);
+            let content_idx = match width_raw.as_deref() {
+                Some(w) if w.trim() == "*" => 1,
+                _ => 2,
+            };
+            let content = conv.convert_required_arg(&cmd, content_idx).unwrap_or_default();
             let _ = write!(output, "___TYPST_CELL___:table.cell(rowspan: {})[{}]", nrows, content);
         }
 

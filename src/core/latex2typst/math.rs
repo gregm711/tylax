@@ -25,17 +25,25 @@ pub fn convert_formula(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             let mut math_content = String::new();
             conv.visit_node(&n, &mut math_content);
 
-            // Apply math cleanup
+            // Apply math cleanup and strip stray delimiters if the parser left them behind
             let cleaned = conv.cleanup_math_spacing(&math_content);
-            let cleaned = cleaned.trim();
+            let mut cleaned = cleaned.trim().to_string();
+            loop {
+                let bytes = cleaned.as_bytes();
+                if cleaned.len() >= 2 && bytes[0] == b'$' && bytes[cleaned.len() - 1] == b'$' {
+                    cleaned = cleaned[1..cleaned.len() - 1].trim().to_string();
+                } else {
+                    break;
+                }
+            }
 
             if is_inline {
                 output.push('$');
-                output.push_str(cleaned);
+                output.push_str(&cleaned);
                 output.push('$');
             } else {
                 output.push_str("$ ");
-                output.push_str(cleaned);
+                output.push_str(&cleaned);
                 output.push_str(" $");
             }
 

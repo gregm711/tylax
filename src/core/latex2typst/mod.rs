@@ -338,21 +338,59 @@ Linear & 1.21 & 0.88 & 0.60 \\
 
     #[test]
     fn test_argmin_conversion() {
-        // \arg\min should be converted with spaces to prevent identifier merging
-        let input = r"$\arg\min_{\theta}$";
+        // \arg\min should be combined into a single operator
+        let input = r"\arg\min_{\theta}";
         let output = latex_math_to_typst(input);
         println!("argmin output: {}", output);
-        // Should not have bare "argmin_" (no space) which is invalid in Typst
-        // Should have "arg min_" (with space) which is valid
         assert!(
-            !output.contains("argmin_"),
-            "Should not have bare argmin_: {}",
+            output.contains("op(\"argmin\")") || output.contains("limits(op(\"argmin\"))"),
+            "Should emit argmin operator: {}",
             output
         );
-        // Should have proper spacing
+    }
+
+    #[test]
+    fn test_limits_on_sum() {
+        let input = r"\sum\limits_{i=1}^n";
+        let output = latex_math_to_typst(input);
+        println!("sum limits output: {}", output);
         assert!(
-            output.contains("arg ") && output.contains("min ") || output.contains("arg min"),
-            "Should have proper spacing: {}",
+            output.contains("limits(sum)"),
+            "Should wrap sum with limits(): {}",
+            output
+        );
+        assert!(output.contains("_("), "Should keep subscript: {}", output);
+        assert!(output.contains("^(n)"), "Should keep superscript: {}", output);
+    }
+
+    #[test]
+    fn test_text_in_math() {
+        let input = r"\text{abc}";
+        let output = latex_math_to_typst(input);
+        println!("text in math output: {}", output);
+        assert!(output.contains("\"abc\""), "Should emit math text: {}", output);
+    }
+
+    #[test]
+    fn test_ce_in_math() {
+        let input = r"\ce{Zn(OH)2}";
+        let output = latex_math_to_typst(input);
+        println!("ce output: {}", output);
+        assert!(
+            output.contains("upright(Zn(OH)_(2))"),
+            "Should format chemical formula with subscripts: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_argmax_conversion() {
+        let input = r"\arg\max_{x}";
+        let output = latex_math_to_typst(input);
+        println!("argmax output: {}", output);
+        assert!(
+            output.contains("op(\"argmax\")") || output.contains("limits(op(\"argmax\"))"),
+            "Should emit argmax operator: {}",
             output
         );
     }
@@ -408,7 +446,7 @@ ARIMA & 0.91 & 1.22 & 1.58 & 2.01 \\
         // The first cell was "&", so it's empty, so it's removed.
         // Remaining cells: H=1, H=5, ...
         // This is correct because the first column is covered by Model's rowspan.
-        assert!(output.contains("[$H = 1 $], [$H = 5 $]"));
+        assert!(output.contains("[$H = 1$], [$H = 5$]"));
     }
 
     #[test]
@@ -427,7 +465,7 @@ Dropout & No & Yes & \\
 
         // Check gamma row: \gamma, [], 0.5, 1.0
         // Should have empty cell in 2nd position
-        assert!(output.contains(r"[$gamma $], [], [0.5], [1.0]"));
+        assert!(output.contains(r"[$gamma$], [], [0.5], [1.0]"));
 
         // Check Dropout row: Dropout, No, Yes, []
         // Typst output might end with comma, trailing empty cell might be implicit or explicit

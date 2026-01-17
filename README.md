@@ -186,6 +186,19 @@ Contributions are welcome! Please feel free to submit issues and pull requests.
 - Update documentation as needed
 - Run `cargo fmt` and `cargo clippy` before committing
 
+### Corpus Regression Harness
+
+Run the thesis corpus compile loop (convert → typst compile → report):
+
+```bash
+./tools/thesis_corpus_compile.sh
+```
+
+Notes:
+- Report output: `target/thesis_corpus/compile_report.md` (logs per template under `target/thesis_corpus/<name>/`).
+- Override corpus list with `THESIS_LIST=tools/thesis_corpus_list.txt`.
+- Use prebuilt binaries via `T2L_BIN=target/debug/t2l` or `TYPST_BIN=/path/to/typst`.
+
 ---
 
 ## License

@@ -1565,6 +1565,18 @@ lazy_static! {
             },
             alias: None,
         }));
+        m.insert("subcaptionbox".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right {
+                pattern: ArgPattern::Glob {
+                    pattern: GlobStr::from("{,b}tt"),
+                },
+            },
+            alias: None,
+        }));
+        m.insert("subcaption".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
         m.insert("tableHeaderStart".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 0 } },
             alias: None,

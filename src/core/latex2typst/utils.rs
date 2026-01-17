@@ -4,6 +4,7 @@
 
 use mitex_parser::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 use std::collections::HashSet;
+use std::fmt::Write;
 
 // =============================================================================
 // Text Processing Utilities
@@ -414,6 +415,190 @@ pub fn sanitize_loss_comment_boundaries(input: &str) -> String {
     input.replace("*/* tylax:loss:", "* /* tylax:loss:")
 }
 
+// =============================================================================
+// Math Cleanup Helpers
+// =============================================================================
+
+/// Merge "arg" followed by "min"/"max" into a single operator.
+/// Returns true if a merge happened and output was updated.
+pub fn merge_arg_operator(output: &mut String, tail: &str) -> bool {
+    let trimmed_len = output.trim_end().len();
+    let prefix = &output[..trimmed_len];
+
+    if !prefix.ends_with("arg") {
+        return false;
+    }
+
+    let before = &prefix[..prefix.len() - 3];
+    let prev = before.chars().rev().find(|c| !c.is_whitespace());
+    if let Some(ch) = prev {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' {
+            return false;
+        }
+    }
+
+    output.truncate(prefix.len() - 3);
+    let _ = write!(output, "op(\"arg{}\") ", tail);
+    true
+}
+
+/// Wrap the trailing operator with limits(...).
+/// Returns true if an operator was wrapped.
+pub fn apply_limits_to_trailing_operator(output: &mut String) -> bool {
+    let trimmed_len = output.trim_end().len();
+    if trimmed_len == 0 {
+        return false;
+    }
+
+    let prefix = &output[..trimmed_len];
+    if prefix.ends_with("limits)") || prefix.ends_with("limits )") {
+        return false;
+    }
+
+    if let Some(expr_start) = find_trailing_op_call(prefix) {
+        let expr = prefix[expr_start..].to_string();
+        output.truncate(expr_start);
+        let _ = write!(output, "limits({}) ", expr);
+        return true;
+    }
+
+    const OPS: [&str; 24] = [
+        "sum",
+        "product",
+        "integral",
+        "integral.double",
+        "integral.triple",
+        "integral.cont",
+        "lim",
+        "sup",
+        "inf",
+        "max",
+        "min",
+        "argmin",
+        "argmax",
+        "det",
+        "gcd",
+        "lcm",
+        "union.big",
+        "sect.big",
+        "plus.circle.big",
+        "times.circle.big",
+        "union.sq.big",
+        "union.plus.big",
+        "or.big",
+        "and.big",
+    ];
+
+    for op in OPS {
+        if !prefix.ends_with(op) {
+            continue;
+        }
+        let before = &prefix[..prefix.len() - op.len()];
+        let prev = before.chars().rev().find(|c| !c.is_whitespace());
+        if let Some(ch) = prev {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' {
+                continue;
+            }
+        }
+
+        output.truncate(prefix.len() - op.len());
+        let _ = write!(output, "limits({}) ", op);
+        return true;
+    }
+
+    false
+}
+
+fn find_trailing_op_call(s: &str) -> Option<usize> {
+    let trimmed = s.trim_end();
+    if !trimmed.ends_with(')') {
+        return None;
+    }
+
+    let mut depth = 0i32;
+    let mut open_idx = None;
+    for (idx, ch) in trimmed.char_indices().rev() {
+        match ch {
+            ')' => depth += 1,
+            '(' => {
+                depth -= 1;
+                if depth == 0 {
+                    open_idx = Some(idx);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let open_idx = open_idx?;
+    let func = trimmed[..open_idx].trim_end();
+    if func.ends_with("limits") {
+        return None;
+    }
+    if !func.ends_with("op") {
+        return None;
+    }
+
+    let func_start = func.len() - 2;
+    let before = func[..func_start].chars().rev().find(|c| !c.is_whitespace());
+    if let Some(ch) = before {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            return None;
+        }
+    }
+    Some(func_start)
+}
+
+/// Format a basic chemical formula for Typst math (e.g., H2O -> upright(H_2O)).
+pub fn format_chemical_formula_math(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    let mut chars = trimmed.chars().peekable();
+    let mut prev_non_space: Option<char> = None;
+
+    while let Some(ch) = chars.next() {
+        if ch.is_ascii_whitespace() {
+            out.push(' ');
+            continue;
+        }
+
+        if ch.is_ascii_digit() {
+            let mut digits = String::new();
+            digits.push(ch);
+            while let Some(next) = chars.peek().copied() {
+                if next.is_ascii_digit() {
+                    digits.push(next);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+
+            let use_subscript = matches!(
+                prev_non_space,
+                Some(p) if p.is_ascii_alphabetic() || p == ')' || p == ']' || p == '}'
+            );
+            if use_subscript {
+                let _ = write!(out, "_({})", digits);
+            } else {
+                out.push_str(&digits);
+            }
+            prev_non_space = Some(ch);
+            continue;
+        }
+
+        out.push(ch);
+        prev_non_space = Some(ch);
+    }
+
+    format!("upright({})", out)
+}
+
 fn convert_string_entries(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
@@ -528,6 +713,52 @@ pub fn escape_typst_string(text: &str) -> String {
         .replace('"', "\\\"")
         .replace('\n', "\\n")
         .replace('\r', "")
+}
+
+/// Strip a \label{...} command from raw text and return (clean_text, label).
+pub fn strip_label_from_text(raw: &str) -> (String, Option<String>) {
+    let bytes = raw.as_bytes();
+    let mut out = String::with_capacity(raw.len());
+    let mut label: Option<String> = None;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && raw[i..].starts_with("\\label") {
+            let mut j = i + "\\label".len();
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'{' {
+                let mut depth = 0i32;
+                let mut end = None;
+                for (off, ch) in raw[j..].char_indices() {
+                    match ch {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end = Some(j + off);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(end_pos) = end {
+                    let content = raw[j + 1..end_pos].trim();
+                    if !content.is_empty() {
+                        label = Some(content.to_string());
+                    }
+                    i = end_pos + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    let cleaned = out.trim().to_string();
+    let cleaned_label = label.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    (cleaned, cleaned_label)
 }
 
 /// Escape '@' occurrences that are not valid Typst references or citations.
