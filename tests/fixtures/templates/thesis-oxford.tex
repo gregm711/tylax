@@ -1,0 +1,689 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[table]{xcolor}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{multicol}
+\usepackage{array}
+\usepackage{textcomp}
+\usepackage{float}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{1em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.8em}{0.3em}
+\titlespacing*{\subsubsection}{0pt}{0.6em}{0.2em}
+\titlespacing*{\paragraph}{0pt}{0.5em}{0.1em}
+\providecommand{\textsubscript}[1]{$_{\text{#1}}$}
+\begin{document}
+
+\begin{center}
+{\huge \textbf{The long-term effects of climate change on farming in Middle Earth}}
+\par\vspace{1em}
+{\large Samwise Gamgee}
+\par\vspace{0.5em}
+Hilary Term, 2048
+\end{center}
+
+chapter-1
+
+\section{The OxEngThesis LaTeX class}
+
+IMPORTANT NOTE This chapter contains a summary of some of the features available in the OxEngThesis class. It is included just to showcase how to use the available formatting options in a LaTeX source file. Remove this chapter when you are writing your own thesis or report. It is numbered as ``Chapter 0'' so not to change the flow of the rest of the document.
+
+\subsection{Introduction}
+
+This repository contains a LaTeX class (OxEngThesis) to write formal academic documents for a student of the Department of Engineering Science at the University of Oxford. For example, my undergraduate students have used this class to write 4\textsuperscript{th}-year project (4YP) reports. My doctoral students have typically used this class to write their 1\textsuperscript{st}-year Transfer of Status report, 2\textsuperscript{nd}-year Confirmation of Status report and their final DPhil thesis. The typical 4YP report contains around 50 pages, whereas a doctoral thesis is a much larger document.
+
+Although I originally created this class for a student at Oxford, I also included in this repository some examples for a PhD thesis for the Massachusetts Institute of Technology and (cough, cough) the University of Cambridge. It should be easy for you to adjust this class to suit the requirements of your academic institution.
+
+LaTex itself is very portable. However, I developed this class under Linux and macOS environments using the latest LaTeX distributions. I have not tested compiling a LaTeX document in Microsoft Windows, but some of my students reported that it works. If you find any problems for Windows, please report any issues to me. Event better, I encourage you to contribute your fixes.
+
+As a research student, a proportion of your time will be devoted to writing science in a formal academic style. There are many resources that will help you to write your thesis, such as ``Writing your thesis''\footnote{\href{https://www.mpls.ox.ac.uk/training/resources-for-researcher-and-career-development/completing-your-dphil/writing-up-your-thesis}{https://www.mpls.ox.ac.uk/training/resources-for-researcher-and-career-development/completing-your-dphil/writing-up-your-thesis}}, ``Completing your doctorate''\footnote{\href{https://www.vitae.ac.uk/doing-research/doing-a-doctorate/completing-your-doctorate}{https://www.vitae.ac.uk/doing-research/doing-a-doctorate/completing-your-doctorate}}, ``Essay and dissertation writing skills''\footnote{\href{https://www.ox.ac.uk/students/academic/guidance/skills/essay}{https://www.ox.ac.uk/students/academic/guidance/skills/essay}} and also ``Resources for new students''\footnote{\href{https://cameralab.eng.ox.ac.uk/resources\_new\_students.html}{https://cameralab.eng.ox.ac.uk/resources\_new\_students.html}}. Steven Pinker's talk on ``Linguistics, Style and Writing in the 21st Century''\footnote{\href{https://youtu.be/OV5J6BfToSw}{https://youtu.be/OV5J6BfToSw}} will provide you with sound advice on writing.
+
+My students have found very helpful to use the LaTeX typesetting system to write reports, theses, journal papers or other academic documents. You can write your LaTeX documents from scratch, however, it is often easier to start with an already written class template. This way you can focus on (as your supervisor expects) writing about your exciting research contributions, rather than spending time formatting your document or applying other cosmetic changes that just waste everybody's time and distract the reader.
+
+The OxEngThesis class is based on the \textit{memoir}\footnote{\href{https://ctan.org/pkg/memoir}{https://ctan.org/pkg/memoir}} package, with the addition of several other packages and extra features useful to format a typical academic document. The main class file is oxengthesis.cls. One sample source file is provided (sample\_dphil\_thesis.tex). You can check this sample PDF file to review an example of the output of a doctoral thesis.
+
+In this chapter, I will summarise some of the features available in the OxEngThesis class. Take a look at the oxengthesis.cls file and the rest of this sample thesis document for a more complete overview.
+
+\subsection{Requirements}
+
+There are several options for writing in LaTeX, including online versions such as Overleaf. I don't recommend online editors, as you will be writing long documents with several figures, tables and other elements. In my experience, having LaTeX installed locally in your computer is a better option.
+
+You will need a modern LaTeX compiler installed in your system, at minimum version 2017. Most modern operating systems use \textit{TexLive}\footnote{\href{https://www.tug.org/texlive}{https://www.tug.org/texlive}} as the preferred LaTeX typesetting system. If you are using Linux, TexLive is already pre-installed or is readily available from your distribution's software repository (for example Fedora\footnote{\href{https://docs.fedoraproject.org/en-US/neurofedora/latex}{https://docs.fedoraproject.org/en-US/neurofedora/latex}} or Ubuntu\footnote{\href{https://help.ubuntu.com/community/LaTeX}{https://help.ubuntu.com/community/LaTeX}}). For macOS, you can download and install the latest MacTeX distribution\footnote{\href{https://tug.org/mactex}{https://tug.org/mactex}}. For Microsoft Windows, follow the installation instructions described in TexLive\footnote{\href{https://tug.org/texlive/windows.html}{https://tug.org/texlive/windows.html}}.
+
+Install the \textit{Carlito} font\footnote{\href{https://ctan.org/tex-archive/fonts/carlito}{https://ctan.org/tex-archive/fonts/carlito}} (if it's not already installed in your system). Follow the instructions for your particular operating system in the ./fonts/ directory in this repository. If you are using Microsoft Windows, also install the ``\textit{Latin Modern Math}''\footnote{\href{https://ctan.org/tex-archive/fonts/lm-math}{https://ctan.org/tex-archive/fonts/lm-math}} font, also available in the ./fonts/ directory in this repository.
+
+\subsection{LaTeX editors}
+
+There are several editors available that will make your life easier when writing LaTeX documents and, ultimately, generating the final PDF file (a.k.a compiling the LaTeX source files). For macOS and iOS, Texifier\footnote{\href{https://www.texifier.com}{https://www.texifier.com}} works really well. Good editors for Linux are Kile\footnote{\href{https://apps.kde.org/en-gb/kile}{https://apps.kde.org/en-gb/kile}} and TeXMaker\footnote{\href{https://www.xm1math.net/texmaker}{https://www.xm1math.net/texmaker}}. If you know what software is good for Microsoft Windows, let me know so I can add it to my recommendation list.
+
+The LaTeX files in this repository require the \textit{LuaLaTeX}\footnote{\href{https://en.wikipedia.org/wiki/LuaTeX}{https://en.wikipedia.org/wiki/LuaTeX}} engine. You editor should allow you to configure LuaLaTeX as the typesetting engine for your document and automatically take care of the compilation process to generate the final PDF document.
+
+\subsection{Writing your thesis}
+
+\subsubsection{Preparing your document}
+
+After you installed your preferred LaTeX editor, make a copy of the sample\_thesis.tex sample file provided in this repository. Throughout this tutorial, I will call this new file your ``\textit{main LaTeX source file}''. From your ``\textit{main LaTeX source file}'', remove the line that includes this chapter. It is a line similar to:
+
+[style=custom-latex]\textbackslash{}include\{oxengthesis\_class\_documentation\}
+
+Note that the line above includes the chapter you are currently reading. It is only meant to showcase the features provided by the OxEngThesis class. It is numbered as ``Chapter 0'' so not to change the flow of the rest of the document.
+
+The \textit{frontmatter} of the thesis will be automatically created depending on the type of document you are writing, either a doctoral thesis or a project report. If you want more control, you can review how the \textbackslash{}makefrontmatterpages command is defined in the oxengthesis.cls class file. If you want all the sections in the \textit{frontmatter} to appear, you will need to create the following files:
+
+\begin{itemize}
+  \item abstract.tex: If you want the ``Abstract'' page
+  \item dedication.tex: If you want the ``Dedication'' page
+  \item declaration.tex: If you want the ``Declaration'' page
+  \item acknowledgements.tex: If you want the ``Acknowledgements'' page
+  \item publications.tex: If you want the ``List of publications'' page
+  \item glossary.tex: If you want the ``List of abbreviations'' page
+\end{itemize}
+
+If any of the files above is missing, that particular page won't be created in the \textit{frontmatter}. This is useful if you are just preparing a draft version of your thesis for your supervisor to correct.
+
+Similarly for the \textit{backmatter} part of your thesis, add all the BibTeX citations to a file named references.bib if you want the ``Bibliography'' section to be created at the end of your document.
+
+\subsubsection{Writing a ``Transfer of Status'' or ``Confirmation of Status'' report}
+
+There are two Key milestones\footnote{\href{https://www.ox.ac.uk/students/academic/guidance/graduate/research/status/DPhil}{https://www.ox.ac.uk/students/academic/guidance/graduate/research/status/DPhil}} for which DPhil students are expected to submit substantial piece of written research work, or reports. They are the ``Transfer of Status''\footnote{\href{https://www.mpls.ox.ac.uk/graduate-school/information-and-resources-for-supervisors/transfer-of-status}{https://www.mpls.ox.ac.uk/graduate-school/information-and-resources-for-supervisors/transfer-of-status}} at the end of your first year, and the ``Confirmation of Status''\footnote{\href{https://www.mpls.ox.ac.uk/graduate-school/information-and-resources-for-supervisors/confirmation-of-status}{https://www.mpls.ox.ac.uk/graduate-school/information-and-resources-for-supervisors/confirmation-of-status}} at the end of your second year.
+
+For these milestones, you will often be required to submit a report with all the details of your research contributions. This document is often around 50-60 pages in length and does not need all the sections that a doctoral thesis has (i.e. declaration, dedication or list of publications).
+
+You can write a \textit{Transfer of Status} report by simply providing the ``report'' option when you load the OxEngThesis class, and defining the ``degree'' variable as shown in the following code snippet:
+
+[style=custom-latex]\textbackslash{}documentclass[report]\{oxengthesis\}\textbackslash{}title\{The title of your report\}\textbackslash{}author\{Your name\}\textbackslash{}degree \{\{\textbackslash{}huge Transfer of Status Report\}\}\textbackslash{}college \{The name of your college\}\textbackslash{}supervisor \{The name(s) of your supervisor(s)\}\textbackslash{}date\{The academic term of submission\}
+
+You can write a \textit{Confirmation of Status} report by simply providing the ``report'' option when you load the OxEngThesis class, and defining the ``degree'' variable as shown in the following code snippet:
+
+[style=custom-latex]\textbackslash{}documentclass[report]\{oxengthesis\}\textbackslash{}title\{The title of your report\}\textbackslash{}author\{Your name\}\textbackslash{}degree \{\{\textbackslash{}huge Confirmation of Status Report\}\}\textbackslash{}college \{The name of your college\}\textbackslash{}supervisor \{The name(s) of your supervisor(s)\}\textbackslash{}date\{The academic term of submission\}
+
+Note that the "*report*" package option is just a shortcut to not include the dedication, declaration and publications pages and format the title page accordingly.
+
+\subsubsection{Writing a 4\textsuperscript{th}-Year Project (4YP) report}
+
+If you are an undergraduate student at the University of Oxford reading Engineering Science\footnote{\href{https://eng.ox.ac.uk/study/undergraduate/your-degree}{https://eng.ox.ac.uk/study/undergraduate/your-degree}}, you will carry out a self-led project during your fourth year. It usually involves original research or significant design and construction work, undertaken in close consultation with an academic supervisor. At the end of your project (usually by the beginning of Trinity term), you will need to submit a report with all the details of your research contributions. This document is often about 50 pages in length and does not need all the sections that a doctoral thesis has (i.e. declaration, dedication or list of publications).
+
+You can write a 4YP report by simply providing the ``report'' option when you load the OxEngThesis class, and defining the ``degree'' variable as shown in the following code snippet:
+
+[style=custom-latex]\textbackslash{}documentclass[report]\{oxengthesis\}\textbackslash{}title\{The title of your report\}\textbackslash{}author\{Your name\}\textbackslash{}degree \{\{\textbackslash{}huge 4\textbackslash{}textsuperscript\{th\} Year Project Report\}\}\textbackslash{}college \{The name of your college\}\textbackslash{}supervisor \{The name(s) of your supervisor(s)\}\textbackslash{}date\{The academic term of submission\}
+
+\subsubsection{Creating the PDF output}
+
+The source files in this repository require the LuaLaTeX engine. You editor should allow you to configure LuaLaTeX as the typesetting engine for your document and automatically take care of the compilation process to generate the final PDF document from your ``\textit{main LaTeX source file}''.
+
+If you want to compile your ``\textit{main LaTeX source file}'' from the command line, you can use the ``compile\_document.sh'' script provided in this repository. This script only works in a Linux or macOS system. For example, to compile the sample thesis provided, you will execute the following command in the terminal:
+
+[style=custom-bash]\$ ./compile\_document.sh sample\_dphil\_thesis.tex
+
+If you want to delete all the temp or auxiliary files LaTeX created during the compilation process, you can run:
+
+[style=custom-bash]\$ ./remove\_latex\_aux\_files.sh
+
+If you are compiling the document manually, you would need to run the \textit{latexmk}\footnote{\href{https://ctan.org/pkg/latexmk}{https://ctan.org/pkg/latexmk}} build command (already part of your LaTeX distribution) in the following order:
+
+[style=custom-bash]\$ latexmk -pdflatex=lualatex -pdf sample\_dphil\_thesis.tex\$ makeglossaries sample\_dphil\_thesis.tex\$ latexmk -pdflatex=lualatex -pdf sample\_dphil\_thesis.tex
+
+\subsubsection{Customising the title page}
+
+Although I originally wrote this LaTeX template for a student at the University of Oxford, it should be easy for you to customise it to suit the requirements of your academic institution. The default title page ``titlepage-oxford.tex'' is simple and customisable. The class template defines some variables you can use. At minimum, you need to provide the following definitions in the preamble of your ``\textit{main LaTeX source file}'':
+
+\begin{itemize}
+  \item \textbackslash{}title\textbackslash{}\{\textbackslash{}\}: The main title of the thesis/report
+  \item \textbackslash{}author\textbackslash{}\{\textbackslash{}\}: The author of the thesis/report
+\end{itemize}
+
+You can define the following optional variables:
+
+\begin{itemize}
+  \item \textbackslash{}supervisor\textbackslash{}\{\textbackslash{}\}: The name of your thesis supervisor. The default value is: ``SUPERVISOR NAME''
+  \item \textbackslash{}college\textbackslash{}\{\textbackslash{}\}: Your college affiliation, if you are an Oxford student. The default value is: ``'' (an \textit{empty string})
+  \item \textbackslash{}degreeprefix\textbackslash{}\{\textbackslash{}\}: Text printed before the degree name. The default value is: ``A thesis submitted for the degree of''
+  \item \textbackslash{}degree\textbackslash{}\{\textbackslash{}\}: The name of the degree. The default value is: ``Doctor of Philosophy''
+  \item \textbackslash{}department\textbackslash{}\{\textbackslash{}\}: Your university department. The default value is: ``Department of Engineering Science''
+  \item \textbackslash{}university\textbackslash{}\{\textbackslash{}\}: The name of your university. The default value is: ``University of Oxford''
+  \item \textbackslash{}universitylogo\textbackslash{}\{\textbackslash{}\}: File name of the university's logo, without the file extension. The default value is: ``oxford-logo'' (which will load the image file oxford-logo.png in the ./figures/ folder in this repository
+  \item \textbackslash{}date\textbackslash{}\{\textbackslash{}\}: The date of publication of the thesis, such as ``Hilary Term, 2048''. If you leave it blank, it will print the current date (useful when sending a draft to your supervisor)
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+
+\label{fig-ch0-title-page-4yp}
+\end{figure}
+
+@fig-ch0-title-page shows examples of the title pages for a DPhil thesis and for a 4YP report using the default title page (file``titlepage-oxford.tex''). Both title pages were created with similar code with the ``report'' package option as the only difference. The title page for the DPhil thesis (see @fig-ch0-title-page-dphil) was created with the following code:
+
+[style=custom-latex]\textbackslash{}documentclass\{oxengthesis\}\textbackslash{}title\{The long-term effects of climate change on farming in Middle Earth\}\textbackslash{}author\{Samwise Gamgee\}\textbackslash{}college \{Jesus College\}\textbackslash{}supervisor\{Professor J.R.R. Tolkien\}\textbackslash{}date\{Hilary Term, 2048\}
+
+The title page for the 4YP report (see \cite{fig-ch0-title-page-4yp}) was created with the following code:
+
+[style=custom-latex]\textbackslash{}documentclass[report]\{oxengthesis\}\textbackslash{}title\{The long-term effects of climate change on farming in Middle Earth\}\textbackslash{}author\{Samwise Gamgee\}\textbackslash{}college \{Jesus College\}\textbackslash{}supervisor\{Professor J.R.R. Tolkien\}\textbackslash{}date\{Hilary Term, 2048\}
+
+\subsubsection{Creating your own title page}
+
+If you don't provide a custom title page, the OxEngThesis class will load the default title file ``titlepage-oxford.tex'' shown above. If the layout of the default title page does not fulfil your or your university's requirements, you can create your own title page. To do so, you will need to follow the 3 steps described below. As an example, we will create a custom title page for a PhD thesis for a student at the Massachusetts Institute of Technology:
+
+\begin{enumerate}
+  \item Create a new LaTeX source file and add your own definitions, such as the example file ``titlepage-mit.tex''
+  \item Define the \textbackslash{}titlepage\textbackslash{}\{\textbackslash{}\} variable in the preamble of your ``\textit{main LaTeX source file}''. For example, after the \textbackslash{}author\textbackslash{}\{\textbackslash{}\} variable as in:
+\end{enumerate}
+
+[style=custom-latex]\textbackslash{}title\{Protein expression of the X-factor mutator gene in Homo Sapiens\}\textbackslash{}author\{Charles F. Xavier\}\textbackslash{}titlepage\{titlepage-mit.tex\}
+
+\begin{enumerate}
+  \item Recompile your ``\textit{main LaTeX source file}''. An example of the output is shown in @fig-ch0-mit-phd-title-page
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\end{figure}
+
+The text below uses the titlepage-cambridge.tex file to create a title page for a student at the University of Cambridge. The output is shown in @fig-ch0-cambridge-phd-title-page.
+
+[style=custom-latex]\textbackslash{}title\{Protein expression of the X-factor mutator gene in Homo Sapiens\}\textbackslash{}author\{Charles F. Xavier\}\textbackslash{}college \{Pembroke College\}\textbackslash{}degreeprefix \{A thesis submitted for the degree of\}\textbackslash{}degree \{Doctor of Philosophy\}\textbackslash{}supervisor \{Professor Albus Dumbledore\}\textbackslash{}department\{Department of Engineering\}\textbackslash{}university \{University of Cambridge\}\textbackslash{}universitylogo\{cambridge-logo\}\textbackslash{}date\{June 2048\}\textbackslash{}titlepage \{titlepage-cambridge.tex\}
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\end{figure}
+
+The OxEngThesis class makes available new LaTeX commands that you can use in your new custom title document. These new commands are based on the variables defined in the preamble of your ``\textit{main LaTeX source file}'':
+
+\begin{itemize}
+  \item The \textbackslash{}title\textbackslash{}\{\textbackslash{}\} variable in the preamble will map to the command \textbackslash{}TitleName
+  \item The \textbackslash{}author\textbackslash{}\{\textbackslash{}\} variable in the preamble will map to the command \textbackslash{}AuthorName
+  \item The \textbackslash{}supervisor\textbackslash{}\{\textbackslash{}\} variable in the preamble will map to the command \textbackslash{}SupervisorName
+  \item The \textbackslash{}college\textbackslash{}\{\textbackslash{}\} variable in the preamble will map to the command \textbackslash{}CollegeName
+  \item The \textbackslash{}degreeprefix\textbackslash{}\{\textbackslash{}\} variable in the preamble will map to the command \textbackslash{}DegreePrefix
+  \item The \textbackslash{}degree\textbackslash{}\{\textbackslash{}\} variable in the preamble will map to the command \textbackslash{}DegreeName
+  \item The \textbackslash{}department\textbackslash{}\{\textbackslash{}\} variable in the preamble will map to the command \textbackslash{}DepartmentName
+  \item The \textbackslash{}university\textbackslash{}\{\textbackslash{}\} variable in the preamble will map to the command \textbackslash{}UniversityName
+  \item The \textbackslash{}universitylogo\textbackslash{}\{\textbackslash{}\} variable in the preamble will map to the command \textbackslash{}UniversityLogo
+  \item The \textbackslash{}date\textbackslash{}\{\textbackslash{}\} variable in the preamble will map to the command \textbackslash{}DegreeDate
+\end{itemize}
+
+Check the files ``titlepage-oxford.tex'', ``titlepage-mit.tex'' and ``titlepage-cambridge.tex'' for examples on how to use the available commands in your new title page.
+
+\subsection{Package options}
+
+\subsubsection{Default options}
+
+By default, the class is formatted to produce a doctoral thesis for the University of Oxford. If you don't provide any package options in your ``\textit{main LaTeX source file}'' (as it is written in the sample\_dphil\_thesis.tex file provided in this repository), such as:
+
+[style=custom-latex]\textbackslash{}documentclass\{oxengthesis\}
+
+the following options will be used:
+
+[style=custom-latex]\textbackslash{}documentclass[10pt,a4paper,openany,onecolumn,twoside,final,font=Carlito,mathfont="Latin Modern Math",headingcolour=\{0,0,0\},leftmargin=4cm,rightmargin=2cm,topmargin=2cm,bottommargin=2.5cm]\{oxengthesis\}
+
+which will produce a thesis using a 10-point Carlito font on A4 paper size. Page margins will be formatted as required by Oxford. Chapters will start on either recto or verso pages (openany). Note that the options ``onecolumn,twoside,final'' cannot be changed.
+
+The OxEngThesis class template is based on the \textit{memoir}\footnote{\href{https://ctan.org/pkg/memoir}{https://ctan.org/pkg/memoir}} LaTeX package. As such, you can pass most of the \textit{memoir}'s option and, therefore, customise your document even further.
+
+\subsubsection{Page size and margins}
+
+By default, the page size and margins are set to comply with the requirements of the University of Oxford. Other institutions have different requirements. For example, the requirements for a thesis at the Massachusetts Institute of Technology (taken from MIT libraries\footnote{\href{https://libraries.mit.edu/distinctive-collections/thesis-specs}{https://libraries.mit.edu/distinctive-collections/thesis-specs}}) are:
+
+[style=custom-text]... For the main body of the text, including appendices and front matter, font size should be at least 11-point ...... Top, bottom, and both side margins must be at least an inch wide (1ÃÂ¢ÃÂÃÂ³) to allow for binding and trimming....
+
+Therefore, you would configure the class with the following options (Note that the left margin is larger to account for the thesis binding):
+
+[style=custom-latex]\textbackslash{}documentclass[11pt,letterpaper,leftmargin=1.5in,rightmargin=1in,topmargin=1in,bottommargin=1in]\{oxengthesis\}
+
+\subsubsection{Fonts}
+
+By default, the main font is 10-point \textit{Carlito}\footnote{\href{https://ctan.org/tex-archive/fonts/carlito}{https://ctan.org/tex-archive/fonts/carlito}} and the font for equations and formulas is ``\textit{Latin Modern Math}''\footnote{\href{https://ctan.org/tex-archive/fonts/lm-math}{https://ctan.org/tex-archive/fonts/lm-math}}. You can change to, for example, 11pt Arial as the main font and ``tex-gyre-math-termes'' as the font for equations with the following package options:
+
+[style=custom-latex]\textbackslash{}documentclass[11pt,font=Arial,mathfont="TeX Gyre Termes Math"]\{oxengthesis\}
+
+\subsubsection{Mini-table of contents for each chapter}
+
+If you have a recent version of LaTeX installed (TeXLive version 2022 works) in your system and would like to have a short table of contents at the beginning of each chapter, you can simply add the ``chaptertoc'' option to your document, as in:
+
+[style=custom-latex]\textbackslash{}documentclass[chaptertoc]\{oxengthesis\}
+
+@fig-ch0-dphil-chap-minitoc shows a sample output for one chapter. I use the \textit{minitoc}\footnote{\href{https://ctan.org/pkg/memoir}{https://ctan.org/pkg/memoir}} package to create the table of contents for each chapter. Previous versions of the minitoc class where incompatible with the \textit{memoir} class. I tested TexLive 2022 and MacTeX 2022, they both work fine.
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\end{figure}
+
+\subsubsection{Abstract page for the Examination Schools}
+
+When submitting your final thesis to the ``Examination Schools'' (located on High Street) at the University of Oxford to schedule your viva examination, you are typically required to submit two printed copies of your thesis (soft-bound). Additionally, you are required to provide two separate one-page printed copies of your abstract. The stand-alone abstract page should contain your name, college affiliation and is NOT meant to be part of the binding of your thesis. To create this single stand-alone page of your abstract, add the ``frontabstract'' option to your document, as shown in the code below. The page will be created before the main title page, as shown in @fig-ch0-dphil-front-abstract-page.
+
+[style=custom-latex]\textbackslash{}documentclass[frontabstract]\{oxengthesis\}
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\end{figure}
+
+\subsubsection{Review editing mode}
+
+Your thesis supervisor may request you to print your document with double line spacing so he/she can correct your draft (the \textcolor{red}{red pen!}). You can simply add the ``review'' option to your document:
+
+[style=custom-latex]\textbackslash{}documentclass[review]\{oxengthesis\}
+
+\subsubsection{Different colour for section headings}
+
+The default font colour for section and subsection headings is black. You can change the colour (to blue for example) by adding the ``headingcolour'' class option:
+
+[style=custom-latex]\textbackslash{}documentclass[headingcolour=\{0.25,0.45,0.76\}]\{oxengthesis\}
+
+Note that the colour of \textbackslash{}subsubsection headings will be black regardless of the setting above.
+
+\subsubsection{Chapter heading styles}
+
+The default style for chapter headings is simple and gives you enough space to write your content. You can take advantage of different chapter styles defined in the \textit{memoir}\footnote{\href{https://ctan.org/pkg/memoir}{https://ctan.org/pkg/memoir}} package by passing the ``chapterstyle'' option. The code shown below will use the ``southall'' chapter style to produce the sample @fig-ch0-chapterstyle-southall.
+
+[style=custom-latex]\textbackslash{}documentclass[chapterstyle=southall]\{oxengthesis\}
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\end{figure}
+
+\subsection{Additional features}
+
+This section describes some of the additional features available in the OxEngThesis class. Refer to the official documentation of the \textit{memoir}\footnote{\href{https://ctan.org/pkg/memoir}{https://ctan.org/pkg/memoir}} LaTeX package to customise your document even further.
+
+\subsubsection{Figures}
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\end{figure}
+
+I use the \textit{graphicx}\footnote{\href{https://ctan.org/pkg/graphicx}{https://ctan.org/pkg/graphicx}} package to include figures. You can put all figures in a ``\href{figures/}{figures/}'' folder and you can simply include the image file directly without the file extension. For example, @fig-ch0-sample-image shows the image file ``\href{./figures/dummy\_image.png}{./figures/dummy\_image.png}''. You can also create a figure with sub plots, as shown in @fig-ch0-subfig-example. Note that you can directly refer to the subplot as ``@fig-ch0-subfig-example-fig1''.
+
+\begin{figure}[H]
+\centering
+
+\label{fig-ch0-subfig-example-fig3}
+\end{figure}
+
+\subsubsection{Tables}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Item} & \textbf{Description} \\
+\hline
+Imaging Sensor & Sony ICX625 2/3" progressive scan CCD \\
+\hline
+Image size (pixels) & 2448 (H) x 2048 (V) \\
+\hline
+Pixel Size & 3.45 μ m x 3.45 μ m \\
+\hline
+A/D Converter & AD9977 14-bit, dual-channel \\
+\hline
+Max frame rate & 15 FPS \\
+\hline
+Video Data Output & 8, 12, 16 and 24-bit digital data \\
+\hline
+Gain \& Exposure & Automatic/Manual/One-Push \\
+\hline
+Lens Mount & C-mount \\
+\hline
+Interface & Gigabit Ethernet \\
+\hline
+Physical dimensions & 44 (W) mm x 29 (H) mm x 58 (L) mm \\
+\hline
+ \\
+\hline
+\end{tabular}
+\caption{General features and specification for ...}
+\label{table-ch0-camera-specs}
+\end{table}
+
+You can create tables using the regular syntax in LaTeX. You can also create tables with additional styles. For example, \cite{table-ch0-camera-specs} shows a classical table with shaded headers. You can have more complex tables, as shown in \cite{table-ch0-patient-demographics}
+
+\begin{figure}[H]
+\centering
+
+\caption{Summary of population demographics in the training and test sets}
+\label{table-ch0-patient-demographics}
+\end{figure}
+
+\subsubsection{Cross-referencing labels}
+
+I use the \textit{cleveref}\footnote{\href{https://ctan.org/pkg/cleveref}{https://ctan.org/pkg/cleveref}} package to automatically format the label when cross referencing chapters, sections, figures and other common LaTeX labels. The following paragraphs, show some of the results.
+
+You don't have to include the word ``chapter'': \cite{chapter-literature-review} discusses .... is presented in \cite{chapter-dataset} with a detailed ...
+
+You don't have to include the word ``figure'' or ``table'': The summary of the demographics for the entire set is described in \cite{table-ch0-patient-demographics} ... @fig-ch0-subfig-example shows the video camera used in the study. @fig-ch0-subfig-example-fig1 shows the the camera model used, @fig-ch0-subfig-example-fig2 shows the ... and \cite{fig-ch0-subfig-example-fig3} shows...
+
+\subsubsection{Glossary, acronyms and abbreviations}
+
+I use the \textit{glossaries-extra}\footnote{\href{https://ctan.org/pkg/glossaries-extra}{https://ctan.org/pkg/glossaries-extra}} packages to define acronyms and automatically add the ``Glossary'' page in the \textit{frontmatter}. Simply create a file with the name ``glossary.tex'' and add all your definitions to it. Note that the first time you use an acronym, its full definition will be provided. For the rest of the instances, only the abbreviation will be used. The following paragraphs show how to define and use acronyms.
+
+The standard vital signs include temperature, hr, rr, bp and, when appropriate, spo2. The routine measurement and interpretation of these vital signs is a core component of the physiological assessment of most patients \cite{prior1977physical} \cite{goldberg2005practical} as they can provide critical information about the underlying state of their health.
+
+We included all study types looking at monitoring of hr, bp, rr or spo2 using image analysis with comparison to a reference device. We did not restrict based on clinical setting and included all age groups. Only non-contact methods using cameras were included. All unpublished studies found were included wherever possible to minimise publication bias.
+
+\subsubsection{Citations and references}
+
+This section contains example on how to cite papers, journals and other documents:
+
+It is widely reported, notably by the World Health Organisation \cite{stroetmann2010can}, that global changes in population demographics, the increased incidence of chronic diseases and the unmet needs for more personalised care are trends that need new integrated approaches to health and social care. \cite{brooks1984infrared}
+
+1@barker1987pulse \cite{peacock1998oxygen} \cite{moller1993randomized}
+
+Finding reliable correspondences in two images of a scene taken from arbitrary viewpoints viewed with possibly different cameras and in different illumination conditions is a difficult and critical step towards fully automatic reconstruction of 3D scenes@hartley2003multiple.
+
+7@priya2012transition \cite{haralick1973textural} \cite{Grass2012Online} \cite{NoninPulseOxOnline}
+
+\subsubsection{Bibliography styles}
+
+The default style for the references is ``ieeetr''. For example, the following text: ``\textit{...Finding reliable correspondences in two images of a scene taken from arbitrary viewpoints viewed with possibly different cameras and in different illumination conditions is a difficult and critical step towards fully automatic reconstruction of 3D scenes \cite{hartley2003multiple..._}'' will produce the following output in the bibliography section at the end of the thesis:}
+
+[style=custom-text]Bibliography...[8] R. Hartley and A. Zisserman, Multiple view geometry in computer vision. Cambridge university press, 2003....
+
+You can specify a custom bibliography style as an argument to the ``\textbackslash{}listofreferences'' command in your \textit{main LaTeX source file}. For example, the following command:
+
+[style=custom-latex]\textbackslash{}listofreferences[apalike]
+
+will use the \textit{apalike}\footnote{\href{https://www.bibtex.com/s/bibliography-style-base-apalike}{https://www.bibtex.com/s/bibliography-style-base-apalike}} BibTeX style and produce the following output in the content pages:
+
+[style=custom-text]...Finding reliable correspondences in two images of a scene taken from arbitrary viewpoints viewed with possibly different cameras and in different illumination conditions is a difficult and critical step towards fully automatic reconstruction of 3D scenes [Hartley and Zisserman, 2003]...
+
+and the bibliography section will read:
+
+[style=custom-text]Bibliography...[Hartley and Zisserman, 2003] Hartley, R. and Zisserman, A. (2003). Multiple view geometry in computer vision. Cambridge university press....
+
+Take a look at the available styles at \textit{The quick BibTeX guide}\footnote{\href{https://www.bibtex.com/styles}{https://www.bibtex.com/styles}} online.
+
+\subsubsection{Mark text as TODO}
+
+You can wrap text in``todo'' tags, so they appear in red colour in the PDF document. For example:
+
+\textcolor{red}{This text is in red colour, it reminds me of a task to complete}
+
+\subsubsection{Formatting source code}
+
+Often, we want to show pseudo code, source code or other verbatim content in our document. For this, I use the \textit{listings}\footnote{\href{https://ctan.org/pkg/listings}{https://ctan.org/pkg/listings}} package. The extra custom styles defined in the OxEngThesis class file are:
+
+Example on displaying C/C++ source code:
+
+[style=custom-c,caption=\{Function to balance a matrix.\}]extern PE\_SIGPROC\_API void pesig\_balance( const size\_t n, signal\_value\_t A[n][n], signal\_value\_t* S );
+
+Example on displaying BASH/Console scripts:
+
+[style=custom-bash,caption=\{A script in bash.\}]\$ mkdir -p \$HOME/code/pebase/realtime\$ cd \$HOME/code/pebase/realtime\$ git clone git\textbackslash{}@github.com:maurovm/thesis\_template.git repository
+
+Example of displaying text as ``verbatim'' mode:
+
+[style=custom-verbatim,caption=\{License information.\}]OxEngThesis is provided under: SPDX-License-Identifier: GPL-2.0-only OxEngThesis is free software: you can redistribute it or modifyit under the terms of the GNU General Public License as published by theFree Software Foundation, version 2 only, according with: LICENSES/GPL-2.0OxEngThesis is distributed in the hope that it will be useful, butWITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITYor FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public Licensefor more details.
+
+\subsubsection{Coloured boxes}
+
+I use the \textit{tcolorbox}\footnote{\href{https://ctan.org/pkg/tcolorbox}{https://ctan.org/pkg/tcolorbox}} package to show coloured and framed text boxes with an optional heading line. Some examples include:
+
+Standard box:
+
+1
+
+Standard box with title:
+
+title=Box title 1
+
+A small box following text:...
+
+\fbox{}
+
+nobeforeafter,colframe=blue!50!black,colback=white,colupper=red!50!blackHello World
+
+Read the documentation of the tcolorbox package to see an extensive description of the configuration options and what you can do with the tcolorbox class, it is quite customisable. The OxEngThesis class defines some environment commands for some predefined boxes. For example, the following is a warning box:
+
+Warning box title Warning box content: 1
+
+The following example shows an information box:
+
+Informational box title Warning box content: 1
+
+\subsection{Troubleshooting common errors}
+
+\subsubsection{Text beyond page limits}
+
+When compiling a LaTeX document, you could get a warning similar to:
+
+[style=custom-text]Overfull \textbackslash{}hbox(22.49216pt too wide) in paragraph at lines 4--5
+
+This often occurs when a line of your document could not fit within the designated horizontal space for text in the current page layout. The LaTeX compiler tries its best to fit text within the page limits, but sometimes it just cannot do it appropriately. This typically results in some text hanging out past the page margin due to long words, acronyms or long equations. Sometimes, it is difficult to know where these errors occur in your document. You can add the ``debuglayout'' option to your document:
+
+[style=custom-latex]\textbackslash{}documentclass[debuglayout]\{oxengthesis\}
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\end{figure}
+
+A black box will be shown next to the affected lines, as shown in @fig-ch0-overfull-hbox-warning. The \href{oxengthesis.cls}{oxengthesis.cls} class file already takes advantage of other packages (such as \textit{microtype}\footnote{\href{https://ctan.org/pkg/microtype}{https://ctan.org/pkg/microtype}}) to deal with common issues such as character protrusion, font expansion and inter-word spacing. I recommend you slightly rephrase your guilty sentences instead of changing the class template. This is usually the first approach many of my students take.
+
+\section{Introduction}
+\label{chapter-introduction}
+
+1-7
+
+\subsection{Clinical need}
+
+1-2@HidalgoEquivitalEQ02Online \cite{poh2011advancements} \cite{poh2010non} \cite{verkruysse2008remote} \cite{wieringa2005contactless} \cite{wiki-bayerfilter} \cite{nonin9560oem} \cite{Mas-Fernandez-2003} \cite{hartley2003multiple}
+
+\subsubsection{Sub section 1}
+
+3-6@schmidt1997animal \cite{4036907} \cite{Orbanz2008} \cite{varjavand2002interactive} \cite{report-PCESC2005} \cite{HSU-05-2012} \cite{collins2015relating} \cite{abdi2010principal}
+
+\paragraph{Subsub section title}
+
+3-5
+
+\paragraph{Subsub section title}
+
+8-10
+
+\subsubsection{Sub section 2}
+
+10-12@cote1988effect \cite{aravindhan2000sulfhemoglobinemia} \cite{clayton1991pulse} \cite{clayton1991comparison} \cite{webb1991potential} \cite{212885} \cite{964165} \cite{Chaichulee2017FG}
+
+\subsection{Objectives}
+
+2-4
+
+\subsection{Contributions}
+
+2-4
+
+\subsection{Outline of document}
+
+\cite{chapter-literature-review} discusses .... . The clinical study undertaken as part of this project is presented in \cite{chapter-dataset} with a detailed description of the patient population, the data collection process and an overview of the main vital signs used as the reference data....
+
+2-4
+
+\section{Literature review}
+\label{chapter-literature-review}
+
+\subsection{Introduction}
+
+2-4
+
+\subsection{Review of previous methods}
+
+2-4
+
+\subsection{Conclusion}
+
+2-4
+
+\section{Dataset}
+\label{chapter-dataset}
+
+\subsection{Introduction}
+
+2-4
+
+\subsection{Clinical study design}
+
+2-4
+
+\subsection{Instrumentation}
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\end{figure}
+
+@fig-sample-image shows the a dummy image ...
+
+2-4
+
+2-4
+
+\cite{table-camera-specs} describes the ...
+
+\begin{figure}[H]
+\centering
+
+\label{table-camera-specs}
+\end{figure}
+
+2-4
+
+\subsection{Patient population}
+
+2-4
+
+\begin{figure}[H]
+\centering
+
+\caption{Summary of population demographics in the training and test sets}
+\label{table-patient-demographics}
+\end{figure}
+
+\subsubsection{Demographics}
+
+The summary of the demographics for the entire set is described in \cite{table-patient-demographics}. ...
+
+2-4
+
+\subsubsection{Vital signs}
+
+2-4
+
+\subsection{Conclusion}
+
+2-4
+
+\section{Proposed method 1}
+\label{chapter-method-1}
+
+\subsection{Introduction}
+
+2-4
+
+\subsection{Overview of the estimation process}
+
+2-4
+
+\subsection{Methods}
+
+2-4
+
+\subsection{Results}
+
+2-4
+
+\subsection{Discussion}
+
+2-4
+
+\subsection{Conclusion}
+
+2-4
+
+\section{Proposed method 2}
+\label{chapter-method-2}
+
+\subsection{Introduction}
+
+2-4
+
+\subsection{Overview of the estimation process}
+
+2-4
+
+\subsection{Methods}
+
+2-4
+
+\subsection{Results}
+
+2-4
+
+\subsection{Discussion}
+
+2-4
+
+\subsection{Conclusion}
+
+2-4
+
+\section{Conclusion and future work}
+\label{chapter-conclusion}
+
+\subsection{Introduction}
+
+2-4
+
+\subsection{Clinical study}
+
+2-4
+
+\subsection{Propsed method}
+
+2-4
+
+\subsection{Future work}
+
+2-4
+
+\subsection{Concluding remarks}
+
+2-4
+
+\section{Bayesian change point detection}
+\label{appendix-appendix-1}
+
+To estimate the location of a step change, a Bayesian change point detection algorithm based on \cite{Ruanaidh1996} and \cite{adams2007bayesian} is used in the thesis. Given a data sequence $x$ of $N$ samples with Gaussian noise added:
+
+\begin{align*}
+x_(i)= \begin{cases}\mu_(1) + \epsilon_(i) \\ & "if $i<m$" . \\ \mu_(2) + \epsilon_(i) \\ & "otherwise" .\end{cases}
+\label{eq-app-cp-5.1}
+\end{align*}
+
+where the noise samples $\epsilon_(i)$ are assumed to be independent and $m$ is the step change location. The likelihood of the data is given by the joint probability of the noise samples $\epsilon_(i)$:
+
+\[
+P(x | {\mu_(1)\mu_(2)\sigma m }) = product_(i = 1)^(N) P(\epsilon_(i))
+\]
+
+where $\sigma$ is the standard deviation of the Gaussian noise; $\mu_(1), \mu_(2)$ and $\sigma m$ are the known time series parameters. The probability density function for the noise samples is defined by:
+
+\[
+P(\epsilon) = \frac{1}{\sigma sqrt(2 \pi)} e^(- \frac{(\epsilon - \mu)^(2)}{2 \sigma^(2)})
+\]
+
+12-17
+
+\section{Optical flow estimation}
+\label{appendix-appendix-2}
+
+2-9
+\end{document}

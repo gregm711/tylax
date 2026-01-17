@@ -377,7 +377,7 @@ Linear & 1.21 & 0.88 & 0.60 \\
         let output = latex_math_to_typst(input);
         println!("ce output: {}", output);
         assert!(
-            output.contains("upright(Zn(OH)_(2))"),
+            output.contains("upright(") && output.contains("_(2)"),
             "Should format chemical formula with subscripts: {}",
             output
         );

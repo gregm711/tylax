@@ -356,6 +356,73 @@ pub fn parse_color_expression(expr: &str) -> String {
     parse_color(expr, None)
 }
 
+/// Return true if the Typst color expression is known/safe to emit.
+pub fn is_safe_color_expression(expr: &str) -> bool {
+    let trimmed = expr.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.contains('(') || trimmed.contains('#') {
+        return true;
+    }
+    if NAMED_COLORS.contains_key(trimmed) {
+        return true;
+    }
+    let lower = trimmed.to_lowercase();
+    if NAMED_COLORS.contains_key(lower.as_str()) {
+        return true;
+    }
+    // Allow bare identifiers (custom color variables)
+    trimmed
+        .chars()
+        .enumerate()
+        .all(|(i, ch)| (i > 0 || !ch.is_ascii_digit()) && (ch.is_ascii_alphanumeric() || ch == '_'))
+}
+
+/// Parse and sanitize a color expression. Unknown colors fall back to black.
+pub fn sanitize_color_expression(expr: &str) -> String {
+    let parsed = parse_color_expression(expr);
+    if is_safe_color_expression(&parsed) {
+        return parsed;
+    }
+    let sanitized = sanitize_color_identifier(&parsed);
+    if is_safe_color_expression(&sanitized) {
+        return sanitized;
+    }
+    "black".to_string()
+}
+
+/// Sanitize a color identifier for Typst (letters, digits, underscore; no leading digit).
+pub fn sanitize_color_identifier(name: &str) -> String {
+    let mut out = String::new();
+    for (idx, ch) in name.chars().enumerate() {
+        let mapped = if ch.is_ascii_alphanumeric() || ch == '_' {
+            ch
+        } else {
+            '_'
+        };
+        if idx == 0 && mapped.is_ascii_digit() {
+            out.push('_');
+        }
+        out.push(mapped);
+    }
+    if out.is_empty() {
+        "_color".to_string()
+    } else {
+        out
+    }
+}
+
+/// Parse a \definecolor-style model+spec pair into a Typst color expression.
+pub fn parse_color_with_model(model: &str, spec: &str) -> String {
+    let parsed = parse_color(spec, Some(model));
+    if is_safe_color_expression(&parsed) {
+        parsed
+    } else {
+        "black".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

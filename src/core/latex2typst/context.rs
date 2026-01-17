@@ -219,6 +219,8 @@ pub struct ConversionState {
     pub options: L2TOptions,
     /// Custom theorem environments defined in preamble
     pub custom_theorems: HashMap<String, String>,
+    /// Color definitions collected from preamble (name -> Typst color expression)
+    pub color_defs: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,6 +311,18 @@ impl ConversionState {
     pub fn register_glossary(&mut self, key: &str, name: &str, description: &str) {
         self.glossary
             .insert(key.to_string(), GlossaryDef::new(name, description));
+    }
+
+    /// Register or update a color definition for Typst output.
+    pub fn register_color_def(&mut self, name: String, value: String) {
+        if name.trim().is_empty() || value.trim().is_empty() {
+            return;
+        }
+        if let Some(existing) = self.color_defs.iter_mut().find(|(n, _)| n == &name) {
+            existing.1 = value;
+        } else {
+            self.color_defs.push((name, value));
+        }
     }
 
     /// Get acronym and mark as used, returns (text, is_first_use)
@@ -1181,6 +1195,12 @@ impl LatexConverter {
             .clone()
             .unwrap_or_default();
         doc.push_str(&generate_typst_preamble(&doc_class));
+        if !self.state.color_defs.is_empty() {
+            for (name, value) in &self.state.color_defs {
+                let _ = writeln!(doc, "#let {} = {}", name, value);
+            }
+            doc.push('\n');
+        }
 
         match self.state.template_kind {
             Some(TemplateKind::Ieee) => {

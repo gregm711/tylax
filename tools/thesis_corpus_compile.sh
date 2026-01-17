@@ -39,6 +39,7 @@ else
 fi
 
 TYPST_BIN="${TYPST_BIN:-typst}"
+TYPST_TIMEOUT="${TYPST_TIMEOUT:-120}"
 typst_available=1
 if [[ -x "$TYPST_BIN" ]]; then
   typst_cmd="$TYPST_BIN"
@@ -48,6 +49,43 @@ else
   typst_available=0
   typst_cmd="$TYPST_BIN"
 fi
+
+timeout_cmd=""
+if command -v timeout >/dev/null 2>&1; then
+  timeout_cmd="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  timeout_cmd="gtimeout"
+fi
+
+run_typst_compile() {
+  local out_dir="$1"
+  local typ_file="$2"
+  local pdf_file="$3"
+  if [[ -n "$timeout_cmd" ]]; then
+    (cd "$out_dir" && "$timeout_cmd" "$TYPST_TIMEOUT" "$typst_cmd" compile "$typ_file" "$pdf_file")
+    return $?
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<PY
+import subprocess, sys
+try:
+    subprocess.run(
+        [${typst_cmd@Q}, "compile", ${typ_file@Q}, ${pdf_file@Q}],
+        cwd=${out_dir@Q},
+        check=True,
+        timeout=float(${TYPST_TIMEOUT@Q}),
+    )
+    sys.exit(0)
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+except subprocess.CalledProcessError as e:
+    sys.exit(e.returncode)
+PY
+    return $?
+  fi
+  (cd "$out_dir" && "$typst_cmd" compile "$typ_file" "$pdf_file")
+  return $?
+}
 
 sanitize() {
   local line="$1"
@@ -70,6 +108,19 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   path=$(echo "$line" | awk '{print $2}')
   if [[ -z "$name" || -z "$path" ]]; then
     continue
+  fi
+
+  if [[ -n "${THESIS_SKIP:-}" ]]; then
+    IFS=',' read -r -a skip_list <<< "$THESIS_SKIP"
+    for skip in "${skip_list[@]}"; do
+      skip="${skip// /}"
+      if [[ -n "$skip" && "$name" == "$skip" ]]; then
+        printf "| %s | skip | skip | %s |\\n" "$name" "skipped via THESIS_SKIP" >> "$REPORT"
+        echo "[skip] $name (THESIS_SKIP)" | tee -a "$SUMMARY"
+        total=$((total + 1))
+        continue 2
+      fi
+    done
   fi
 
   total=$((total + 1))
@@ -106,11 +157,16 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
   if [[ $convert_ok -eq 1 ]]; then
     if [[ $typst_available -eq 1 ]]; then
-      if (cd "$out_dir" && "$typst_cmd" compile "$name.typ" "$name.pdf") >"$compile_log" 2>&1; then
+      if run_typst_compile "$out_dir" "$name.typ" "$name.pdf" >"$compile_log" 2>&1; then
         compile_ok=1
         compile_pass=$((compile_pass + 1))
       else
-        error_line=$(head -n 1 "$compile_log")
+        code=$?
+        if [[ $code -eq 124 || $code -eq 137 ]]; then
+          error_line="compile timeout (${TYPST_TIMEOUT}s)"
+        else
+          error_line=$(head -n 1 "$compile_log")
+        fi
       fi
     else
       error_line="typst not found: $typst_cmd"

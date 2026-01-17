@@ -1,0 +1,272 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[table]{xcolor}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{multicol}
+\usepackage{array}
+\usepackage{textcomp}
+\usepackage{float}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{1em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.8em}{0.3em}
+\titlespacing*{\subsubsection}{0pt}{0.6em}{0.2em}
+\titlespacing*{\paragraph}{0pt}{0.5em}{0.1em}
+\numberwithin{equation}{section}
+\providecommand{\textsubscript}[1]{$_{\text{#1}}$}
+\begin{document}
+
+\newpage
+
+\begin{center}
+ <Thesis title>  \textbf{<Full name>} \\ 3exSubmitted for the degree of <Name of degree> \\ 1exand the <Diploma of \textbackslash{}texttt<Name of your University>> \begin{figure}[H]
+\centering
+\includegraphics{}
+\end{figure} 2ex <Name of your Department>\\ 2ex <Name of your University>\\ 10ex Month Year
+\end{center}
+
+\newpage
+
+\newpage
+
+\newpage
+
+\newpage
+
+\newpage
+
+\section{Abstract}
+
+1-2
+
+\newpage
+
+\newpage
+
+\section{Copyright Declaration}
+
+The copyright of this thesis rests with the author and is made available under a Creative Commons Attribution Non-Commercial No Derivatives licence. Researchers are free to copy, distribute or transmit the thesis on the condition that they attribute it, that they do not use it for commercial purposes and that they do not alter, transform or build upon it. For any reuse or redistribution, researchers must make clear to others the licence terms of this work.
+
+\newpage
+
+\newpage
+
+\section{Declaration}
+
+I hereby certify that the work presented in this dissertation is the result of my own investigations during the <Name of degree> project. Text and results obtained from other sources are referenced and properly acknowledged.
+
+\begin{flushright}
+\textit{<Full name>}\\ Month Year
+\end{flushright}
+
+\newpage
+
+\newpage
+
+\newpage
+
+\newpage
+
+\par\vspace{\fill}
+
+\textit{Great Scott}\\ Emmett Brown
+
+\par\vspace{\fill}
+
+\newpage
+
+\newpage
+
+\section{Acknowledgements}
+
+Your acknowledgements.
+
+1
+
+\newpage
+
+\newpage
+
+\newpage
+
+\newpage
+
+\newpage
+
+\newpage
+
+\newpage
+
+\newpage
+
+2cm
+
+\newpage
+
+\newpage
+
+\section{Introduction}
+
+A nice introduction.
+
+1-3
+
+\newpage
+
+\newpage
+
+\section{First result chapter}
+\label{chap-reschap1}
+
+\subsection{Mathematical Model}
+
+Something smart\footnote{At least it should be something smart, not mystical like \cite{ExampleArticle1984}.}. The author of \cite{EmmitBrown1955} enjoyed reading and was inspired by \cite{TwentyThousandLeaguesUnderTheSea}.
+
+\subsection{Some Notes on Figures}
+
+Have a look at Figure \cite{fig-basis-fun-cg} and \cite{fig-rotation-schematic}. But also check out Figure \cite{fig-basis-functions}@subfig-basis-fun-cg and \cite{fig-basis-functions}@subfig-basis-fun-dg which includes two subfigures in one figure environment using the LaTeX package subcaption.
+
+Example of including programming code is shown in Program @prog-some-program-label on page @prog-some-program-label.
+
+\subsection{More text}
+
+1-3
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\label{fig-basis-fun-cg}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\caption{Schematic of a rotation}
+\label{fig-rotation-schematic}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+
+\caption{Basis functions}
+\label{fig-basis-functions}
+\end{figure}
+
+\newpage
+
+\begin{figure}[H]
+\centering
+p \begin{verbatim}
+[]
+\end{verbatim} frame=t,breaklines=true,caption=Example title of the following programming code,numbers=left,label=prog:some\textit{(p)rogram}(l)abel,nolol=falsecontent/reschap1/python/example\textit{(c)ode.py }
+\end{figure}
+
+\newpage
+
+\newpage
+
+\section{Second result chapter}
+\label{chap-reschap2}
+
+\subsection{Mathematical Model}
+
+Something smart, see \cite{EmmitBrown1947}. Also, see Table \cite{tab-scientists} on page .
+
+Also have a look at Figures \cite{fig-test-combinations}, \cite{fig-some-results-plot}, and \cite{fig-3dgraphic}. These are good examples for TikZ graphics/pgfplots.
+
+\begin{figure}[H]
+\centering
+
+\caption{This is a table of three scientists}
+\label{tab-scientists}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\caption{Fancy TikZ plot}
+\label{fig-test-combinations}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+
+\caption{PGFPlots reading in data from data files, then plotting it, with magnifying a certain area of the plot.}
+\label{fig-some-results-plot}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\caption{Another fancy 3d TikZ plot 3d}
+\label{fig-3dgraphic}
+\end{figure}
+
+\newpage
+
+\newpage
+
+\section{Third result chapter}
+\label{chap-reschap3}
+
+\subsection{Mathematical Model}
+
+Something smart, \cite{DoeJane2001}. Also, see the sideways printed Table \cite{tab-parefficiencybig} on page .
+
+Moreover, Figure \cite{fig-parefficiency} shows another example of pgfplots beautifully plotting data from a data file. Table @tab-parefficiency shows the same data as a table.
+
+\begin{figure}[H]
+\centering
+\includegraphics{missing-image.pdf}
+\label{fig-parefficiency}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+
+\caption{Same as Table \{tab:parefficiency\}, but with more columns to stretch the width such that it has to be rotated to fit on one page.}
+\label{tab-parefficiencybig}
+\end{figure}
+
+\newpage
+
+\newpage
+
+\section{Summary}
+\label{chap-summary}
+
+To sum up...
+
+\newpage
+
+\newpage
+
+\section{Conclusion}
+\label{chap-conclusion}
+
+This work is simply awesome.
+
+\newpage
+
+\newpage
+
+\section{Future Work}
+\label{chap-future-work}
+
+This and that could be improved.
+
+\newpage
+
+\newpage
+
+\newpage
+
+\newpage
+
+\section{Appendix}
+
+\subsection{Some additional stuff}
+\end{document}

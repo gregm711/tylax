@@ -592,11 +592,53 @@ pub fn format_chemical_formula_math(raw: &str) -> String {
             continue;
         }
 
+        if ch.is_ascii_alphabetic() {
+            if let Some(prev) = prev_non_space {
+                if prev.is_ascii_alphabetic() {
+                    out.push(' ');
+                }
+            }
+        }
+
         out.push(ch);
         prev_non_space = Some(ch);
     }
 
     format!("upright({})", out)
+}
+
+/// Sanitize mhchem-style content for safe insertion into text() in math mode.
+/// Drops LaTeX command markers and math delimiters to avoid invalid Typst syntax.
+pub fn sanitize_ce_text_for_math(raw: &str) -> String {
+    let mut out = String::new();
+    let mut chars = raw.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                let mut cmd = String::new();
+                while let Some(&next) = chars.peek() {
+                    if next.is_ascii_alphabetic() {
+                        cmd.push(next);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if cmd.is_empty() {
+                    if let Some(next) = chars.next() {
+                        out.push(next);
+                    }
+                } else {
+                    out.push_str(&cmd);
+                }
+            }
+            '$' | '{' | '}' => {}
+            _ => out.push(ch),
+        }
+    }
+
+    out.trim().to_string()
 }
 
 fn convert_string_entries(input: &str) -> String {

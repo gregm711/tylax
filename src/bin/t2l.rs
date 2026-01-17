@@ -468,6 +468,7 @@ fn main() -> io::Result<()> {
                 result = rewrite_image_paths(&result, &mapping);
             }
         }
+        result = rewrite_extensionless_images(&result, &out_dir);
     }
 
     let result = if cli.pretty {
@@ -916,6 +917,64 @@ fn rewrite_image_paths(
 }
 
 #[cfg(feature = "cli")]
+fn rewrite_extensionless_images(content: &str, out_dir: &Path) -> String {
+    const EXTENSIONS: &[&str] = &[".pdf", ".png", ".jpg", ".jpeg", ".eps", ".svg"];
+
+    let mut out = String::with_capacity(content.len());
+    let mut i = 0usize;
+    while let Some(pos) = content[i..].find("image(\"") {
+        let start = i + pos;
+        if start > 0 {
+            let prev = content.as_bytes()[start - 1] as char;
+            if prev.is_ascii_alphanumeric() || prev == '_' {
+                out.push_str(&content[i..start + 1]);
+                i = start + 1;
+                continue;
+            }
+        }
+
+        out.push_str(&content[i..start]);
+        out.push_str("image(\"");
+
+        let path_start = start + "image(\"".len();
+        let Some(end_rel) = content[path_start..].find('"') else {
+            out.push_str(&content[path_start..]);
+            return out;
+        };
+        let path_end = path_start + end_rel;
+        let path = &content[path_start..path_end];
+
+        let mut replacement: Option<String> = None;
+        if Path::new(path).extension().is_none() {
+            for ext in EXTENSIONS {
+                let mut with_ext = path.to_string();
+                with_ext.push_str(ext);
+                let candidate = if Path::new(path).is_absolute() {
+                    PathBuf::from(&with_ext)
+                } else {
+                    out_dir.join(&with_ext)
+                };
+                if candidate.exists() {
+                    replacement = Some(with_ext);
+                    break;
+                }
+            }
+        }
+
+        if let Some(new_path) = replacement {
+            out.push_str(&new_path);
+        } else {
+            out.push_str(path);
+        }
+        out.push('"');
+        i = path_end + 1;
+    }
+
+    out.push_str(&content[i..]);
+    out
+}
+
+#[cfg(feature = "cli")]
 fn handle_subcommand(cmd: Commands) -> io::Result<()> {
     match cmd {
         Commands::Check { input, no_color } => {
@@ -1125,6 +1184,7 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                         result = rewrite_image_paths(&result, &mapping);
                     }
                 }
+                result = rewrite_extensionless_images(&result, &out_dir);
             }
 
             if let (Some(path), Some(report)) = (loss_log.as_ref(), loss_report.as_ref()) {

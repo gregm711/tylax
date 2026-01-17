@@ -198,6 +198,8 @@ Notes:
 - Report output: `target/thesis_corpus/compile_report.md` (logs per template under `target/thesis_corpus/<name>/`).
 - Override corpus list with `THESIS_LIST=tools/thesis_corpus_list.txt`.
 - Use prebuilt binaries via `T2L_BIN=target/debug/t2l` or `TYPST_BIN=/path/to/typst`.
+- Skip templates with `THESIS_SKIP=mit-thesis,oxford-thesis`.
+- Set compile timeout via `TYPST_TIMEOUT=120` (seconds). Uses `timeout`/`gtimeout` when available.
 
 ---
 

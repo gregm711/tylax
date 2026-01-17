@@ -6,7 +6,7 @@ use mitex_parser::syntax::{CmdItem, SyntaxElement};
 use rowan::ast::AstNode;
 use std::fmt::Write;
 
-use crate::data::colors::parse_color_expression;
+use crate::data::colors::{parse_color_with_model, sanitize_color_expression, sanitize_color_identifier};
 use crate::data::constants::{CodeBlockOptions, LANGUAGE_MAP};
 use crate::data::extended_symbols::EXTENDED_SYMBOLS;
 use crate::data::maps::TEX_COMMAND_SPEC;
@@ -228,6 +228,27 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 }
                 return;
             }
+            "definecolor" => {
+                let name = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+                let model = conv.get_required_arg(&cmd, 1).unwrap_or_default();
+                let spec = conv.get_required_arg(&cmd, 2).unwrap_or_default();
+                if !name.trim().is_empty() && !model.trim().is_empty() && !spec.trim().is_empty() {
+                    let ident = sanitize_color_identifier(name.trim());
+                    let value = parse_color_with_model(model.trim(), spec.trim());
+                    conv.state.register_color_def(ident, value);
+                }
+                return;
+            }
+            "colorlet" => {
+                let name = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+                let spec = conv.get_required_arg(&cmd, 1).unwrap_or_default();
+                if !name.trim().is_empty() && !spec.trim().is_empty() {
+                    let ident = sanitize_color_identifier(name.trim());
+                    let value = sanitize_color_expression(spec.trim());
+                    conv.state.register_color_def(ident, value);
+                }
+                return;
+            }
             "title" => {
                 if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
                     let cleaned = raw.replace("\\\\", " ");
@@ -317,8 +338,8 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             | "makeatletter" | "makeatother" | "AtBeginDocument" | "AtEndDocument"
             // Environment definitions
             | "newenvironment" | "renewenvironment"
-            // Hyperref and colors
-            | "hypersetup" | "definecolor" | "colorlet"
+            // Hyperref
+            | "hypersetup"
             // Graphics
             | "graphicspath" | "DeclareGraphicsExtensions"
             // Captions and floats
@@ -501,9 +522,20 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "ce" => {
             if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
                 if conv.state.mode == ConversionMode::Math {
-                    let formatted = super::utils::format_chemical_formula_math(&raw);
-                    if !formatted.is_empty() {
-                        let _ = write!(output, "{} ", formatted);
+                    // mhchem content can include nested LaTeX (e.g. $\beta$). Fall back to text
+                    // when the input looks complex so we don't emit invalid Typst math.
+                    let complex = raw.contains('\\') || raw.contains('$');
+                    if complex {
+                        let text = super::utils::sanitize_ce_text_for_math(&raw);
+                        let escaped = super::utils::escape_typst_string(text.trim());
+                        if !escaped.is_empty() {
+                            let _ = write!(output, "text(\"{}\") ", escaped);
+                        }
+                    } else {
+                        let formatted = super::utils::format_chemical_formula_math(&raw);
+                        if !formatted.is_empty() {
+                            let _ = write!(output, "{} ", formatted);
+                        }
                     }
                 } else {
                     let text = super::utils::convert_caption_text(&raw);
@@ -1905,21 +1937,21 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "textcolor" => {
             let color = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let content = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
-            let typst_color = parse_color_expression(&color);
+            let typst_color = sanitize_color_expression(&color);
             let _ = write!(output, "#text(fill: {})[{}]", typst_color, content);
         }
         "colorbox" => {
             let color = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let content = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
-            let typst_color = parse_color_expression(&color);
+            let typst_color = sanitize_color_expression(&color);
             let _ = write!(output, "#box(fill: {}, inset: 2pt)[{}]", typst_color, content);
         }
         "fcolorbox" => {
             let frame_color = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let bg_color = conv.get_required_arg(&cmd, 1).unwrap_or_default();
             let content = conv.convert_required_arg(&cmd, 2).unwrap_or_default();
-            let typst_frame = parse_color_expression(&frame_color);
-            let typst_bg = parse_color_expression(&bg_color);
+            let typst_frame = sanitize_color_expression(&frame_color);
+            let typst_bg = sanitize_color_expression(&bg_color);
             let _ = write!(
                 output,
                 "#box(fill: {}, stroke: {}, inset: 2pt)[{}]",
@@ -2655,7 +2687,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             // \color{red} affects following text until scope ends
             // Typst doesn't have an equivalent - output as comment with mapped color
             let color_name = conv.get_required_arg(&cmd, 0).unwrap_or_default();
-            let typst_color = parse_color_expression(&color_name);
+            let typst_color = sanitize_color_expression(&color_name);
             let _ = write!(output, "/* \\color{{{}}} -> {} */", color_name, typst_color);
         }
 
