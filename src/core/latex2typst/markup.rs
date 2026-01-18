@@ -615,6 +615,20 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 let _ = write!(output, "#smallcaps[{}] ", content);
             }
         }
+        "smallcaps" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                write_math_text(conv, &cmd, output);
+            } else if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "#smallcaps[{}] ", content.trim());
+            }
+        }
+        "allcaps" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                write_math_text(conv, &cmd, output);
+            } else if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "upper({}) ", content.trim());
+            }
+        }
         "textsuperscript" => {
             let content = conv
                 .convert_required_arg(&cmd, 0)
@@ -656,6 +670,57 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 let text = super::utils::convert_caption_text(&raw);
                 let _ = write!(output, "#link(\"https://doi.org/{}\")[{}]", text.trim(), text.trim());
             }
+        }
+        "fnref" => {
+            // Footnote reference in author lists (elsarticle)
+            return;
+        }
+        "fntext" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            if !content.trim().is_empty() {
+                let _ = write!(output, "#footnote[{}]", content.trim());
+            }
+        }
+        "cortext" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                if !text.trim().is_empty() {
+                    let _ = write!(output, "({})", text.trim());
+                }
+            }
+        }
+        "ead" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                if !text.trim().is_empty() {
+                    output.push_str(text.trim());
+                }
+            }
+        }
+        "bstctlcite" => {
+            return;
+        }
+        "marginnote" => {
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                if !content.trim().is_empty() {
+                    let _ = write!(output, "#footnote[{}]", content.trim());
+                }
+            }
+        }
+        "thanklessauthor" => {
+            if let Some(author) = conv.state.author.as_ref() {
+                let escaped = super::utils::escape_typst_text(author);
+                output.push_str(&escaped);
+            }
+        }
+        "thanklesstitle" => {
+            if let Some(title) = conv.state.title.as_ref() {
+                let escaped = super::utils::escape_typst_text(title);
+                output.push_str(&escaped);
+            }
+        }
+        "thanklesspublisher" => {
+            // Unknown in most documents; ignore.
         }
         "ce" => {
             if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
@@ -1181,6 +1246,23 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             let _ = write!(output, "__TYLAX_REF__{}__", clean_label);
         }
 
+        // Math in text mode
+        "ensuremath" => {
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                let trimmed = content.trim();
+                if trimmed.is_empty() {
+                    return;
+                }
+                if conv.state.mode == ConversionMode::Math {
+                    output.push_str(trimmed);
+                    output.push(' ');
+                } else {
+                    let _ = write!(output, "$ {} $", trimmed);
+                }
+            }
+            return;
+        }
+
         // Keywords (IEEE/ACM style)
         "IEEEkeywords" | "keywords" => {
             if conv.state.template_kind == Some(super::context::TemplateKind::Ieee) {
@@ -1194,6 +1276,28 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 }
                 return;
             }
+        }
+        "keyword" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                if !text.trim().is_empty() {
+                    conv.state.keywords = text
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                }
+            }
+            return;
+        }
+        "abstract" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                if !text.trim().is_empty() {
+                    conv.state.abstract_text = Some(text.trim().to_string());
+                }
+            }
+            return;
         }
 
         // Bibliography
@@ -1439,6 +1543,26 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
         }
 
+        "rotatebox" => {
+            // \rotatebox[origin=c]{90}{content}
+            let _opt = conv.get_optional_arg(&cmd, 0);
+            let angle = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let content = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            let mut angle_val = angle.trim().to_string();
+            if !angle_val.ends_with("deg") && !angle_val.ends_with("rad") {
+                angle_val.push_str("deg");
+            }
+            if !content.trim().is_empty() {
+                let _ = write!(output, "#rotate({})[{}]", angle_val, content.trim());
+            }
+        }
+
+        "smashoperator" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                output.push_str(arg.trim());
+            }
+        }
+
         // Table header helpers (OxEngThesis)
         "tableHeaderStart" | "tableHeaderEnd" => {
             // Style-only commands; ignore.
@@ -1600,6 +1724,20 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 _ => {
                     let _ = write!(output, "[{}]", content);
                 }
+            }
+        }
+        "captionof" => {
+            let kind = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let caption = conv.get_converted_required_arg(&cmd, 1).unwrap_or_default();
+            if !caption.trim().is_empty() {
+                let label = if kind.to_lowercase().contains("table") {
+                    "Table"
+                } else if kind.to_lowercase().contains("figure") {
+                    "Figure"
+                } else {
+                    "Caption"
+                };
+                let _ = write!(output, "#block[*{}:* {}]", label, caption.trim());
             }
         }
 
@@ -1823,6 +1961,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "mathcal" => {
             if let Some(content) = conv.convert_required_arg(&cmd, 0) {
                 let _ = write!(output, "cal({}) ", content);
+            }
+        }
+        "cal" => {
+            // Old-style \cal switch (often used as \cal A)
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "cal({}) ", content.trim());
             }
         }
         "mathfrak" => {
@@ -2662,6 +2806,21 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 let _ = write!(output, "{{ {} }} ", arg);
             }
         }
+        "ket" | "Ket" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "|{}⟩ ", arg.trim());
+            }
+        }
+        "bra" | "Bra" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "⟨{}| ", arg.trim());
+            }
+        }
+        "braket" | "Braket" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "⟨{}⟩ ", arg.trim());
+            }
+        }
 
         // Comparison aliases (with shorthand support)
         "ne" | "neq" => {
@@ -3114,7 +3273,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "authorrunning" | "titlerunning" | "institute"
         | "icmltitlerunning" | "icmlsetsymbol" | "printAffiliationsAndNotice" | "icmlEqualContribution"
         | "iclrfinalcopy"
-        | "address" | "subjclass" | "ccsdesc" | "received"
+        | "address" | "subjclass" | "ccsdesc" | "received" | "PACS" | "altaffiliation"
         | "CCSXML" | "authornote"
         | "acmArticle" | "acmDOI" | "acmJournal" | "acmMonth" | "acmNumber" | "acmVolume"
         | "acmYear" | "acmConference" | "acmBooktitle" | "acmPrice" | "acmISBN"
@@ -3124,7 +3283,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "renewbibmacro" | "DeclarePairedDelimiterXPP" | "pdfbookmark"
         | "jot" | "ifpdftex" | "else" | "fi" | "setstretch" | "dnormalspacing"
         | "hbadness" | "hyphenation" | "textwidth" | "setcounter"
-        | "setlength" | "addtolength"
+        | "setlength" | "addtolength" | "parindent" | "baselineskip"
         | "beforepreface" | "afterpreface" | "onlinesignature"
         | "lstset" | "lstdefinestyle" | "chaptermark" | "MakeOuterQuote" | "tolerance"
         | "approvalpage" | "copyrightpage" | "pagestyle" | "thispagestyle"
@@ -3153,7 +3312,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "itemsep" | "addtocounter" | "addlinespace" | "cdashline" | "compactitem"
         | "onecolumn" | "pacs" | "orcid" | "let" | "@dashdrawstore" | "adl@draw"
         | "adl@drawiv" | "parskip" | "tabcolsep" | "restylealgo" | "setcopyright"
-        | "theequation" => {
+        | "theequation" | "fontsize" | "selectfont" | "@footnotetext" | "subfile"
+        | "captionsetup" | "maketitlesupplementary"
+        | "makeatletter" | "makeatother" | "ifcase" | "or" | "month" | "year" | "space"
+        | "the" | "ttfamilyError" | "mathindent" | "." | "r" => {
             // Ignore these
         }
 
@@ -3195,6 +3357,24 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                     if let Some(rest) = base_name.strip_prefix(prefix) {
                         if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
                             output.push_str(prefix);
+                            output.push(' ');
+                            output.push_str(rest);
+                            output.push(' ');
+                            return;
+                        }
+                    }
+                }
+
+                let bracket_prefixes = [
+                    ("langle", "angle.l"),
+                    ("rangle", "angle.r"),
+                    ("lvert", "bar.v"),
+                    ("rvert", "bar.v"),
+                ];
+                for (prefix, sym) in bracket_prefixes {
+                    if let Some(rest) = base_name.strip_prefix(prefix) {
+                        if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                            output.push_str(sym);
                             output.push(' ');
                             output.push_str(rest);
                             output.push(' ');

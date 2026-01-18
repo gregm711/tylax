@@ -36,7 +36,7 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         }
 
         // Figure-like environments
-        "figure" | "listing" | "sidewaysfigure" | "wrapfigure" => {
+        "figure" | "listing" | "sidewaysfigure" | "wrapfigure" | "marginfigure" => {
             convert_figure(conv, &node, output);
         }
 
@@ -71,6 +71,10 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             conv.visit_env_content(&node, output);
             conv.state.pop_env();
             output.push('\n');
+        }
+        "multicols" => {
+            // Ignore column layout; emit content
+            conv.visit_env_content(&node, output);
         }
 
         // ICML author list (metadata only)
@@ -119,10 +123,18 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             convert_lstlisting(conv, &node, output);
         }
         // Knitr / shaded output blocks: keep raw to avoid breaking code-like content.
-        "knitrout" | "kframe" | "Shaded" | "Highlighting" | "Sinput" | "Soutput" | "Schunk" => {
+        "knitrout"
+        | "kframe"
+        | "Shaded"
+        | "shaded"
+        | "Highlighting"
+        | "Sinput"
+        | "Soutput"
+        | "Schunk" => {
             convert_verbatim(conv, &node, output);
         }
-        "Large" | "large" | "singlespacing" | "onehalfspacing" | "doublespacing" => {
+        "Large" | "large" | "scriptsize" | "small"
+        | "singlespacing" | "onehalfspacing" | "doublespacing" => {
             conv.visit_env_content(&node, output);
         }
 
@@ -142,15 +154,21 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         "savequote" => {
             convert_savequote(conv, &node, output);
         }
-        "frontmatter" | "sloppypar" => {
+        "frontmatter" | "sloppypar" | "fullwidth" => {
             conv.visit_env_content(&node, output);
+        }
+        "docspec" | "docspecdef" => {
+            output.push_str("#block[\n");
+            conv.visit_env_content(&node, output);
+            output.push_str("\n]\n");
         }
         "nomenclature" | "nomenclature*" => {
             output.push_str("\n= Nomenclature\n\n");
             conv.visit_env_content(&node, output);
             output.push('\n');
         }
-        "dedication" | "acknowledgements" | "acknowledgments" | "acks" => {
+        "dedication" | "acknowledgements" | "acknowledgments" | "acknowledgement"
+        | "ack" | "acks" => {
             let title = match env_str {
                 "dedication" => "Dedication",
                 "acknowledgements" => "Acknowledgements",
@@ -204,7 +222,7 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         }
 
         // IEEE keywords environment
-        "IEEEkeywords" | "keywords" => {
+        "IEEEkeywords" | "keywords" | "keyword" => {
             let mut buffer = String::new();
             conv.visit_env_content(&node, &mut buffer);
             let text = buffer.trim();
