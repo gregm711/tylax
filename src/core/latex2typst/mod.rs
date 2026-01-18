@@ -384,6 +384,45 @@ Linear & 1.21 & 0.88 & 0.60 \\
     }
 
     #[test]
+    fn test_ce_mixed_math_text() {
+        let input = r"\ce{^234_90Th -> ^0_-1$\beta${} + ^234_91Pa}";
+        let output = latex_math_to_typst(input);
+        println!("ce mixed output: {}", output);
+        assert!(
+            output.contains("text(\""),
+            "Should fall back to text() for complex mhchem: {}",
+            output
+        );
+        assert!(
+            !output.contains("$"),
+            "Should strip stray $ from mhchem text: {}",
+            output
+        );
+        assert!(
+            !output.contains("\\beta") && !output.contains("beta"),
+            "Should not leave LaTeX command in mhchem text: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_ce_equation_like() {
+        let input = r"\ce{SO4^2- + Ba^2+ -> BaSO4 v}";
+        let output = latex_math_to_typst(input);
+        println!("ce equation output: {}", output);
+        assert!(
+            output.contains("text(\"SO4"),
+            "Should emit text() for equation-like mhchem: {}",
+            output
+        );
+        assert!(
+            !output.contains("upright("),
+            "Should avoid upright() for complex mhchem: {}",
+            output
+        );
+    }
+
+    #[test]
     fn test_argmax_conversion() {
         let input = r"\arg\max_{x}";
         let output = latex_math_to_typst(input);
@@ -411,6 +450,48 @@ $\arg\min_{\theta}$ & Optimization operator \\
         assert!(
             !output.contains("argmin_"),
             "Should not have bare argmin_: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_overset_underset_limits() {
+        let input = r"\overset{*}{\sum\limits} + \underset{i}{\sum\limits}";
+        let output = latex_math_to_typst(input);
+        println!("overset/underset output: {}", output);
+        assert!(
+            !output.contains("limits(limits("),
+            "Should not double-wrap limits(): {}",
+            output
+        );
+        assert!(
+            output.contains("limits(sum)^(") && output.contains("limits(sum)_("),
+            "Should apply limits() for overset/underset: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_ref_eqref_resolution() {
+        let input = r"\documentclass{article}
+\begin{document}
+\section{Intro}\label{sec:intro}
+See Section~\ref{sec:intro}. Eq.~\eqref{eq:one}.
+\begin{equation}\label{eq:one} a=b \end{equation}
+\end{document}";
+        let output = latex_to_typst(input);
+        println!("ref/eqref output:\n{}", output);
+        assert!(output.contains("<sec-intro>"), "Missing section label: {}", output);
+        assert!(
+            output.contains("@sec-intro"),
+            "Missing resolved section ref: {}",
+            output
+        );
+        assert!(output.contains("<eq-one>"), "Missing equation label: {}", output);
+        assert!(output.contains("(@eq-one)"), "Missing eqref: {}", output);
+        assert!(
+            !output.contains("__TYLAX_REF__") && !output.contains("__TYLAX_EQREF__"),
+            "Should resolve reference placeholders: {}",
             output
         );
     }

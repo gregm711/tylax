@@ -199,7 +199,19 @@ Notes:
 - Override corpus list with `THESIS_LIST=tools/thesis_corpus_list.txt`.
 - Use prebuilt binaries via `T2L_BIN=target/debug/t2l` or `TYPST_BIN=/path/to/typst`.
 - Skip templates with `THESIS_SKIP=mit-thesis,oxford-thesis`.
+- Filter to one template with `THESIS_ONLY=mit-thesis`.
 - Set compile timeout via `TYPST_TIMEOUT=120` (seconds). Uses `timeout`/`gtimeout` when available.
+
+Run Typst → LaTeX snapshot diffs for templates:
+
+```bash
+./tools/template_snapshot_report.sh
+```
+
+Notes:
+- Report output: `target/template_snapshot_report.md` (diffs in `target/template_snapshot/<name>/`).
+- Default inputs are `public/templates/*.typ` (override with `TEMPLATE_DIR=...`).
+- Filter to one template with `ONLY_TEMPLATE=ieee`.
 
 ---
 

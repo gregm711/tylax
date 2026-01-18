@@ -442,6 +442,11 @@ lazy_static! {
         m.insert("examples", TheoremInfo { display_name: "Examples", style: TheoremStyle::Definition });
         m.insert("Example", TheoremInfo { display_name: "Example", style: TheoremStyle::Definition });
 
+        // Abbreviated theorem names used in some templates
+        m.insert("obs", TheoremInfo { display_name: "Observation", style: TheoremStyle::Remark });
+        m.insert("rq", TheoremInfo { display_name: "Remark", style: TheoremStyle::Remark });
+        m.insert("mainthm", TheoremInfo { display_name: "Main Theorem", style: TheoremStyle::Plain });
+
         // Exercises
         m.insert("exercise", TheoremInfo { display_name: "Exercise", style: TheoremStyle::Definition });
         m.insert("exer", TheoremInfo { display_name: "Exercise", style: TheoremStyle::Definition });
@@ -453,6 +458,9 @@ lazy_static! {
         // Questions
         m.insert("question", TheoremInfo { display_name: "Question", style: TheoremStyle::Definition });
         m.insert("ques", TheoremInfo { display_name: "Question", style: TheoremStyle::Definition });
+
+        // Problem boxes
+        m.insert("problembox", TheoremInfo { display_name: "Problem", style: TheoremStyle::Definition });
 
         // Solutions
         m.insert("solution", TheoremInfo { display_name: "Solution", style: TheoremStyle::Definition });

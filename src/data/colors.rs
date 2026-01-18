@@ -413,6 +413,19 @@ pub fn sanitize_color_identifier(name: &str) -> String {
     }
 }
 
+/// Return true if the color name is a known named color.
+pub fn is_named_color(name: &str) -> bool {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if NAMED_COLORS.contains_key(trimmed) {
+        return true;
+    }
+    let lower = trimmed.to_lowercase();
+    NAMED_COLORS.contains_key(lower.as_str())
+}
+
 /// Parse a \definecolor-style model+spec pair into a Typst color expression.
 pub fn parse_color_with_model(model: &str, spec: &str) -> String {
     let parsed = parse_color(spec, Some(model));

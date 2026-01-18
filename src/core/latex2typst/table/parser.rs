@@ -89,24 +89,46 @@ impl TableGridParser {
                 // We must advance current_col by the placeholder's span to correctly align subsequent data.
                 let raw = &raw_cells[input_idx];
                 let cell = GridCell::parse(raw);
+                let is_placeholder = cell.content.trim().is_empty();
 
-                // Decrement coverage for active columns.
-                // If a column wasn't covered but is spanned by the placeholder, we ignore it
-                // as it suggests a malformed table structure.
-                let span = cell.colspan;
+                if is_placeholder {
+                    // Decrement coverage for active columns.
+                    // If a column wasn't covered but is spanned by the placeholder, we ignore it
+                    // as it suggests a malformed table structure.
+                    let span = cell.colspan.max(1);
 
-                for i in 0..span {
-                    if current_col + i < self.col_coverage.len()
-                        && self.col_coverage[current_col + i] > 0
-                    {
-                        self.col_coverage[current_col + i] -= 1;
+                    for i in 0..span {
+                        if current_col + i < self.col_coverage.len()
+                            && self.col_coverage[current_col + i] > 0
+                        {
+                            self.col_coverage[current_col + i] -= 1;
+                        }
                     }
-                }
 
-                // Consume the placeholder cell from input
-                // but DO NOT emit a cell - Typst handles the spanned area
-                input_idx += 1;
-                current_col += span;
+                    // Consume the placeholder cell from input
+                    // but DO NOT emit a cell - Typst handles the spanned area
+                    input_idx += 1;
+                    current_col += span;
+                } else {
+                    // If we have real content, treat it as a real cell to avoid dropping data.
+                    // Clear existing coverage for the spanned columns and emit the cell.
+                    let span = cell.colspan.max(1);
+                    if current_col + span > self.col_coverage.len() {
+                        self.col_coverage.resize(current_col + span, 0);
+                    }
+                    for i in 0..span {
+                        self.col_coverage[current_col + i] = 0;
+                    }
+
+                    let rows_to_cover = cell.rowspan.saturating_sub(1);
+                    for i in 0..span {
+                        self.col_coverage[current_col + i] = rows_to_cover;
+                    }
+
+                    row.cells.push(cell.clone());
+                    input_idx += 1;
+                    current_col += span;
+                }
             } else {
                 // Not covered, process the input cell
                 let raw = &raw_cells[input_idx];
@@ -205,9 +227,23 @@ impl TableGridParser {
 
             while col < effective_cols {
                 if coverage[col] > 0 {
-                    coverage[col] -= 1;
-                    col += 1;
-                    continue;
+                    if cell_idx < row.cells.len() {
+                        let pending = &row.cells[cell_idx];
+                        let is_placeholder = pending.content.trim().is_empty()
+                            && !pending.is_special
+                            && pending.rowspan <= 1
+                            && pending.colspan <= 1
+                            && pending.align.is_none();
+                        if is_placeholder {
+                            coverage[col] -= 1;
+                            col += 1;
+                            continue;
+                        }
+                    } else {
+                        coverage[col] -= 1;
+                        col += 1;
+                        continue;
+                    }
                 }
 
                 if cell_idx < row.cells.len() {
@@ -248,11 +284,21 @@ pub fn parse_with_grid_parser(content: &str, alignments: Vec<CellAlign>) -> Stri
     let col_count = alignments.len().max(1);
     let mut parser = TableGridParser::new(alignments);
 
-    for row_str in content.split("|||ROW|||") {
+    let rows: Vec<&str> = content.split("|||ROW|||").collect();
+    let longtable_keep = compute_longtable_keep(&rows);
+
+    for (row_idx, row_str) in rows.iter().enumerate() {
         let row_str = row_str.trim();
         if row_str.is_empty() {
             continue;
         }
+
+        if let Some(ref keep) = longtable_keep {
+            if !keep.should_keep(row_idx) {
+                continue;
+            }
+        }
+
         let has_longtable_control = contains_longtable_control(row_str);
 
         // Check for HLINE markers and extract partial line info
@@ -308,4 +354,71 @@ fn contains_longtable_control(s: &str) -> bool {
         || s.contains("endhead")
         || s.contains("endfoot")
         || s.contains("endlastfoot")
+}
+
+struct LongtableKeep {
+    header_end: Option<usize>,
+    body_start: usize,
+}
+
+impl LongtableKeep {
+    fn should_keep(&self, idx: usize) -> bool {
+        let in_header = self.header_end.map(|end| idx < end).unwrap_or(false);
+        let in_body = idx >= self.body_start;
+        in_header || in_body
+    }
+}
+
+fn compute_longtable_keep(rows: &[&str]) -> Option<LongtableKeep> {
+    if !rows.iter().any(|r| contains_longtable_control(r)) {
+        return None;
+    }
+
+    let endfirsthead = find_control_row(rows, "endfirsthead");
+    let endhead = find_control_row(rows, "endhead");
+    let endfoot = find_control_row(rows, "endfoot");
+    let endlastfoot = find_control_row(rows, "endlastfoot");
+
+    let header_end = endfirsthead.or(endhead);
+    let body_start = if let Some(idx) = endlastfoot {
+        idx + 1
+    } else if let Some(idx) = endfoot {
+        idx + 1
+    } else if let Some(idx) = endhead {
+        idx + 1
+    } else if let Some(idx) = endfirsthead {
+        idx + 1
+    } else {
+        0
+    };
+
+    Some(LongtableKeep {
+        header_end,
+        body_start,
+    })
+}
+
+fn find_control_row(rows: &[&str], keyword: &str) -> Option<usize> {
+    rows.iter().enumerate().find_map(|(idx, row)| {
+        let row_lower = row.to_ascii_lowercase();
+        if row_lower.contains(keyword) && is_longtable_control_row(row) {
+            Some(idx)
+        } else {
+            None
+        }
+    })
+}
+
+fn is_longtable_control_row(row: &str) -> bool {
+    if !contains_longtable_control(row) {
+        return false;
+    }
+
+    let clean_row = row.replace("|||HLINE|||", "");
+    let clean_row = clean_hline_args(&clean_row);
+    let raw_cells: Vec<String> = clean_row
+        .split("|||CELL|||")
+        .map(clean_cell_content)
+        .collect();
+    raw_cells.iter().all(|c| c.trim().is_empty())
 }

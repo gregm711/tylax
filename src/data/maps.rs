@@ -1147,6 +1147,10 @@ lazy_static! {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
             alias: None,
         }));
+        m.insert("DeclarePairedDelimiter".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 3 } },
+            alias: None,
+        }));
         m.insert("Gls".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
             alias: None,
@@ -1180,7 +1184,8 @@ lazy_static! {
             alias: None,
         }));
         m.insert("autocite".to_string(), CommandSpecItem::Cmd(CmdShape {
-            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            // Allow optional prenote, then one required argument
+            args: ArgShape::Right { pattern: ArgPattern::Glob { pattern: GlobStr::from("{,b}t") } },
             alias: None,
         }));
         m.insert("autoref".to_string(), CommandSpecItem::Cmd(CmdShape {
@@ -1236,15 +1241,16 @@ lazy_static! {
             alias: None,
         }));
         m.insert("cite".to_string(), CommandSpecItem::Cmd(CmdShape {
-            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            // Allow optional bracket, then one required argument
+            args: ArgShape::Right { pattern: ArgPattern::Glob { pattern: GlobStr::from("{,b}t") } },
             alias: None,
         }));
         m.insert("citep".to_string(), CommandSpecItem::Cmd(CmdShape {
-            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            args: ArgShape::Right { pattern: ArgPattern::Glob { pattern: GlobStr::from("{,b}t") } },
             alias: None,
         }));
         m.insert("citet".to_string(), CommandSpecItem::Cmd(CmdShape {
-            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            args: ArgShape::Right { pattern: ArgPattern::Glob { pattern: GlobStr::from("{,b}t") } },
             alias: None,
         }));
         m.insert("color".to_string(), CommandSpecItem::Cmd(CmdShape {
@@ -1304,7 +1310,7 @@ lazy_static! {
             alias: None,
         }));
         m.insert("footcite".to_string(), CommandSpecItem::Cmd(CmdShape {
-            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            args: ArgShape::Right { pattern: ArgPattern::Glob { pattern: GlobStr::from("{,b}t") } },
             alias: None,
         }));
         m.insert("footnote".to_string(), CommandSpecItem::Cmd(CmdShape {
@@ -1452,7 +1458,7 @@ lazy_static! {
             alias: None,
         }));
         m.insert("parencite".to_string(), CommandSpecItem::Cmd(CmdShape {
-            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            args: ArgShape::Right { pattern: ArgPattern::Glob { pattern: GlobStr::from("{,b}t") } },
             alias: None,
         }));
         m.insert("part".to_string(), CommandSpecItem::Cmd(CmdShape {
@@ -1518,7 +1524,7 @@ lazy_static! {
             alias: None,
         }));
         m.insert("textcite".to_string(), CommandSpecItem::Cmd(CmdShape {
-            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            args: ArgShape::Right { pattern: ArgPattern::Glob { pattern: GlobStr::from("{,b}t") } },
             alias: None,
         }));
         m.insert("textcolor".to_string(), CommandSpecItem::Cmd(CmdShape {
@@ -1554,6 +1560,30 @@ lazy_static! {
             alias: None,
         }));
         m.insert("subref".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("abs".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right {
+                pattern: ArgPattern::Glob {
+                    pattern: GlobStr::from("{,b}t"),
+                },
+            },
+            alias: None,
+        }));
+        m.insert("norm".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right {
+                pattern: ArgPattern::Glob {
+                    pattern: GlobStr::from("{,b}t"),
+                },
+            },
+            alias: None,
+        }));
+        m.insert("code".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("pkg".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
             alias: None,
         }));

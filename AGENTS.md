@@ -27,8 +27,10 @@
 - No explicit coverage threshold, but new behavior should include tests.
 - Template snapshots (Typst → LaTeX) can be refreshed with `UPDATE_GOLDEN=1 cargo test -q template_snapshots`.
 - Thesis corpus harness: `./tools/thesis_corpus_compile.sh` (convert → typst compile → report).
-  - Env: `THESIS_LIST`, `THESIS_SKIP` (comma-separated), `TYPST_TIMEOUT`, `T2L_BIN`, `TYPST_BIN`.
+  - Env: `THESIS_LIST`, `THESIS_SKIP` (comma-separated), `THESIS_ONLY`, `TYPST_TIMEOUT`, `T2L_BIN`, `TYPST_BIN`.
   - `timeout`/`gtimeout` (or Python timeout) is used to avoid hangs on large templates.
+- Template snapshot report: `./tools/template_snapshot_report.sh` (Typst → LaTeX → diff report).
+  - Env: `TEMPLATE_DIR`, `ONLY_TEMPLATE`, `T2L_BIN`.
 
 ## Commit & Pull Request Guidelines
 - Commit messages are short, imperative, sentence-case (e.g., “Improve Typst→LaTeX layout”).
@@ -42,3 +44,4 @@
 ## Conversion Notes
 - LaTeX → Typst: `\definecolor` / `\colorlet` from the preamble are captured as `#let` color definitions.
 - CLI post-processes image paths to resolve extensionless `image("path")` against files copied into the output folder.
+- Bibliography auto-discovery ignores generated `*.typst.bib` files to prevent self-including merges.

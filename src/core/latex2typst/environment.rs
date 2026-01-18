@@ -26,8 +26,9 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
 
     let env_name = env.name_tok().map(|t| t.text().to_string());
     let env_str = env_name.as_deref().unwrap_or("");
+    let env_trim = env_str.trim().trim_end_matches('*');
 
-    match env_str {
+    match env_trim {
         // Document environment - marks end of preamble
         "document" => {
             conv.state.in_preamble = false;
@@ -35,22 +36,22 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         }
 
         // Figure-like environments
-        "figure" | "figure*" | "listing" | "listing*" | "sidewaysfigure" => {
+        "figure" | "listing" | "sidewaysfigure" | "wrapfigure" => {
             convert_figure(conv, &node, output);
         }
 
         // Table environment
-        "table" | "table*" => {
+        "table" | "wraptable" => {
             convert_table(conv, &node, output);
         }
 
         // Tabular environment
-        "tabular" | "tabular*" | "tabularx" | "longtable" | "longtabu" | "array" => {
+        "tabular" | "tabularx" | "longtable" | "longtabu" | "array" => {
             convert_tabular(conv, &node, output);
         }
 
         // List environments
-        "itemize" => {
+        "itemize" | "compactitem" => {
             conv.state.push_env(EnvironmentContext::Itemize);
             output.push('\n');
             conv.visit_env_content(&node, output);
@@ -79,17 +80,16 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         }
 
         // Math environments
-        "equation" | "equation*" => {
+        "equation" => {
             convert_equation(conv, &node, env_str, output);
         }
-        "align" | "align*" | "aligned" | "alignat" | "alignat*" | "flalign" | "flalign*"
-        | "eqnarray" | "eqnarray*" => {
+        "align" | "aligned" | "alignat" | "flalign" | "eqnarray" => {
             convert_align(conv, &node, env_str, output);
         }
-        "gather" | "gather*" => {
+        "gather" => {
             convert_gather(conv, &node, env_str, output);
         }
-        "multline" | "multline*" => {
+        "multline" => {
             convert_multline(conv, &node, env_str, output);
         }
         "split" => {
@@ -112,11 +112,15 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         }
 
         // Code/verbatim environments
-        "verbatim" | "verbatim*" | "Verbatim" => {
+        "verbatim" | "verbatim*" | "Verbatim" | "alltt" => {
             convert_verbatim(conv, &node, output);
         }
         "lstlisting" => {
             convert_lstlisting(conv, &node, output);
+        }
+        // Knitr / shaded output blocks: keep raw to avoid breaking code-like content.
+        "knitrout" | "kframe" | "Shaded" | "Highlighting" | "Sinput" | "Soutput" | "Schunk" => {
+            convert_verbatim(conv, &node, output);
         }
         "Large" | "large" | "singlespacing" | "onehalfspacing" | "doublespacing" => {
             conv.visit_env_content(&node, output);
@@ -146,7 +150,7 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             conv.visit_env_content(&node, output);
             output.push('\n');
         }
-        "dedication" | "acknowledgements" | "acknowledgments" => {
+        "dedication" | "acknowledgements" | "acknowledgments" | "acks" => {
             let title = match env_str {
                 "dedication" => "Dedication",
                 "acknowledgements" => "Acknowledgements",
@@ -160,17 +164,63 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             convert_table(conv, &node, output);
         }
 
+        // ACM metadata XML block (ignore content)
+        "CCSXML" => {
+            let mut _scratch = String::new();
+            conv.visit_env_content(&node, &mut _scratch);
+        }
+
+        // Prompt blocks used in some datasets
+        "prompt" => {
+            let mut content = String::new();
+            conv.visit_env_content(&node, &mut content);
+            if !content.trim().is_empty() {
+                output.push_str("\n#block[\n");
+                output.push_str(content.trim());
+                output.push_str("\n]\n");
+            }
+        }
+
         // TikZ
         "tikzpicture" => {
             convert_tikz(conv, &node, output);
+        }
+
+        // Cryptocode-style gameproof blocks: keep as raw to avoid invalid math/text mixes
+        "gameproof" => {
+            convert_gameproof(conv, &node, output);
         }
 
         // Theorem-like environments
         "theorem" | "lemma" | "proposition" | "corollary" | "definition" | "example" | "remark"
         | "proof" | "conjecture" | "claim" | "fact" | "observation" | "property" | "question"
         | "problem" | "solution" | "answer" | "exercise" | "assumption" | "hypothesis"
-        | "notation" | "conclusion" => {
-            convert_theorem(conv, &node, env_str, output);
+        | "notation" | "conclusion"
+        // Common short forms
+        | "thm" | "lem" | "prop" | "rem" | "cor" | "defn"
+        // Custom theorem-like environments from packages
+        | "enumthm" => {
+            convert_theorem(conv, &node, env_trim, output);
+        }
+
+        // IEEE keywords environment
+        "IEEEkeywords" | "keywords" => {
+            let mut buffer = String::new();
+            conv.visit_env_content(&node, &mut buffer);
+            let text = buffer.trim();
+            if !text.is_empty() {
+                let cleaned = convert_caption_text(text);
+                conv.state.keywords = cleaned
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+        }
+
+        // Comment environment (ignore content)
+        "comment" => {
+            // Ignore everything inside.
         }
 
         // Quote environments
@@ -265,22 +315,27 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
 
         // Unknown environments - pass through content
         _ => {
-            // Check if it's a theorem-like environment defined by user
-            if conv.state.counters.contains_key(env_str) {
-                convert_theorem(conv, &node, env_str, output);
+            let env_lower = env_trim.to_lowercase();
+            // Check if it's a theorem-like environment defined by user or known
+            if conv.state.custom_theorems.contains_key(env_trim)
+                || THEOREM_TYPES.contains_key(env_trim)
+            {
+                convert_theorem(conv, &node, env_trim, output);
+            } else if THEOREM_TYPES.contains_key(env_lower.as_str()) {
+                convert_theorem(conv, &node, &env_lower, output);
             } else {
                 let loss_id = conv.record_loss(
                     LossKind::UnknownEnvironment,
-                    Some(env_str.to_string()),
-                    format!("Unknown environment {}", env_str),
+                    Some(env_trim.to_string()),
+                    format!("Unknown environment {}", env_trim),
                     Some(node.text().to_string()),
                     Some("text".to_string()),
                 );
                 let loss_marker = format!(" /* {}{} */ ", LOSS_MARKER_PREFIX, loss_id);
                 // Just process content
-                let _ = writeln!(output, "{} /* Begin {} */", loss_marker, env_str);
+                let _ = writeln!(output, "{} /* Begin {} */", loss_marker, env_trim);
                 conv.visit_env_content(&node, output);
-                let _ = write!(output, "\n/* End {} */\n", env_str);
+                let _ = write!(output, "\n/* End {} */\n", env_trim);
             }
         }
     }
@@ -552,7 +607,10 @@ fn convert_tabular(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut St
 
     // Save current mode and force Text mode for tabular content
     let prev_mode = conv.state.mode;
-    conv.state.mode = ConversionMode::Text;
+    let in_math = matches!(prev_mode, ConversionMode::Math);
+    if !in_math {
+        conv.state.mode = ConversionMode::Text;
+    }
 
     // Get column specification from the environment's first required argument
     let col_spec = get_tabular_col_spec(node).unwrap_or_default();
@@ -576,11 +634,58 @@ fn convert_tabular(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut St
     // Restore previous mode
     conv.state.mode = prev_mode;
 
-    // Use the new grid parser
-    let typst_output = parse_with_grid_parser(&content, alignments);
-    output.push_str(&typst_output);
+    if in_math {
+        let math_output = render_math_matrix(&content);
+        output.push_str(&math_output);
+    } else {
+        // Use the new grid parser
+        let typst_output = parse_with_grid_parser(&content, alignments);
+        output.push_str(&typst_output);
+    }
 
     conv.state.pop_env();
+}
+
+/// Render a tabular/array-like environment into a Typst math matrix.
+fn render_math_matrix(raw: &str) -> String {
+    let mut rows_out: Vec<String> = Vec::new();
+    for row in raw.split("|||ROW|||") {
+        let mut row_str = row.trim().trim_matches(',').to_string();
+        if row_str.contains("|||HLINE|||") {
+            row_str = row_str.replace("|||HLINE|||", "");
+        }
+        if row_str.trim().is_empty() {
+            continue;
+        }
+        if row_str.contains("table.hline") || row_str.contains("table.cline") {
+            continue;
+        }
+        let mut cells_out: Vec<String> = Vec::new();
+        for cell in row_str.split("|||CELL|||") {
+            let mut cell_str = cell.trim().trim_matches(',').to_string();
+            if cell_str.contains("|||HLINE|||") {
+                cell_str = cell_str.replace("|||HLINE|||", "");
+            }
+            let cell_str = cell_str.trim();
+            if cell_str.contains("table.hline") || cell_str.contains("table.cline") {
+                continue;
+            }
+            if cell_str.is_empty() {
+                cells_out.push("zws".to_string());
+            } else {
+                cells_out.push(cell_str.to_string());
+            }
+        }
+        if !cells_out.is_empty() {
+            rows_out.push(cells_out.join(", "));
+        }
+    }
+
+    if rows_out.is_empty() {
+        "mat()".to_string()
+    } else {
+        format!("mat({})", rows_out.join("; "))
+    }
 }
 
 /// Convert an equation environment
@@ -1008,90 +1113,18 @@ fn convert_bibliography(conv: &mut LatexConverter, node: &SyntaxNode, output: &m
     conv.state.push_env(EnvironmentContext::Bibliography);
 
     output.push_str("\n= References\n\n");
-    output.push_str("#show figure.where(kind: \"bib\"): it => block[#it.caption #it.body]\n");
-
-    // Process bibitem commands using the dedicated function
-    convert_thebibliography_content(conv, node, output);
+    // Render bibliography content as raw text to avoid invalid markup from BibTeX-like entries.
+    let raw = conv.extract_env_raw_content(node);
+    let trimmed = raw.trim_end();
+    let escaped = escape_typst_string(trimmed);
+    output.push_str("#raw(block: true, lang: \"text\", \"");
+    output.push_str(&escaped);
+    output.push_str("\")\n");
 
     conv.state.pop_env();
 }
 
-/// Special converter for thebibliography environment content
-fn convert_thebibliography_content(
-    conv: &mut LatexConverter,
-    node: &SyntaxNode,
-    output: &mut String,
-) {
-    let mut bib_counter = 1;
-    let mut current_label = String::new();
-    let mut in_item = false;
-
-    for child in node.children_with_tokens() {
-        // Check if current child is a \bibitem command
-        let is_bibitem = if let SyntaxElement::Node(n) = &child {
-            if let Some(cmd) = CmdItem::cast(n.clone()) {
-                if let Some(name) = cmd.name_tok() {
-                    name.text() == "\\bibitem"
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        if is_bibitem {
-            // Close previous item
-            if in_item {
-                output.push_str("] ");
-                if !current_label.is_empty() {
-                    let _ = write!(output, "<{}>", sanitize_label(&current_label));
-                }
-                output.push('\n');
-            }
-
-            // Start new item
-            if let SyntaxElement::Node(n) = &child {
-                if let Some(cmd) = CmdItem::cast(n.clone()) {
-                    // Get label from arg - use get_required_arg for simple labels
-                    if let Some(arg) = conv.get_required_arg(&cmd, 0) {
-                        current_label = arg;
-                    } else {
-                        current_label = String::new();
-                    }
-
-                    let _ = write!(
-                        output,
-                        "#figure(kind: \"bib\", supplement: none, caption: [{}])[",
-                        bib_counter
-                    );
-                    bib_counter += 1;
-                    in_item = true;
-                }
-            }
-        } else {
-            // If in item, output content
-            if in_item {
-                // Skip begin/end tokens
-                match child.kind() {
-                    SyntaxKind::ItemBegin | SyntaxKind::ItemEnd => continue,
-                    _ => conv.visit_element(child, output),
-                }
-            }
-        }
-    }
-
-    // Close last item
-    if in_item {
-        output.push_str("] ");
-        if !current_label.is_empty() {
-            let _ = write!(output, "<{}>", sanitize_label(&current_label));
-        }
-        output.push('\n');
-    }
-}
+// convert_thebibliography_content removed; we render raw for stability.
 
 /// Convert a beamer frame
 fn convert_frame(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut String) {
@@ -1135,6 +1168,19 @@ fn convert_algorithm(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut 
     output.push_str(&escaped);
     output.push_str("\")\n");
 
+    output.push_str("]\n");
+}
+
+/// Convert a gameproof environment (cryptocode) as raw text to keep it valid.
+fn convert_gameproof(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut String) {
+    let content = conv.extract_env_raw_content(node);
+    let trimmed = content.trim_end();
+    let escaped = escape_typst_string(trimmed);
+    output.push_str("\n#block(width: 100%, stroke: 1pt, inset: 10pt)[\n");
+    output.push_str("  #text(weight: \"bold\")[Game]\n\n");
+    output.push_str("  #raw(block: true, lang: \"text\", \"");
+    output.push_str(&escaped);
+    output.push_str("\")\n");
     output.push_str("]\n");
 }
 
@@ -1204,98 +1250,80 @@ fn get_tabular_col_spec(node: &SyntaxNode) -> Option<String> {
 /// Parse column specification from LaTeX format (e.g., "l|ccc" -> ["l", "c", "c", "c"])
 fn parse_column_spec(spec: &str) -> Vec<String> {
     let mut columns = Vec::new();
-    let mut chars = spec.chars().peekable();
+    let chars: Vec<char> = spec.chars().collect();
+    let mut i = 0usize;
 
-    while let Some(c) = chars.next() {
+    while i < chars.len() {
+        let c = chars[i];
         match c {
-            'l' | 'c' | 'r' => columns.push(c.to_string()),
-            'p' | 'm' | 'b' | 'X' => {
-                // Skip width specification
-                if chars.peek() == Some(&'{') {
-                    let mut depth = 0;
-                    for ch in chars.by_ref() {
-                        if ch == '{' {
-                            depth += 1;
-                        } else if ch == '}' {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                    }
+            'l' | 'c' | 'r' => {
+                columns.push(c.to_string());
+                i += 1;
+            }
+            'p' | 'm' | 'b' | 'X' | 'S' => {
+                i += 1;
+                i = skip_ws(&chars, i);
+                if i < chars.len() && chars[i] == '{' {
+                    i = skip_braced_group(&chars, i);
                 }
-                columns.push("l".to_string()); // Default to left
+                columns.push("l".to_string());
             }
             '*' => {
-                // Repeat specification *{n}{spec}
-                if chars.peek() == Some(&'{') {
-                    chars.next();
-                    let mut count_str = String::new();
-                    for ch in chars.by_ref() {
-                        if ch == '}' {
-                            break;
-                        }
-                        count_str.push(ch);
+                i += 1;
+                i = skip_ws(&chars, i);
+                let mut count = 1usize;
+                if i < chars.len() && chars[i] == '{' {
+                    if let Some((count_str, next)) = parse_braced_content(&chars, i) {
+                        count = count_str.trim().parse().unwrap_or(1);
+                        i = next;
+                    } else {
+                        i = chars.len();
                     }
-                    let count: usize = count_str.parse().unwrap_or(1);
-
-                    if chars.peek() == Some(&'{') {
-                        chars.next();
-                        let mut spec_str = String::new();
-                        let mut depth = 1;
-                        for ch in chars.by_ref() {
-                            if ch == '{' {
-                                depth += 1;
-                            } else if ch == '}' {
-                                depth -= 1;
-                                if depth == 0 {
-                                    break;
-                                }
-                            }
-                            spec_str.push(ch);
-                        }
-
+                }
+                i = skip_ws(&chars, i);
+                if i < chars.len() && chars[i] == '{' {
+                    if let Some((spec_str, next)) = parse_braced_content(&chars, i) {
                         let inner_cols = parse_column_spec(&spec_str);
                         for _ in 0..count {
                             columns.extend(inner_cols.clone());
                         }
+                        i = next;
+                    } else {
+                        i = chars.len();
                     }
                 }
             }
-            '|' | '@' | '!' => {
-                // Skip separators and @{} expressions
-                if (c == '@' || c == '!') && chars.peek() == Some(&'{') {
-                    let mut depth = 0;
-                    for ch in chars.by_ref() {
-                        if ch == '{' {
-                            depth += 1;
-                        } else if ch == '}' {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                    }
+            '>' | '<' => {
+                i += 1;
+                i = skip_ws(&chars, i);
+                if i < chars.len() && chars[i] == '{' {
+                    i = skip_braced_group(&chars, i);
                 }
+            }
+            '@' | '!' => {
+                i += 1;
+                i = skip_ws(&chars, i);
+                if i < chars.len() && chars[i] == '{' {
+                    i = skip_braced_group(&chars, i);
+                }
+            }
+            '|' => {
+                i += 1;
+            }
+            _ if c.is_ascii_whitespace() => {
+                i += 1;
             }
             _ if c.is_ascii_alphabetic() => {
-                // Custom column types (e.g., j{3.2}) - treat as a single column
-                if chars.peek() == Some(&'{') {
-                    let mut depth = 0;
-                    for ch in chars.by_ref() {
-                        if ch == '{' {
-                            depth += 1;
-                        } else if ch == '}' {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                    }
+                i += 1;
+                i = skip_ws(&chars, i);
+                if i < chars.len() && chars[i] == '{' {
+                    i = skip_braced_group(&chars, i);
                 }
                 columns.push("l".to_string());
             }
-            _ => {}
+            _ => {
+                i += 1;
+            }
         }
     }
 
@@ -1304,6 +1332,94 @@ fn parse_column_spec(spec: &str) -> Vec<String> {
     }
 
     columns
+}
+
+fn skip_ws(chars: &[char], mut i: usize) -> usize {
+    while i < chars.len() && chars[i].is_whitespace() {
+        i += 1;
+    }
+    i
+}
+
+fn skip_braced_group(chars: &[char], start: usize) -> usize {
+    let mut depth = 0i32;
+    let mut i = start;
+    while i < chars.len() {
+        match chars[i] {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    chars.len()
+}
+
+fn parse_braced_content(chars: &[char], start: usize) -> Option<(String, usize)> {
+    if start >= chars.len() || chars[start] != '{' {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut out = String::new();
+    let mut i = start;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '{' {
+            depth += 1;
+            if depth > 1 {
+                out.push(ch);
+            }
+        } else if ch == '}' {
+            depth -= 1;
+            if depth == 0 {
+                return Some((out, i + 1));
+            }
+            out.push(ch);
+        } else if depth >= 1 {
+            out.push(ch);
+        }
+        i += 1;
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_column_spec;
+
+    #[test]
+    fn test_parse_column_spec_with_modifiers() {
+        let cols = parse_column_spec(r">{\raggedright\arraybackslash}p{2cm}c");
+        assert_eq!(cols, vec!["l".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_column_spec_with_repeat_and_custom() {
+        let cols = parse_column_spec(r"l|*{2}{>{\centering}m{1cm}}r");
+        assert_eq!(
+            cols,
+            vec![
+                "l".to_string(),
+                "l".to_string(),
+                "l".to_string(),
+                "r".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_column_spec_custom_types() {
+        let cols = parse_column_spec(r"S D{.}{.}{-1} c");
+        assert_eq!(
+            cols,
+            vec!["l".to_string(), "l".to_string(), "c".to_string()]
+        );
+    }
 }
 
 /// Convert a LaTeX dimension to Typst

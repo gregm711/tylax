@@ -105,8 +105,13 @@ impl MacroDb {
         db.define(Macro::simple("displaystyle", ""));
         db.define(Macro::simple("textstyle", ""));
         db.define(Macro::simple("scriptstyle", ""));
+        db.define(Macro::with_args("bold", 1, "\\mathbf{#1}"));
 
         db
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &Macro)> {
+        self.macros.iter()
     }
 
     /// Define a new macro
@@ -297,9 +302,14 @@ impl MacroDb {
             Some((name, &input[end + 1..]))
         } else if let Some(rest) = input.strip_prefix('\\') {
             // \name
-            let end = rest
-                .find(|c: char| !c.is_alphabetic())
-                .unwrap_or(rest.len());
+            let mut end = 0usize;
+            for ch in rest.chars() {
+                if ch.is_alphanumeric() || ch == '@' || ch == '_' || ch == '-' {
+                    end += ch.len_utf8();
+                } else {
+                    break;
+                }
+            }
             let name = rest[..end].to_string();
             Some((name, &rest[end..]))
         } else {
@@ -409,7 +419,7 @@ fn expand_macros_with_depth(input: &str, db: &MacroDb, depth: usize) -> String {
             let mut cmd_name = String::new();
             while i < chars.len() {
                 let next = chars[i];
-                if next.is_alphabetic() {
+                if next.is_alphanumeric() || next == '@' || next == '-' {
                     cmd_name.push(next);
                     i += 1;
                 } else {
@@ -629,23 +639,33 @@ pub fn extract_and_remove_definitions(input: &str) -> (MacroDb, String) {
         "\\providecommand",
         "\\def",
         "\\DeclareMathOperator",
+        "\\DeclarePairedDelimiter",
+        "\\DeclarePairedDelimiterX",
+        "\\newenvironment",
+        "\\renewenvironment",
+        "\\provideenvironment",
     ];
 
     for pattern in patterns {
-        while let Some(start) = result.find(pattern) {
-            // Find the end of this definition
+        let mut search_idx = 0usize;
+        loop {
+            let rel_start = match result[search_idx..].find(pattern) {
+                Some(pos) => pos,
+                None => break,
+            };
+            let start = search_idx + rel_start;
             let after = &result[start..];
-            if let Some(end) = find_definition_end_simple(after) {
-                // Parse the definition
-                let def_text = &result[start..start + end];
-                if let Some(macro_def) = parse_definition(def_text) {
-                    db.define(macro_def);
-                }
-
-                // Remove from result
-                result = format!("{}{}", &result[..start], &result[start + end..]);
+            let end = match find_definition_end_simple(after) {
+                Some(end) => end,
+                None => break,
+            };
+            let def_text = &result[start..start + end];
+            if let Some(macro_def) = parse_definition(def_text) {
+                db.define(macro_def);
+                result.replace_range(start..start + end, "");
+                search_idx = start;
             } else {
-                break;
+                search_idx = start + pattern.len();
             }
         }
     }
@@ -655,11 +675,12 @@ pub fn extract_and_remove_definitions(input: &str) -> (MacroDb, String) {
 
 fn find_definition_end_simple(input: &str) -> Option<usize> {
     let mut depth = 0;
-    let mut brace_count = 0;
-    let mut required_braces = 2;
+    let mut group_count = 0;
+    let mut required_groups = 2;
+    let mut in_comment = false;
 
     if input.starts_with("\\def") {
-        required_braces = 1;
+        required_groups = 1;
     } else if input.starts_with("\\newcommand")
         || input.starts_with("\\renewcommand")
         || input.starts_with("\\providecommand")
@@ -680,21 +701,45 @@ fn find_definition_end_simple(input: &str) -> Option<usize> {
 
         let rest = input[cmd_end..].trim_start();
         if rest.starts_with('\\') {
-            required_braces = 1;
+            required_groups = 1;
         }
+    } else if input.starts_with("\\newenvironment")
+        || input.starts_with("\\renewenvironment")
+        || input.starts_with("\\provideenvironment")
+    {
+        // \newenvironment{name}{begin}{end} (plus optional args)
+        required_groups = 3;
+    } else if input.starts_with("\\DeclarePairedDelimiterX") {
+        // \DeclarePairedDelimiterX{\name}[n]{\left}{\right}{body}
+        required_groups = 4;
+    } else if input.starts_with("\\DeclarePairedDelimiter") {
+        // \DeclarePairedDelimiter{\name}{\left}{\right}
+        required_groups = 3;
     }
 
     for (i, c) in input.char_indices() {
+        if in_comment {
+            if c == '\n' {
+                in_comment = false;
+            }
+            continue;
+        }
+        if c == '%' {
+            in_comment = true;
+            continue;
+        }
         match c {
             '{' => {
                 depth += 1;
-                brace_count += 1;
+                if depth == 1 {
+                    group_count += 1;
+                }
             }
             '}' => {
                 depth -= 1;
                 // For \newcommand{\foo}{body}, we need to find the closing of body
                 // which is the second time depth returns to 0
-                if depth == 0 && brace_count >= required_braces {
+                if depth == 0 && group_count >= required_groups {
                     return Some(i + 1);
                 }
             }
@@ -715,6 +760,10 @@ fn parse_definition(input: &str) -> Option<Macro> {
         parse_def_simple(input)
     } else if input.starts_with("\\DeclareMathOperator") {
         parse_declare_math_operator(input)
+    } else if input.starts_with("\\DeclarePairedDelimiterX") {
+        parse_declare_paired_delimiterx(input)
+    } else if input.starts_with("\\DeclarePairedDelimiter") {
+        parse_declare_paired_delimiter(input)
     } else {
         None
     }
@@ -758,6 +807,7 @@ fn parse_newcommand_simple(input: &str) -> Option<Macro> {
 
     // Parse [numargs][default]
     let mut num_args = 0;
+    let mut default_opt: Option<String> = None;
 
     if remaining.starts_with('[') {
         if let Some(end) = remaining.find(']') {
@@ -768,9 +818,10 @@ fn parse_newcommand_simple(input: &str) -> Option<Macro> {
         }
     }
 
-    // Skip optional default value
+    // Optional default value for the first argument
     if remaining.starts_with('[') {
         if let Some(end) = remaining.find(']') {
+            default_opt = Some(remaining[1..end].to_string());
             remaining = remaining[end + 1..].trim_start();
         }
     }
@@ -783,7 +834,12 @@ fn parse_newcommand_simple(input: &str) -> Option<Macro> {
     let body_end = find_matching_brace_simple(remaining)?;
     let replacement = remaining[1..body_end].to_string();
 
-    Some(Macro::with_args(&name, num_args, &replacement))
+    if let Some(default) = default_opt {
+        let num = if num_args == 0 { 1 } else { num_args };
+        Some(Macro::with_optional(&name, num, &default, &replacement))
+    } else {
+        Some(Macro::with_args(&name, num_args, &replacement))
+    }
 }
 
 fn find_matching_brace_simple(s: &str) -> Option<usize> {
@@ -891,6 +947,89 @@ fn parse_declare_math_operator(input: &str) -> Option<Macro> {
     let replacement = format!("\\operatorname{{{}}}", text);
 
     Some(Macro::simple(name, &replacement))
+}
+
+fn parse_declare_paired_delimiter(input: &str) -> Option<Macro> {
+    // \DeclarePairedDelimiter{\name}{\left}{\right} or \DeclarePairedDelimiter\name{left}{right}
+    let rest = input.strip_prefix("\\DeclarePairedDelimiter")?.trim_start();
+    let rest = rest.strip_prefix('*').unwrap_or(rest).trim_start();
+
+    let (name, rest) = extract_command_name(rest)?;
+    let (left, rest) = extract_braced_simple(rest.trim_start())?;
+    let (right, _) = extract_braced_simple(rest.trim_start())?;
+
+    let replacement = format!("\\left{} #2 \\right{}", left.trim(), right.trim());
+    Some(Macro::with_optional(&name, 2, "", &replacement))
+}
+
+fn parse_declare_paired_delimiterx(input: &str) -> Option<Macro> {
+    // \DeclarePairedDelimiterX{\name}[n]{\left}{\right}{body}
+    let rest = input.strip_prefix("\\DeclarePairedDelimiterX")?.trim_start();
+    let rest = rest.strip_prefix('*').unwrap_or(rest).trim_start();
+
+    let (name, mut rest) = extract_command_name(rest)?;
+    let mut num_args = 1usize;
+    if rest.starts_with('[') {
+        if let Some((count, next)) = extract_bracket_simple(rest) {
+            if let Ok(parsed) = count.trim().parse::<usize>() {
+                num_args = parsed;
+            }
+            rest = next.trim_start();
+        }
+    }
+
+    let (left, rest) = extract_braced_simple(rest.trim_start())?;
+    let (right, rest) = extract_braced_simple(rest.trim_start())?;
+    let (body, _) = extract_braced_simple(rest.trim_start())?;
+
+    // Keep it simple: wrap the body with the declared delimiters.
+    let replacement = format!("\\left{} {} \\right{}", left.trim(), body.trim(), right.trim());
+    Some(Macro::with_args(&name, num_args, &replacement))
+}
+
+fn extract_command_name(input: &str) -> Option<(String, &str)> {
+    let mut rest = input.trim_start();
+    if rest.starts_with('{') {
+        let (name, remaining) = extract_braced_simple(rest)?;
+        let name = name.trim_start_matches('\\').to_string();
+        return Some((name, remaining));
+    }
+    if let Some(after) = rest.strip_prefix('\\') {
+        let mut end = 0usize;
+        for ch in after.chars() {
+                if ch.is_alphanumeric() || ch == '@' || ch == '-' {
+                end += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if end > 0 {
+            let name = after[..end].to_string();
+            rest = &after[end..];
+            return Some((name, rest));
+        }
+    }
+    None
+}
+
+fn extract_bracket_simple(input: &str) -> Option<(String, &str)> {
+    if !input.starts_with('[') {
+        return None;
+    }
+    let mut depth = 0;
+    for (i, c) in input.char_indices() {
+        match c {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((input[1..i].to_string(), &input[i + 1..]));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn extract_braced_simple(input: &str) -> Option<(String, &str)> {
@@ -1020,6 +1159,25 @@ Some text \foo here.
         let db = MacroDb::new();
         let _result = db.parse_single_definition("\\DeclareMathOperator{\\argmax}{arg\\,max}");
         // Note: this test may not pass with simple parser, but shows intent
+    }
+
+    #[test]
+    fn test_declare_math_operator_with_subscript() {
+        let input = r"\DeclareMathOperator{\Steg}{\mathsf{PKStS}} $\Steg_{x}$";
+        let (db, clean) = extract_and_remove_definitions(input);
+        assert!(db.is_defined("Steg"));
+        let expanded = expand_macros(&clean, &db);
+        assert!(expanded.contains("\\operatorname{\\mathsf{PKStS}}_{x}"));
+    }
+
+    #[test]
+    fn test_declare_math_operator_with_hyphen() {
+        let input =
+            r"\DeclareMathOperator{\SSCCA-Dist}{\mathsf{SS-CCA-Dist}} $\SSCCA-Dist_{P,Q}$";
+        let (db, clean) = extract_and_remove_definitions(input);
+        assert!(db.is_defined("SSCCA-Dist"));
+        let expanded = expand_macros(&clean, &db);
+        assert!(expanded.contains("\\operatorname{\\mathsf{SS-CCA-Dist}}_{P,Q}"));
     }
 
     #[test]

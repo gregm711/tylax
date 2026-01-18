@@ -6,7 +6,9 @@ use mitex_parser::syntax::{CmdItem, SyntaxElement};
 use rowan::ast::AstNode;
 use std::fmt::Write;
 
-use crate::data::colors::{parse_color_with_model, sanitize_color_expression, sanitize_color_identifier};
+use crate::data::colors::{
+    is_named_color, parse_color_with_model, sanitize_color_expression, sanitize_color_identifier,
+};
 use crate::data::constants::{CodeBlockOptions, LANGUAGE_MAP};
 use crate::data::extended_symbols::EXTENDED_SYMBOLS;
 use crate::data::maps::TEX_COMMAND_SPEC;
@@ -18,9 +20,13 @@ use crate::data::symbols::{
 use mitex_spec::CommandSpecItem;
 
 use super::context::{
-    ConversionMode, EnvironmentContext, LatexConverter, MacroDef, PendingOperator,
+    CitationMode, ConversionMode, EnvironmentContext, LatexConverter, MacroDef, PendingHeading,
+    PendingOperator,
 };
-use super::utils::{sanitize_citation_key, sanitize_label, to_roman_numeral};
+use super::utils::{
+    convert_caption_text, escape_typst_string, escape_typst_text, sanitize_citation_key,
+    sanitize_label, to_roman_numeral,
+};
 use crate::features::images::ImageAttributes;
 use crate::utils::loss::{LossKind, LOSS_MARKER_PREFIX};
 
@@ -102,6 +108,22 @@ pub fn convert_command_sym(conv: &mut LatexConverter, elem: SyntaxElement, outpu
                 output.push('~');
                 return;
             }
+            "<" => {
+                if matches!(conv.state.mode, ConversionMode::Math) {
+                    output.push_str("angle.l ");
+                } else {
+                    output.push('<');
+                }
+                return;
+            }
+            ">" => {
+                if matches!(conv.state.mode, ConversionMode::Math) {
+                    output.push_str("angle.r ");
+                } else {
+                    output.push('>');
+                }
+                return;
+            }
             _ => {}
         }
 
@@ -174,6 +196,41 @@ fn lookup_symbol(name: &str) -> Option<&'static str> {
     None
 }
 
+fn write_math_class(output: &mut String, class_name: &str, arg: &str) {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if trimmed.contains('#') {
+        let escaped = escape_typst_string(trimmed);
+        let _ = write!(
+            output,
+            "class(\"{}\", text(\"{}\")) ",
+            class_name, escaped
+        );
+    } else {
+        let _ = write!(output, "class(\"{}\", {}) ", class_name, trimmed);
+    }
+}
+
+fn write_math_text(conv: &mut LatexConverter, cmd: &CmdItem, output: &mut String) {
+    let raw = conv.get_required_arg_with_braces(cmd, 0).unwrap_or_default();
+    let text = convert_caption_text(&raw);
+    let escaped = escape_typst_string(text.trim());
+    let _ = write!(output, "text(\"{}\")", escaped);
+}
+
+fn write_inline_raw(output: &mut String, content: &str, lang: Option<&str>) {
+    let escaped = escape_typst_string(content);
+    if let Some(lang) = lang {
+        if !lang.is_empty() {
+            let _ = write!(output, "#raw(lang: \"{}\", \"{}\")", lang, escaped);
+            return;
+        }
+    }
+    let _ = write!(output, "#raw(\"{}\")", escaped);
+}
+
 /// Convert a LaTeX command
 pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &mut String) {
     let node = match &elem {
@@ -198,7 +255,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
     let base_name = cmd_str.trim_start_matches('\\');
 
     if base_name.is_empty() {
-        output.push_str("#linebreak()");
+        output.push(' ');
         return;
     }
 
@@ -315,6 +372,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 handle_def(conv, &cmd);
                 return;
             }
+            "DeclarePairedDelimiter" => {
+                handle_declare_paired_delimiter(conv, &cmd);
+                return;
+            }
             "newacronym" => {
                 handle_newacronym(conv, &cmd);
                 return;
@@ -329,7 +390,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             | "thispagestyle" | "pagenumbering" | "setcounter" | "addtocounter" 
             | "setlength" | "addtolength" | "theoremstyle" 
             | "allowdisplaybreaks" | "numberwithin" | "DeclareMathOperator"
-            | "DeclarePairedDelimiter" | "sisetup" | "NewDocumentCommand"
+            | "sisetup" | "NewDocumentCommand"
             | "RenewDocumentCommand" | "ProvideDocumentCommand" | "DeclareDocumentCommand"
             // Layout and spacing
             | "geometry" | "onehalfspacing" | "doublespacing" | "singlespacing"
@@ -355,8 +416,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             // TeX primitives and conditionals
             | "newif" | "fi" | "else" | "or" 
             | "begingroup" | "endgroup" | "relax"
-            // Keywords and IEEEtran specific commands
+            // Keywords and IEEEtran / LNCS specific commands
             | "IEEEkeywords" | "keywords" | "IEEEPARstart" | "IEEEpeerreviewmaketitle"
+            | "authorrunning" | "titlerunning" | "institute" | "address" | "subjclass"
+            | "ccsdesc" | "received"
             // More preamble commands
             | "DeclareOption" | "ProcessOptions" | "ExecuteOptions"
             | "PackageWarning" | "PackageError" | "ClassWarning" | "ClassError"
@@ -411,11 +474,38 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             let title = conv
                 .convert_required_arg(&cmd, 0)
                 .or_else(|| conv.get_required_arg(&cmd, 0))
-                .unwrap_or_default();
-            output.push('\n');
-            output.push_str("= ");
-            output.push_str(title.trim());
-            output.push('\n');
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty());
+
+            if let Some(title) = title {
+                output.push('\n');
+                output.push_str("= ");
+                output.push_str(&title);
+                output.push('\n');
+            } else {
+                let raw = cmd.syntax().text().to_string();
+                let (capture_mode, capture_depth) = if raw.ends_with('[') {
+                    (super::context::HeadingCaptureMode::Optional, 1)
+                } else if raw.ends_with('{') {
+                    (super::context::HeadingCaptureMode::Required, 1)
+                } else {
+                    (super::context::HeadingCaptureMode::None, 0)
+                };
+                let implicit_open = matches!(
+                    capture_mode,
+                    super::context::HeadingCaptureMode::Optional
+                        | super::context::HeadingCaptureMode::Required
+                );
+                conv.state.pending_heading = Some(PendingHeading {
+                    level: 0,
+                    optional: None,
+                    required: None,
+                    capture_mode,
+                    capture_depth,
+                    capture_buffer: String::new(),
+                    implicit_open,
+                });
+            }
         }
         // Sectioning - adjust level based on documentclass
         "section" => {
@@ -453,29 +543,77 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
         "subparagraph" => {
             let title = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "\n_{}_\n", title);
+            let _ = write!(output, "\n#emph[{}]\n", title);
         }
 
         // Text formatting
         "textbf" | "bf" => {
-            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "*{}*", content);
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                write_math_text(conv, &cmd, output);
+            } else {
+                let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+                let _ = write!(output, "#strong[{}] ", content);
+            }
         }
         "textit" | "it" | "emph" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                write_math_text(conv, &cmd, output);
+            } else {
+                let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+                let _ = write!(output, "#emph[{}] ", content);
+            }
+        }
+        "MakeUppercase" | "makeuppercase" => {
             let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "_{}_", content);
+            if !content.trim().is_empty() {
+                let _ = write!(output, "upper({}) ", content.trim());
+            }
+        }
+        "MakeLowercase" | "makelowercase" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            if !content.trim().is_empty() {
+                let _ = write!(output, "lower({}) ", content.trim());
+            }
         }
         "texttt" | "tt" => {
-            let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "`{}`", content);
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                write_math_text(conv, &cmd, output);
+            } else {
+                let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+                write_inline_raw(output, content.trim(), None);
+            }
+        }
+        "code" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                write_math_text(conv, &cmd, output);
+            } else {
+                let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+                write_inline_raw(output, content.trim(), None);
+            }
+        }
+        "pkg" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                write_math_text(conv, &cmd, output);
+            } else {
+                let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+                let _ = write!(output, "#emph[{}] ", content);
+            }
         }
         "underline" => {
-            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "#underline[{}]", content);
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                write_math_text(conv, &cmd, output);
+            } else {
+                let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+                let _ = write!(output, "#underline[{}] ", content);
+            }
         }
         "textsc" | "sc" => {
-            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "#smallcaps[{}]", content);
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                write_math_text(conv, &cmd, output);
+            } else {
+                let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+                let _ = write!(output, "#smallcaps[{}] ", content);
+            }
         }
         "textsuperscript" => {
             let content = conv
@@ -522,19 +660,26 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "ce" => {
             if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
                 if conv.state.mode == ConversionMode::Math {
-                    // mhchem content can include nested LaTeX (e.g. $\beta$). Fall back to text
-                    // when the input looks complex so we don't emit invalid Typst math.
-                    let complex = raw.contains('\\') || raw.contains('$');
-                    if complex {
-                        let text = super::utils::sanitize_ce_text_for_math(&raw);
-                        let escaped = super::utils::escape_typst_string(text.trim());
-                        if !escaped.is_empty() {
-                            let _ = write!(output, "text(\"{}\") ", escaped);
-                        }
-                    } else {
+                    // mhchem content can include nested LaTeX (e.g. $\beta$) or equation syntax.
+                    // Fall back to text when input looks complex so we don't emit invalid Typst math.
+                    let is_simple = raw.chars().all(|c| {
+                        c.is_ascii_alphanumeric()
+                            || c.is_whitespace()
+                            || c == '('
+                            || c == ')'
+                            || c == '.'
+                    });
+                    if is_simple {
                         let formatted = super::utils::format_chemical_formula_math(&raw);
                         if !formatted.is_empty() {
                             let _ = write!(output, "{} ", formatted);
+                        }
+                    } else {
+                        let text = super::utils::sanitize_ce_text_for_math(&raw);
+                        let text = super::utils::strip_unescaped_dollars(&text);
+                        let escaped = super::utils::escape_typst_string(text.trim());
+                        if !escaped.is_empty() {
+                            let _ = write!(output, "text(\"{}\") ", escaped);
                         }
                     }
                 } else {
@@ -579,7 +724,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 .unwrap_or_default();
             let _ = writeln!(
                 output,
-                "- *{}* — {}",
+                "- #strong[{}] — {}",
                 term.trim(),
                 desc.trim()
             );
@@ -590,7 +735,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 .get_required_arg_with_braces(&cmd, 0)
                 .or_else(|| conv.get_required_arg(&cmd, 0));
             if let Some(raw) = raw {
-                let text = super::utils::convert_caption_text(&raw);
+                let mut text = super::utils::convert_caption_text(&raw);
+                if conv.state.mode == ConversionMode::Math {
+                    text = super::utils::strip_unescaped_dollars(&text);
+                }
                 let escaped = super::utils::escape_typst_string(text.trim());
                 let _ = write!(output, "\"{}\" ", escaped);
             }
@@ -1002,6 +1150,9 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
             let label = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let clean_label = sanitize_label(&label);
+            if attach_label_to_heading(output, &clean_label) {
+                return;
+            }
             let _ = write!(output, "<{}>", clean_label);
         }
         "ref" | "autoref" | "cref" | "Cref" => {
@@ -1015,6 +1166,11 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             let _ = write!(output, "__TYLAX_EQREF__{}__", sanitized);
         }
         "pageref" => {
+            let label = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let clean_label = sanitize_label(&label);
+            let _ = write!(output, "__TYLAX_PAGEREF__{}__", clean_label);
+        }
+        "cpageref" => {
             let label = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let clean_label = sanitize_label(&label);
             let _ = write!(output, "__TYLAX_PAGEREF__{}__", clean_label);
@@ -1068,6 +1224,13 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
         }
 
+        // Prettyref - treat as normal reference
+        "prettyref" => {
+            let label = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let clean_label = sanitize_label(&label);
+            let _ = write!(output, "@{}", clean_label);
+        }
+
         // Citations - Full set from l2t.rs (40+ variants)
         "cite" | "Cite" | "citep" | "citep*" | "citet" | "citet*" | "citeal"
         | "citealp" | "citealp*" | "citealt" | "citealt*"
@@ -1091,7 +1254,11 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                     if i > 0 {
                         output.push_str("; ");
                     }
-                    let _ = write!(output, "@{}", key);
+                    if matches!(conv.state.citation_mode, CitationMode::Typst) {
+                        let _ = write!(output, "@{}", key);
+                    } else {
+                        output.push_str(&escape_typst_text(key));
+                    }
                 }
                 output.push(']');
             }
@@ -1105,17 +1272,29 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "citeauthor" | "citeauthor*" => {
             let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let clean = sanitize_citation_key(key.trim());
-            let _ = write!(output, "#cite(<{}>, form: \"author\")", clean);
+            if matches!(conv.state.citation_mode, CitationMode::Typst) {
+                let _ = write!(output, "#cite(<{}>, form: \"author\")", clean);
+            } else {
+                output.push_str(&escape_typst_text(&clean));
+            }
         }
         "citeyear" | "citeyear*" | "citeyearpar" => {
             let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let clean = sanitize_citation_key(key.trim());
-            let _ = write!(output, "#cite(<{}>, form: \"year\")", clean);
+            if matches!(conv.state.citation_mode, CitationMode::Typst) {
+                let _ = write!(output, "#cite(<{}>, form: \"year\")", clean);
+            } else {
+                output.push_str(&escape_typst_text(&clean));
+            }
         }
         "citetitle" | "citetitle*" => {
             let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let clean = sanitize_citation_key(key.trim());
-            let _ = write!(output, "#cite(<{}>, form: \"title\")", clean);
+            if matches!(conv.state.citation_mode, CitationMode::Typst) {
+                let _ = write!(output, "#cite(<{}>, form: \"title\")", clean);
+            } else {
+                output.push_str(&escape_typst_text(&clean));
+            }
         }
 
         // URLs and hyperlinks
@@ -1157,6 +1336,13 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "equal" => {
             // Used inside \ifthenelse; ignore here.
         }
+        "foreignlanguage" => {
+            // \foreignlanguage{lang}{text} -> text
+            let content = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            if !content.trim().is_empty() {
+                output.push_str(content.trim());
+            }
+        }
 
         // References
         "subref" => {
@@ -1181,10 +1367,36 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 || trimmed.contains('}')
             {
                 output.push_str("#box(stroke: 0.5pt, inset: 6pt)[Missing image]");
+            } else if trimmed
+                .rsplit('.')
+                .next()
+                .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "eps" | "epsi" | "ps"))
+                .unwrap_or(false)
+            {
+                let _ = write!(
+                    output,
+                    "#box(stroke: 0.5pt, inset: 6pt)[Image omitted (unsupported EPS): {}]",
+                    trimmed
+                );
             } else if args.is_empty() {
                 let _ = write!(output, "#image(\"{}\")", trimmed);
             } else {
                 let _ = write!(output, "#image(\"{}\", {})", trimmed, args);
+            }
+        }
+
+        // Scalebox
+        "scalebox" => {
+            let h = conv.get_required_arg(&cmd, 0).unwrap_or_else(|| "1".to_string());
+            let v = conv.get_optional_arg(&cmd, 0).unwrap_or_else(|| h.clone());
+            if let Some(content) = conv.convert_required_arg(&cmd, 1) {
+                let _ = write!(
+                    output,
+                    "#scale(x: {}, y: {})[{}] ",
+                    h.trim(),
+                    v.trim(),
+                    content
+                );
             }
         }
 
@@ -1233,12 +1445,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
         "tableHCell" => {
             let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
-            let _ = write!(output, "*{}*", content.trim());
+            let _ = write!(output, "#strong[{}]", content.trim());
         }
         "tableHCellTwoRows" => {
             let top = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
             let bottom = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
-            let _ = write!(output, "*{}* #linebreak() {}", top.trim(), bottom.trim());
+            let _ = write!(output, "#strong[{}] #linebreak() {}", top.trim(), bottom.trim());
         }
 
         // Simple boxes and TODOs
@@ -1397,25 +1609,41 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             for _ in 0..conv.state.indent {
                 output.push(' ');
             }
+            let label_opt = conv
+                .get_optional_arg(&cmd, 0)
+                .or_else(|| extract_item_label_fallback(&cmd));
+            let item_arg = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
             match conv.state.current_env() {
                 EnvironmentContext::Enumerate => {
                     // Check for optional label
-                    if let Some(label) = conv.get_optional_arg(&cmd, 0) {
+                    if let Some(label) = label_opt.as_ref() {
+                        let label = convert_caption_text(label);
                         let _ = write!(output, "+ [{}] ", label);
                     } else {
                         output.push_str("+ ");
                     }
                 }
                 EnvironmentContext::Description => {
-                    if let Some(term) = conv.get_optional_arg(&cmd, 0) {
-                        let _ = write!(output, "/ {}: ", term);
+                    if let Some(term) = label_opt.as_ref() {
+                        let term = convert_caption_text(term);
+                        if term.trim().is_empty() {
+                            output.push_str("- ");
+                        } else {
+                            let _ = write!(output, "/ {}: ", term);
+                        }
                     } else {
-                        output.push_str("/ ");
+                        output.push_str("- ");
                     }
                 }
                 _ => {
                     output.push_str("- ");
                 }
+            }
+            let item_trim = item_arg.trim();
+            let is_empty_math = matches!(item_trim, "$" | "$$");
+            if !item_trim.is_empty() && !is_empty_math {
+                output.push_str(item_trim);
+                output.push(' ');
             }
         }
 
@@ -1463,7 +1691,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 && conv.is_simple_term(&num)
                 && conv.is_simple_term(&den)
             {
-                let _ = write!(output, "{}/{}", num.trim(), den.trim());
+                let _ = write!(output, "{}/{} ", num.trim(), den.trim());
             } else {
                 let _ = write!(output, "frac({}, {})", num.trim(), den.trim());
             }
@@ -1483,7 +1711,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 && conv.is_simple_term(&num)
                 && conv.is_simple_term(&den)
             {
-                let _ = write!(output, "{}/{}", num.trim(), den.trim());
+                let _ = write!(output, "{}/{} ", num.trim(), den.trim());
             } else {
                 let _ = write!(output, "inline(frac({}, {}))", num.trim(), den.trim());
             }
@@ -1580,7 +1808,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
             // If no argument, just skip
         }
-        "mathbb" => {
+        "mathbb" | "mathds" | "mathbbm" => {
             if let Some(content) = conv.get_required_arg(&cmd, 0) {
                 let content = content.trim();
                 // Only use short forms for standard number sets that Typst supports as symbols
@@ -1610,6 +1838,34 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "mathtt" => {
             if let Some(content) = conv.convert_required_arg(&cmd, 0) {
                 let _ = write!(output, "mono({}) ", content);
+            }
+        }
+        "abs" => {
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "|{}| ", content);
+            }
+        }
+        "norm" => {
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "||{}|| ", content);
+            }
+        }
+        "floor" => {
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "⌊{}⌋ ", content);
+            }
+        }
+        "binom" => {
+            let a = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let b = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            if !a.trim().is_empty() || !b.trim().is_empty() {
+                let _ = write!(output, "binom({}, {}) ", a.trim(), b.trim());
+            }
+        }
+        "lefteqn" => {
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                output.push_str(content.trim());
+                output.push(' ');
             }
         }
         "mathscr" => {
@@ -1937,21 +2193,21 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "textcolor" => {
             let color = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let content = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
-            let typst_color = sanitize_color_expression(&color);
+            let typst_color = resolve_color_expression(conv, &color);
             let _ = write!(output, "#text(fill: {})[{}]", typst_color, content);
         }
         "colorbox" => {
             let color = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let content = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
-            let typst_color = sanitize_color_expression(&color);
+            let typst_color = resolve_color_expression(conv, &color);
             let _ = write!(output, "#box(fill: {}, inset: 2pt)[{}]", typst_color, content);
         }
         "fcolorbox" => {
             let frame_color = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let bg_color = conv.get_required_arg(&cmd, 1).unwrap_or_default();
             let content = conv.convert_required_arg(&cmd, 2).unwrap_or_default();
-            let typst_frame = sanitize_color_expression(&frame_color);
-            let typst_bg = sanitize_color_expression(&bg_color);
+            let typst_frame = resolve_color_expression(conv, &frame_color);
+            let typst_bg = resolve_color_expression(conv, &bg_color);
             let _ = write!(
                 output,
                 "#box(fill: {}, stroke: {}, inset: 2pt)[{}]",
@@ -2071,20 +2327,44 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             {
                 output.push_str("eq.def ");
             } else {
-                let _ = write!(output, "limits({})^({}) ", base, top);
+                if let Some(base_wrapped) = super::utils::wrap_with_limits_for_stack(&base) {
+                    if top.trim().is_empty() {
+                        let _ = write!(output, "{} ", base_wrapped);
+                    } else {
+                        let _ = write!(output, "{}^({}) ", base_wrapped, top);
+                    }
+                } else if !top.trim().is_empty() {
+                    let _ = write!(output, "{} ", top.trim());
+                }
             }
         }
         "underset" => {
             // \underset{bottom}{base} -> limits(base)_(bottom)
             let bottom = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
             let base = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
-            let _ = write!(output, "limits({})_({}) ", base, bottom);
+            if let Some(base_wrapped) = super::utils::wrap_with_limits_for_stack(&base) {
+                if bottom.trim().is_empty() {
+                    let _ = write!(output, "{} ", base_wrapped);
+                } else {
+                    let _ = write!(output, "{}_({}) ", base_wrapped, bottom);
+                }
+            } else if !bottom.trim().is_empty() {
+                let _ = write!(output, "{} ", bottom.trim());
+            }
         }
         "stackrel" => {
             // \stackrel{top}{relation} -> limits(relation)^(top)
             let top = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
             let base = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
-            let _ = write!(output, "limits({})^({}) ", base, top);
+            if let Some(base_wrapped) = super::utils::wrap_with_limits_for_stack(&base) {
+                if top.trim().is_empty() {
+                    let _ = write!(output, "{} ", base_wrapped);
+                } else {
+                    let _ = write!(output, "{}^({}) ", base_wrapped, top);
+                }
+            } else if !top.trim().is_empty() {
+                let _ = write!(output, "{} ", top.trim());
+            }
         }
         "substack" => {
             // \substack{a \\ b} -> directly output content
@@ -2329,37 +2609,37 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         // Math class commands (spacing/classification)
         "mathrel" => {
             if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
-                let _ = write!(output, "class(\"relation\", {}) ", arg);
+                write_math_class(output, "relation", &arg);
             }
         }
         "mathbin" => {
             if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
-                let _ = write!(output, "class(\"binary\", {}) ", arg);
+                write_math_class(output, "binary", &arg);
             }
         }
         "mathop" => {
             if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
-                let _ = write!(output, "class(\"large\", {}) ", arg);
+                write_math_class(output, "large", &arg);
             }
         }
         "mathord" => {
             if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
-                let _ = write!(output, "class(\"normal\", {}) ", arg);
+                write_math_class(output, "normal", &arg);
             }
         }
         "mathopen" => {
             if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
-                let _ = write!(output, "class(\"opening\", {}) ", arg);
+                write_math_class(output, "opening", &arg);
             }
         }
         "mathclose" => {
             if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
-                let _ = write!(output, "class(\"closing\", {}) ", arg);
+                write_math_class(output, "closing", &arg);
             }
         }
         "mathpunct" => {
             if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
-                let _ = write!(output, "class(\"punctuation\", {}) ", arg);
+                write_math_class(output, "punctuation", &arg);
             }
         }
         "mathinner" => {
@@ -2407,6 +2687,16 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "star" => output.push_str("star "),
         "circ" => output.push_str("circle.small "),
         "bullet" => output.push_str("bullet "),
+        "over" => {
+            if conv.state.mode == ConversionMode::Math {
+                output.push_str("/ ");
+            }
+        }
+        "choose" => {
+            if conv.state.mode == ConversionMode::Math {
+                output.push_str("choose ");
+            }
+        }
 
         // Arrows (with shorthand support)
         "rightarrow" | "to" => {
@@ -2439,6 +2729,20 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
         "uparrow" => output.push_str("arrow.t "),
         "downarrow" => output.push_str("arrow.b "),
+        "nint" => output.push_str("∫ "),
+        "dint" => output.push_str("∬ "),
+
+        // Definition/equality variants
+        "coloneqq" => {
+            let sym = apply_shorthand("colon.eq", conv.state.options.prefer_shorthands);
+            let _ = write!(output, "{} ", sym);
+        }
+        "eqqcolon" => {
+            let sym = apply_shorthand("eq.colon", conv.state.options.prefer_shorthands);
+            let _ = write!(output, "{} ", sym);
+        }
+        "Coloneqq" => output.push_str("colon.double.eq "),
+        "Eqqcolon" => output.push_str("eq.colon "),
 
         // Set operations
         "in" => output.push_str("in "),
@@ -2450,6 +2754,9 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "cup" => output.push_str("union "),
         "cap" => output.push_str("sect "),
         "emptyset" | "varnothing" => output.push_str("emptyset "),
+        "uplus" => output.push_str("⊎ "),
+        "llbracket" => output.push_str("⟦ "),
+        "rrbracket" => output.push_str("⟧ "),
 
         // Logic
         "land" | "wedge" => output.push_str("and "),
@@ -2606,10 +2913,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
         }
 
-        // Inline code
+        "R" => output.push_str("R"),
+        "Bibtex" => output.push_str("BibTeX"),
+        "Biblatex" => output.push_str("BibLaTeX"),
         "verb" => {
             if let Some(content) = conv.get_required_arg(&cmd, 0) {
-                let _ = write!(output, "`{}`", content);
+                write_inline_raw(output, content.trim(), None);
             } else {
                 let text = cmd.syntax().text().to_string();
                 for delim in ['|', '!', '+', '@', '#', '"', '\''] {
@@ -2618,7 +2927,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                         let rest = &text[start + pattern.len()..];
                         if let Some(end) = rest.find(delim) {
                             let code = &rest[..end];
-                            let _ = write!(output, "`{}`", code);
+                            write_inline_raw(output, code.trim(), None);
                             break;
                         }
                     }
@@ -2630,26 +2939,77 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 let options_str = conv.get_optional_arg(&cmd, 0).unwrap_or_default();
                 let options = CodeBlockOptions::parse(&options_str);
                 let lang = options.get_typst_language();
-                if lang.is_empty() {
-                    let _ = write!(output, "`{}`", content);
-                } else {
-                    let _ = write!(output, "```{} {} ```", lang, content);
-                }
+                let lang_opt = if lang.is_empty() { None } else { Some(lang) };
+                write_inline_raw(output, content.trim(), lang_opt);
             }
+        }
+
+        // Pseudocode / game macros (cryptocode-style)
+        "pcln" => output.push_str("\\ "),
+        "pcreturn" => {
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "return {} ", content.trim());
+            } else {
+                output.push_str("return ");
+            }
+        }
+        "pccomment" => {
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "/* {} */ ", content.trim());
+            }
+        }
+        "gamechange" | "gameprocedure" | "gameproof" => {
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                output.push_str(content.trim());
+                output.push(' ');
+            } else {
+                output.push_str(base_name);
+                output.push(' ');
+            }
+        }
+        "pcfor" => {
+            output.push_str("for ");
+        }
+        "leqP" => {
+            output.push_str("<=_P");
+        }
+        "subsetneq" => {
+            output.push('⊊');
+        }
+        "kk" => {
+            output.push('k');
+        }
+        "p" => {
+            output.push('p');
+        }
+        "pnm" => {
+            output.push_str("pnm");
+        }
+        "toG" => {
+            output.push_str("toG");
+        }
+        "t" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                output.push_str(arg.trim());
+            } else {
+                output.push('t');
+            }
+        }
+        "ipcf" | "scp" | "erz" | "SSCCA" | "id" | "prompt" | "child" | "layers"
+        | "Def" | "Ex" | "Rq" | "q" => {
+            output.push_str(base_name);
+            output.push(' ');
         }
         "mintinline" => {
             let lang_raw = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let content = conv.get_required_arg(&cmd, 1).unwrap_or_default();
             let lang = LANGUAGE_MAP.get(lang_raw.as_str()).copied().unwrap_or("");
-            if lang.is_empty() {
-                let _ = write!(output, "`{}`", content);
-            } else {
-                let _ = write!(output, "```{} {} ```", lang, content);
-            }
+            let lang_opt = if lang.is_empty() { None } else { Some(lang) };
+            write_inline_raw(output, content.trim(), lang_opt);
         }
 
         // QED symbols
-        "qed" | "qedsymbol" => output.push('∎'),
+        "qed" | "qedsymbol" | "qedhere" => output.push('∎'),
 
         // Special character commands (Scandinavian, etc.)
         "o" => output.push('ø'),   // \o -> ø
@@ -2661,6 +3021,22 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "oe" => output.push('œ'),  // \oe -> œ
         "OE" => output.push('Œ'),  // \OE -> Œ
         "ss" => output.push('ß'),  // \ss -> ß
+        "at" => output.push('@'),  // \at -> @
+        "nobreakdash" => output.push('-'),
+        "<" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                output.push_str("angle.l ");
+            } else {
+                output.push('<');
+            }
+        }
+        ">" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                output.push_str("angle.r ");
+            } else {
+                output.push('>');
+            }
+        }
 
         // Newcommand and def in body
         "newcommand" | "renewcommand" | "providecommand" => {
@@ -2682,12 +3058,42 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             output.push_str("#set heading(numbering: \"A.\")\n\n");
         }
 
+        // Hyperref string alternate - prefer TeX string
+        "texorpdfstring" => {
+            let tex = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            if !tex.trim().is_empty() {
+                output.push_str(tex.trim());
+                output.push(' ');
+            }
+        }
+
+        // Color definitions inside body: record and ignore output
+        "definecolor" => {
+            let name = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let model = conv.get_required_arg(&cmd, 1).unwrap_or_default();
+            let spec = conv.get_required_arg(&cmd, 2).unwrap_or_default();
+            if !name.trim().is_empty() && !model.trim().is_empty() && !spec.trim().is_empty() {
+                let ident = sanitize_color_identifier(name.trim());
+                let value = parse_color_with_model(model.trim(), spec.trim());
+                conv.state.register_color_def(ident, value);
+            }
+        }
+        "colorlet" => {
+            let name = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let spec = conv.get_required_arg(&cmd, 1).unwrap_or_default();
+            if !name.trim().is_empty() && !spec.trim().is_empty() {
+                let ident = sanitize_color_identifier(name.trim());
+                let value = sanitize_color_expression(spec.trim());
+                conv.state.register_color_def(ident, value);
+            }
+        }
+
         // Color command (scope-based, hard to convert perfectly)
         "color" => {
             // \color{red} affects following text until scope ends
             // Typst doesn't have an equivalent - output as comment with mapped color
             let color_name = conv.get_required_arg(&cmd, 0).unwrap_or_default();
-            let typst_color = sanitize_color_expression(&color_name);
+            let typst_color = resolve_color_expression(conv, &color_name);
             let _ = write!(output, "/* \\color{{{}}} -> {} */", color_name, typst_color);
         }
 
@@ -2705,23 +3111,31 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "IEEEauthorblockN" | "IEEEauthorblockA" | "IEEEoverridecommandlockouts"
         | "IEEEaftertitletext" | "IEEEmembership" | "IEEEspecialpapernotice"
         | "markboth" | "markright" | "thanks" | "and"
+        | "authorrunning" | "titlerunning" | "institute"
         | "icmltitlerunning" | "icmlsetsymbol" | "printAffiliationsAndNotice" | "icmlEqualContribution"
         | "iclrfinalcopy"
+        | "address" | "subjclass" | "ccsdesc" | "received"
+        | "CCSXML" | "authornote"
+        | "acmArticle" | "acmDOI" | "acmJournal" | "acmMonth" | "acmNumber" | "acmVolume"
+        | "acmYear" | "acmConference" | "acmBooktitle" | "acmPrice" | "acmISBN"
+        | "copyrightyear"
         // Thesis template setup
         | "DocumentMetadata" | "IfPackageAtLeastTF" | "newcolumntype" | "AtEveryBibitem"
         | "renewbibmacro" | "DeclarePairedDelimiterXPP" | "pdfbookmark"
         | "jot" | "ifpdftex" | "else" | "fi" | "setstretch" | "dnormalspacing"
         | "hbadness" | "hyphenation" | "textwidth" | "setcounter"
+        | "setlength" | "addtolength"
         | "beforepreface" | "afterpreface" | "onlinesignature"
         | "lstset" | "lstdefinestyle" | "chaptermark" | "MakeOuterQuote" | "tolerance"
         | "approvalpage" | "copyrightpage" | "pagestyle" | "thispagestyle"
+        | "fancyhead" | "fancyfoot" | "fancyhf" | "fancyheadings"
         // Additional formatting switches (excluding already handled: it, bf, tt, sc, rm)
         | "em" | "sf" | "sl"
         // Floats and placement
         | "suppressfloats" | "FloatBarrier" | "clearfloats"
         // Spacing (excluding already handled: smallskip, medskip, bigskip)
         | "vfill" | "hfill" | "hfil" | "vfil" | "break" | "allowbreak" | "nobreak"
-        | "goodbreak" | "penalty"
+        | "goodbreak" | "penalty" | "hskip" | "kern" | "hss" | "looseness" | "xspace"
         // Margin and page setup
         | "marginpar" | "marginparpush" | "reversemarginpar" | "normalmarginpar"
         // Misc invisible commands (excluding already handled: protect)
@@ -2732,7 +3146,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         // Index
         | "makeindex" | "printindex" | "index" | "glossary"
         // Equation numbering control
-        | "nonumber" => {
+        | "nonumber" | "notag" | "balance" | "normalcolor" | "setbox" | "wd"
+        | "newblock" | "boldmath" | "unboldmath"
+        | "vskip" | "abovedisplayskip" | "belowdisplayskip"
+        | "linewidth" | "noalign" | "arraybackslash" | "graphicspath"
+        | "itemsep" | "addtocounter" | "addlinespace" | "cdashline" | "compactitem"
+        | "onecolumn" | "pacs" | "orcid" | "let" | "@dashdrawstore" | "adl@draw"
+        | "adl@drawiv" | "parskip" | "tabcolsep" | "restylealgo" | "setcopyright"
+        | "theequation" => {
             // Ignore these
         }
 
@@ -2766,6 +3187,21 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                     output.push_str(suffix);
                 }
                 return;
+            }
+
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                let prefixes = ["times", "in", "geq", "leq", "ge", "le"];
+                for prefix in prefixes {
+                    if let Some(rest) = base_name.strip_prefix(prefix) {
+                        if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                            output.push_str(prefix);
+                            output.push(' ');
+                            output.push_str(rest);
+                            output.push(' ');
+                            return;
+                        }
+                    }
+                }
             }
 
             let context = match conv.state.mode {
@@ -2823,6 +3259,32 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
         }
     }
+}
+
+fn resolve_color_expression(conv: &mut LatexConverter, raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "black".to_string();
+    }
+
+    if is_named_color(trimmed) {
+        return sanitize_color_expression(trimmed);
+    }
+
+    let is_ident = trimmed
+        .chars()
+        .enumerate()
+        .all(|(i, ch)| (i > 0 || !ch.is_ascii_digit()) && (ch.is_ascii_alphanumeric() || ch == '_'));
+    if is_ident {
+        let ident = sanitize_color_identifier(trimmed);
+        if !conv.state.color_defs.iter().any(|(name, _)| name == &ident) {
+            conv.state
+                .register_color_def(ident.clone(), "black".to_string());
+        }
+        return ident;
+    }
+
+    sanitize_color_expression(trimmed)
 }
 
 // =============================================================================
@@ -2919,6 +3381,29 @@ fn handle_def(conv: &mut LatexConverter, cmd: &CmdItem) {
     }
 }
 
+/// Handle \DeclarePairedDelimiter{\name}{\left}{\right}
+fn handle_declare_paired_delimiter(conv: &mut LatexConverter, cmd: &CmdItem) {
+    let name = conv
+        .get_required_arg(cmd, 0)
+        .map(|n| n.trim_start_matches('\\').to_string())
+        .or_else(|| extract_paired_delimiter_name(cmd));
+    let left = conv.get_required_arg(cmd, 1).unwrap_or_default();
+    let right = conv.get_required_arg(cmd, 2).unwrap_or_default();
+
+    if let Some(name) = name {
+        let replacement = format!("\\left{} #1 \\right{}", left.trim(), right.trim());
+        conv.state.macros.insert(
+            name.clone(),
+            MacroDef {
+                name,
+                num_args: 1,
+                default_arg: None,
+                replacement,
+            },
+        );
+    }
+}
+
 /// Handle \newacronym
 fn handle_newacronym(conv: &mut LatexConverter, cmd: &CmdItem) {
     let key = conv.get_required_arg(cmd, 0);
@@ -2950,6 +3435,61 @@ fn handle_newglossaryentry(conv: &mut LatexConverter, cmd: &CmdItem) {
         }
 
         conv.state.register_glossary(&key, &name, &description);
+    }
+}
+
+fn extract_item_label_fallback(cmd: &CmdItem) -> Option<String> {
+    let text = cmd.syntax().text().to_string();
+    let item_pos = text.find("\\item")?;
+    let mut i = item_pos + "\\item".len();
+    let bytes = text.as_bytes();
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() || bytes[i] != b'[' {
+        return None;
+    }
+    i += 1;
+    let start = i;
+    let mut depth = 1i32;
+    while i < bytes.len() && depth > 0 {
+        if bytes[i] == b'[' {
+            depth += 1;
+        } else if bytes[i] == b']' {
+            depth -= 1;
+        }
+        i += 1;
+    }
+    if depth != 0 || i <= start {
+        return None;
+    }
+    let end = i - 1;
+    Some(text[start..end].trim().to_string())
+}
+
+fn extract_paired_delimiter_name(cmd: &CmdItem) -> Option<String> {
+    let text = cmd.syntax().text().to_string();
+    let marker = "\\DeclarePairedDelimiter";
+    let pos = text.find(marker)?;
+    let mut i = pos + marker.len();
+    let bytes = text.as_bytes();
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() || bytes[i] != b'\\' {
+        return None;
+    }
+    i += 1;
+    let start = i;
+    while i < bytes.len()
+        && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'@' || bytes[i] == b'_')
+    {
+        i += 1;
+    }
+    if i <= start {
+        None
+    } else {
+        Some(text[start..i].to_string())
     }
 }
 
@@ -3116,10 +3656,13 @@ fn apply_cedilla(content: &str) -> String {
 
 /// Convert section heading with proper level
 fn convert_section(conv: &mut LatexConverter, cmd: &CmdItem, level: u8, output: &mut String) {
-    if let Some(title) = conv
+    let title = conv
         .convert_required_arg(cmd, 0)
         .or_else(|| conv.get_required_arg(cmd, 0))
-    {
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
+
+    if let Some(title) = title {
         output.push('\n');
         for _ in 0..=level {
             output.push('=');
@@ -3127,7 +3670,51 @@ fn convert_section(conv: &mut LatexConverter, cmd: &CmdItem, level: u8, output: 
         output.push(' ');
         output.push_str(&title);
         output.push('\n');
+    } else {
+        let raw = cmd.syntax().text().to_string();
+        let (capture_mode, capture_depth) = if raw.ends_with('[') {
+            (super::context::HeadingCaptureMode::Optional, 1)
+        } else if raw.ends_with('{') {
+            (super::context::HeadingCaptureMode::Required, 1)
+        } else {
+            (super::context::HeadingCaptureMode::None, 0)
+        };
+        let implicit_open = matches!(
+            capture_mode,
+            super::context::HeadingCaptureMode::Optional
+                | super::context::HeadingCaptureMode::Required
+        );
+        conv.state.pending_heading = Some(PendingHeading {
+            level,
+            optional: None,
+            required: None,
+            capture_mode,
+            capture_depth,
+            capture_buffer: String::new(),
+            implicit_open,
+        });
     }
+}
+
+fn attach_label_to_heading(output: &mut String, label: &str) -> bool {
+    let trimmed_len = output
+        .trim_end_matches(|c: char| c == ' ' || c == '\t' || c == '\n' || c == '\r')
+        .len();
+    if trimmed_len == 0 {
+        return false;
+    }
+    let trimmed = &output[..trimmed_len];
+    let line_start = trimmed.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+    let last_line = trimmed[line_start..].trim_start();
+    if !last_line.starts_with('=') {
+        return false;
+    }
+
+    output.truncate(trimmed_len);
+    output.push(' ');
+    output.push_str(&format!("<{}>", label));
+    output.push('\n');
+    true
 }
 
 fn parse_affiliation_keys(raw: &str) -> Vec<String> {

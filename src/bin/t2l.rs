@@ -4,7 +4,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use tylax::{
     convert_auto, convert_auto_document, detect_format,
     diagnostics::{check_latex, format_diagnostics},
@@ -19,7 +19,7 @@ use tylax::{
 };
 use tylax::core::latex2typst::utils::{
     collect_bibliography_entries, collect_graphicspath_entries, collect_includegraphics_paths,
-    expand_latex_inputs, sanitize_bibtex_content,
+    expand_latex_inputs, sanitize_bibtex_content, sanitize_citation_key,
 };
 
 #[cfg(feature = "cli")]
@@ -415,13 +415,17 @@ fn main() -> io::Result<()> {
         fs::write(path, serialized)?;
     }
 
-    // Pretty print if requested
-    if !bib_entries.is_empty() {
-        if let Some(output_path) = cli.output.as_ref() {
-            let out_dir = Path::new(output_path)
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
+    // Bibliography handling
+    if let Some(output_path) = cli.output.as_ref() {
+        let out_dir = Path::new(output_path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let mut citation_keys = extract_citation_keys_from_typst(&result);
+        let bibitem_keys = extract_bibitem_keys_from_typst(&result);
+        citation_keys.extend(bibitem_keys.iter().cloned());
+
+        if !bib_entries.is_empty() {
             if let Some(base_dir) = bib_base_dir.as_ref() {
                 if let Ok(mapping) = sanitize_bibliography_files(&bib_entries, base_dir, &out_dir) {
                     result = rewrite_bibliography_paths(&result, &mapping);
@@ -452,8 +456,17 @@ fn main() -> io::Result<()> {
                             }
                         }
                     }
+                    let mut mapped_files: Vec<String> = mapping.values().cloned().collect();
+                    mapped_files.sort();
+                    mapped_files.dedup();
+                    let _ =
+                        populate_placeholder_bibliography(&out_dir, &mapped_files, &citation_keys);
                 }
             }
+        } else if !bibitem_keys.is_empty() && !result.contains("#bibliography") {
+            let stub_path = out_dir.join("references.typst.bib");
+            let _ = write_stub_bibliography(&stub_path, &citation_keys);
+            result.push_str("\n#hide(bibliography(\"references.typst.bib\"))\n");
         }
     }
     if let (Some(output_path), Some(base_dir)) = (cli.output.as_ref(), graphics_base_dir.as_ref()) {
@@ -520,8 +533,8 @@ fn sanitize_bibliography_files(
             } else {
                 fs::write(&out_path, sanitized)?;
             }
-        } else if !out_path.exists() {
-            let placeholder = "% Missing bibliography source. Provide a .bib file to populate citations.\n";
+        } else {
+            let placeholder = "% TYLAX-STUB-BIB: Missing bibliography source. Provide a .bib file to populate citations.\n";
             fs::write(&out_path, placeholder)?;
         }
         mapping.insert(name, out_name);
@@ -548,6 +561,233 @@ fn sanitize_bibliography_files(
     }
 
     Ok(mapping)
+}
+
+#[cfg(feature = "cli")]
+fn extract_citation_keys_from_typst(input: &str) -> std::collections::HashSet<String> {
+    let mut keys = std::collections::HashSet::new();
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len();
+    let mut i = 0usize;
+    while i < len {
+        // Capture citation blocks like [@key; @key2]
+        if chars[i] == '[' {
+            let mut probe = i + 1;
+            while probe < len && chars[probe].is_whitespace() {
+                probe += 1;
+            }
+            if probe < len && chars[probe] == '@' {
+                let mut j = probe + 1;
+                while j < len && chars[j] != ']' {
+                    j += 1;
+                }
+                if j < len {
+                    let mut k = probe;
+                    while k < j {
+                        if chars[k] == '@' {
+                            if k > 0 && chars[k - 1] == '\\' {
+                                k += 1;
+                                continue;
+                            }
+                            let mut m = k + 1;
+                            while m < j {
+                                let ch = chars[m];
+                                if ch.is_ascii_alphanumeric() || ch == '-' {
+                                    m += 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                            if m > k + 1 {
+                                let key: String = chars[k + 1..m].iter().collect();
+                                keys.insert(key);
+                            }
+                            k = m;
+                            continue;
+                        }
+                        k += 1;
+                    }
+                    i = j + 1;
+                    continue;
+                }
+            }
+        }
+
+        // Capture #cite(<key>, ...)
+        if chars[i] == '#' {
+            let target: [char; 6] = ['c', 'i', 't', 'e', '(', '<'];
+            if i + 1 + target.len() <= len && chars[i + 1..i + 1 + target.len()] == target {
+                let mut m = i + 1 + target.len();
+                let mut key = String::new();
+                while m < len {
+                    let ch = chars[m];
+                    if ch.is_ascii_alphanumeric() || ch == '-' {
+                        key.push(ch);
+                        m += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if !key.is_empty() {
+                    keys.insert(key);
+                }
+                i = m;
+                continue;
+            }
+        }
+
+        i += 1;
+    }
+    keys
+}
+
+#[cfg(feature = "cli")]
+fn extract_bibitem_keys_from_typst(input: &str) -> std::collections::HashSet<String> {
+    let mut keys = std::collections::HashSet::new();
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && input[i..].starts_with("\\bibitem") {
+            let mut j = i + "\\bibitem".len();
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'[' {
+                j += 1;
+                while j < bytes.len() && bytes[j] != b']' {
+                    j += 1;
+                }
+                if j < bytes.len() {
+                    j += 1;
+                }
+            }
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'{' {
+                j += 1;
+                let key_start = j;
+                while j < bytes.len() && bytes[j] != b'}' {
+                    j += 1;
+                }
+                if j <= bytes.len() {
+                    let raw_key = input[key_start..j].trim();
+                    let clean = sanitize_citation_key(raw_key);
+                    if !clean.is_empty() {
+                        keys.insert(clean);
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    keys
+}
+
+#[cfg(feature = "cli")]
+fn write_stub_bibliography(path: &Path, keys: &std::collections::HashSet<String>) -> io::Result<()> {
+    if keys.is_empty() {
+        return Ok(());
+    }
+    let mut keys_sorted: Vec<&String> = keys.iter().collect();
+    keys_sorted.sort();
+    let mut stub = String::new();
+    for key in keys_sorted {
+        stub.push_str("@misc{");
+        stub.push_str(key);
+        stub.push_str(",\n  title = \"{Missing citation}\",\n  author = \"{Unknown}\",\n  year = \"{0000}\",\n}\n\n");
+    }
+    fs::write(path, stub)
+}
+
+#[cfg(feature = "cli")]
+fn populate_placeholder_bibliography(
+    out_dir: &Path,
+    files: &[String],
+    keys: &std::collections::HashSet<String>,
+) -> io::Result<()> {
+    if keys.is_empty() {
+        return Ok(());
+    }
+
+    for file in files {
+        let path = out_dir.join(file);
+        if !path.exists() {
+            continue;
+        }
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        let has_entries = content.contains('@');
+        let is_placeholder = content.trim().is_empty()
+            || content.contains("TYLAX-STUB-BIB")
+            || content
+                .lines()
+                .next()
+                .map(|line| line.contains("Missing bibliography source"))
+                .unwrap_or(false);
+        // Build stub entries for any missing keys.
+        let mut missing: Vec<&String> = Vec::new();
+        for key in keys {
+            if !bibtex_contains_key(&content, key) {
+                missing.push(key);
+            }
+        }
+
+        if !missing.is_empty() {
+            let mut stub = String::new();
+            for key in &missing {
+                stub.push_str("@misc{");
+                stub.push_str(key);
+                stub.push_str(",\n  title = \"{Missing citation}\",\n  author = \"{Unknown}\",\n  year = \"{0000}\",\n}\n\n");
+            }
+            if is_placeholder || !has_entries {
+                fs::write(&path, stub)?;
+            } else {
+                let mut updated = content;
+                if !updated.ends_with('\n') {
+                    updated.push('\n');
+                }
+                updated.push_str(&stub);
+                fs::write(&path, updated)?;
+            }
+        } else if is_placeholder && !has_entries {
+            // Ensure placeholder files are at least non-empty
+            fs::write(&path, content)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn bibtex_contains_key(content: &str, key: &str) -> bool {
+    let bytes = content.as_bytes();
+    let key_lower = key.to_lowercase();
+    let key_bytes = key_lower.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'@' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_alphabetic() {
+                j += 1;
+            }
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && (bytes[j] == b'{' || bytes[j] == b'(') {
+                j += 1;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j + key_bytes.len() <= bytes.len() {
+                    let slice = &content[j..j + key_bytes.len()].to_lowercase();
+                    if slice.as_bytes() == key_bytes {
+                        return true;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 #[cfg(feature = "cli")]
@@ -579,6 +819,31 @@ fn extract_bib_entries(content: &str) -> Vec<(String, String)> {
             let open = bytes[j] as char;
             let close = if open == '{' { '}' } else { ')' };
             j += 1;
+
+            let is_meta = entry_type.eq_ignore_ascii_case("string")
+                || entry_type.eq_ignore_ascii_case("preamble")
+                || entry_type.eq_ignore_ascii_case("comment");
+
+            if is_meta {
+                // Scan to matching close without trying to parse a key.
+                let mut depth = 1i32;
+                while j < bytes.len() && depth > 0 {
+                    let ch = bytes[j] as char;
+                    if ch == open {
+                        depth += 1;
+                    } else if ch == close {
+                        depth -= 1;
+                    }
+                    j += 1;
+                }
+                let end = j.min(bytes.len());
+                let entry_text = content[start..end].to_string();
+                anon_idx += 1;
+                let key_final = format!("{}-{}", entry_type, anon_idx);
+                out.push((key_final, entry_text));
+                i = end;
+                continue;
+            }
 
             // Extract key
             while j < bytes.len() && bytes[j].is_ascii_whitespace() {
@@ -675,6 +940,14 @@ fn collect_bibliography_entries_with_includes(
                 if path.extension().and_then(|s| s.to_str()) != Some("bib") {
                     continue;
                 }
+                if path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.ends_with(".typst.bib"))
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     entries.push(format!("{}/{}", folder, stem));
                 }
@@ -687,6 +960,14 @@ fn collect_bibliography_entries_with_includes(
         for entry in read_dir.flatten() {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) != Some("bib") {
+                continue;
+            }
+            if path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .map(|s| s.ends_with(".typst.bib"))
+                .unwrap_or(false)
+            {
                 continue;
             }
             if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
@@ -766,67 +1047,98 @@ fn resolve_graphics_path(
     }
 
     let raw_path = Path::new(raw);
-    let mut bases: Vec<PathBuf> = Vec::new();
-    if raw_path.is_absolute() {
-        bases.push(PathBuf::new());
-    } else {
-        bases.push(base_dir.to_path_buf());
-        for dir in graphic_dirs {
-            let trimmed = dir.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let candidate = PathBuf::from(trimmed);
-            if candidate.is_absolute() {
-                bases.push(candidate);
-            } else {
-                bases.push(base_dir.join(candidate));
-            }
+    let has_ext = raw_path.extension().is_some();
+
+    let mut candidates: Vec<String> = Vec::new();
+    candidates.push(raw.to_string());
+    if !has_ext {
+        for ext in EXTENSIONS {
+            let mut with_ext = raw.to_string();
+            with_ext.push_str(ext);
+            candidates.push(with_ext);
         }
     }
 
-    let has_ext = raw_path.extension().is_some();
-    if has_ext {
-        for base in &bases {
-            let candidate = if raw_path.is_absolute() {
-                raw_path.to_path_buf()
-            } else {
-                base.join(raw_path)
-            };
-            if candidate.exists() {
-                return Some((candidate, raw.to_string()));
+    if raw_path.is_absolute() {
+        for candidate in &candidates {
+            let candidate_path = PathBuf::from(candidate);
+            if candidate_path.exists() {
+                let rel = normalize_abs_rel_path(&candidate_path);
+                let rel_str = rel.to_string_lossy().to_string();
+                return Some((candidate_path, rel_str));
             }
         }
         return None;
     }
 
-    for base in &bases {
-        let candidate = if raw_path.is_absolute() {
-            raw_path.to_path_buf()
+    let mut bases: Vec<(PathBuf, PathBuf)> = Vec::new();
+    bases.push((base_dir.to_path_buf(), PathBuf::new()));
+
+    for dir in graphic_dirs {
+        let trimmed = dir.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let candidate = PathBuf::from(trimmed);
+        if candidate.is_absolute() {
+            if let Ok(rel) = candidate.strip_prefix(base_dir) {
+                bases.push((candidate.clone(), normalize_rel_path(rel)));
+            } else {
+                bases.push((candidate.clone(), normalize_abs_rel_path(&candidate)));
+            }
         } else {
-            base.join(raw_path)
-        };
-        if candidate.exists() {
-            return Some((candidate, raw.to_string()));
+            let rel_prefix = normalize_rel_path(&candidate);
+            bases.push((base_dir.join(&candidate), rel_prefix));
         }
     }
 
-    for ext in EXTENSIONS {
-        for base in &bases {
-            let mut with_ext = raw.to_string();
-            with_ext.push_str(ext);
-            let candidate = if raw_path.is_absolute() {
-                PathBuf::from(&with_ext)
-            } else {
-                base.join(&with_ext)
-            };
-            if candidate.exists() {
-                return Some((candidate, with_ext));
+    for candidate in &candidates {
+        for (base, rel_prefix) in &bases {
+            let candidate_path = base.join(candidate);
+            if candidate_path.exists() {
+                let rel = if rel_prefix.as_os_str().is_empty() {
+                    normalize_rel_path(Path::new(candidate))
+                } else {
+                    normalize_rel_path(&rel_prefix.join(candidate))
+                };
+                let rel_str = rel.to_string_lossy().to_string();
+                return Some((candidate_path, rel_str));
             }
         }
     }
 
     None
+}
+
+#[cfg(feature = "cli")]
+fn normalize_rel_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            Component::Normal(part) => out.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+    out
+}
+
+#[cfg(feature = "cli")]
+fn normalize_abs_rel_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        if let Component::Normal(part) = comp {
+            out.push(part);
+        }
+    }
+    if out.as_os_str().is_empty() {
+        PathBuf::from("image")
+    } else {
+        out
+    }
 }
 
 #[cfg(feature = "cli")]
@@ -846,6 +1158,9 @@ fn copy_graphics_assets(
             continue;
         }
         if let Some((src, rel)) = resolve_graphics_path(trimmed, graphic_dirs, base_dir) {
+            if rel.is_empty() {
+                continue;
+            }
             if seen.insert(rel.clone()) {
                 let dest = out_dir.join(&rel);
                 if dest == src {
@@ -972,6 +1287,77 @@ fn rewrite_extensionless_images(content: &str, out_dir: &Path) -> String {
 
     out.push_str(&content[i..]);
     out
+}
+
+#[cfg(all(test, feature = "cli"))]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        dir.push(format!("tylax-{}-{}", prefix, ts));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_graphicspath_copy_and_rewrite() {
+        let base_dir = temp_dir("graphics-base");
+        let out_dir = temp_dir("graphics-out");
+        let figs_dir = base_dir.join("figs");
+        fs::create_dir_all(&figs_dir).unwrap();
+        fs::write(figs_dir.join("plot.png"), b"fake").unwrap();
+
+        let paths = vec!["plot".to_string()];
+        let graphic_dirs = vec!["figs/".to_string()];
+        let mapping = copy_graphics_assets(&paths, &graphic_dirs, &base_dir, &out_dir).unwrap();
+
+        assert_eq!(
+            mapping.get("plot").map(|s| s.as_str()),
+            Some("figs/plot.png")
+        );
+        assert!(out_dir.join("figs").join("plot.png").exists());
+
+        let rewritten = rewrite_image_paths("#image(\"plot\")", &mapping);
+        assert!(rewritten.contains("figs/plot.png"));
+    }
+
+    #[test]
+    fn test_bibliography_copy() {
+        let base_dir = temp_dir("bib-base");
+        let out_dir = temp_dir("bib-out");
+        fs::write(base_dir.join("refs.bib"), "@article{a, title={x}}\n").unwrap();
+
+        let entries = vec!["refs".to_string()];
+        let mapping = sanitize_bibliography_files(&entries, &base_dir, &out_dir).unwrap();
+
+        assert_eq!(
+            mapping.get("refs.bib").map(|s| s.as_str()),
+            Some("refs.typst.bib")
+        );
+        assert!(out_dir.join("refs.typst.bib").exists());
+    }
+
+    #[test]
+    fn test_bibliography_fallback_ignores_generated_files() {
+        let base_dir = temp_dir("bib-ignore");
+        fs::write(base_dir.join("refs.bib"), "@article{a, title={x}}\n").unwrap();
+        fs::write(
+            base_dir.join("refs.typst.bib"),
+            "@article{b, title={y}}\n",
+        )
+        .unwrap();
+
+        let entries = collect_bibliography_entries_with_includes("no bibliography here", &base_dir);
+
+        assert!(entries.iter().any(|e| e == "refs"));
+        assert!(!entries.iter().any(|e| e.contains("typst")));
+    }
 }
 
 #[cfg(feature = "cli")]
@@ -1159,17 +1545,63 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                 }
             };
 
-            if !bib_entries.is_empty() {
-                if let Some(output_path) = output.as_ref() {
-                    let out_dir = Path::new(output_path)
-                        .parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+            if let Some(output_path) = output.as_ref() {
+                let out_dir = Path::new(output_path)
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let mut citation_keys = extract_citation_keys_from_typst(&result);
+                let bibitem_keys = extract_bibitem_keys_from_typst(&result);
+                citation_keys.extend(bibitem_keys.iter().cloned());
+
+                if !bib_entries.is_empty() {
                     if let Some(base_dir) = bib_base_dir.as_ref() {
-                        if let Ok(mapping) = sanitize_bibliography_files(&bib_entries, base_dir, &out_dir) {
+                        if let Ok(mapping) =
+                            sanitize_bibliography_files(&bib_entries, base_dir, &out_dir)
+                        {
                             result = rewrite_bibliography_paths(&result, &mapping);
+                            if !result.contains("#bibliography") {
+                                let mut mapped: Vec<String> = Vec::new();
+                                for entry in &bib_entries {
+                                    let mut name = entry.clone();
+                                    if !name.ends_with(".bib") {
+                                        name.push_str(".bib");
+                                    }
+                                    if let Some(mapped_name) = mapping.get(&name) {
+                                        mapped.push(mapped_name.clone());
+                                    }
+                                }
+                                if !mapped.is_empty() {
+                                    mapped.sort();
+                                    mapped.dedup();
+                                    let quoted: Vec<String> =
+                                        mapped.into_iter().map(|s| format!("\"{}\"", s)).collect();
+                                    if quoted.len() == 1 {
+                                        result.push_str("\n#bibliography(");
+                                        result.push_str(&quoted.join(", "));
+                                        result.push_str(")\n");
+                                    } else {
+                                        result.push_str("\n#bibliography((");
+                                        result.push_str(&quoted.join(", "));
+                                        result.push_str("))\n");
+                                    }
+                                }
+                            }
+                            let mut mapped_files: Vec<String> =
+                                mapping.values().cloned().collect();
+                            mapped_files.sort();
+                            mapped_files.dedup();
+                            let _ = populate_placeholder_bibliography(
+                                &out_dir,
+                                &mapped_files,
+                                &citation_keys,
+                            );
                         }
                     }
+                } else if !bibitem_keys.is_empty() && !result.contains("#bibliography") {
+                    let stub_path = out_dir.join("references.typst.bib");
+                    let _ = write_stub_bibliography(&stub_path, &citation_keys);
+                    result.push_str("\n#hide(bibliography(\"references.typst.bib\"))\n");
                 }
             }
             if let (Some(output_path), Some(base_dir)) = (output.as_ref(), graphics_base_dir.as_ref()) {

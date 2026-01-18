@@ -12,13 +12,17 @@ fi
 OUT_ROOT="$ROOT/target/thesis_corpus"
 REPORT="$OUT_ROOT/compile_report.md"
 SUMMARY="$OUT_ROOT/compile_summary.txt"
+ERRORS="$OUT_ROOT/compile_errors.txt"
 
 mkdir -p "$OUT_ROOT"
 : > "$REPORT"
 : > "$SUMMARY"
+: > "$ERRORS"
 
-printf "| Template | Convert | Compile | First Error Line |\\n" >> "$REPORT"
-printf "| --- | --- | --- | --- |\\n" >> "$REPORT"
+printf "# Thesis Corpus Compile Report\\n\\n" >> "$REPORT"
+printf "## Results\\n\\n" >> "$REPORT"
+printf "| Template | Convert | Compile | First Error Line | Repro |\\n" >> "$REPORT"
+printf "| --- | --- | --- | --- | --- |\\n" >> "$REPORT"
 
 T2L_BIN="${T2L_BIN:-}"
 if [[ -n "$T2L_BIN" ]]; then
@@ -97,10 +101,12 @@ sanitize() {
   printf "%s" "$line"
 }
 
-total=0
+total_listed=0
+skipped=0
 convert_pass=0
 compile_pass=0
 failures=0
+timeout_count=0
 
 while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -z "$line" || "$line" =~ ^# ]] && continue
@@ -110,25 +116,31 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     continue
   fi
 
+  if [[ -n "${THESIS_ONLY:-}" && "$name" != "$THESIS_ONLY" ]]; then
+    continue
+  fi
+
+  total_listed=$((total_listed + 1))
+
   if [[ -n "${THESIS_SKIP:-}" ]]; then
     IFS=',' read -r -a skip_list <<< "$THESIS_SKIP"
     for skip in "${skip_list[@]}"; do
       skip="${skip// /}"
       if [[ -n "$skip" && "$name" == "$skip" ]]; then
-        printf "| %s | skip | skip | %s |\\n" "$name" "skipped via THESIS_SKIP" >> "$REPORT"
+        printf "| %s | skip | skip | %s | %s |\\n" "$name" "skipped via THESIS_SKIP" "THESIS_ONLY=$name ./tools/thesis_corpus_compile.sh" >> "$REPORT"
         echo "[skip] $name (THESIS_SKIP)" | tee -a "$SUMMARY"
-        total=$((total + 1))
+        skipped=$((skipped + 1))
         continue 2
       fi
     done
   fi
 
-  total=$((total + 1))
   src="$ROOT/$path"
   if [[ ! -f "$src" ]]; then
     error_line="missing source: $src"
-    printf "| %s | fail | skip | %s |\\n" "$name (missing source)" "$(sanitize "$error_line")" >> "$REPORT"
+    printf "| %s | fail | skip | %s | %s |\\n" "$name (missing source)" "$(sanitize "$error_line")" "THESIS_ONLY=$name ./tools/thesis_corpus_compile.sh" >> "$REPORT"
     echo "[fail] $name missing source: $src" | tee -a "$SUMMARY"
+    echo "$error_line" >> "$ERRORS"
     failures=$((failures + 1))
     continue
   fi
@@ -153,6 +165,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     convert_pass=$((convert_pass + 1))
   else
     error_line=$(head -n 1 "$convert_log")
+    [[ -n "$error_line" ]] && echo "$error_line" >> "$ERRORS"
   fi
 
   if [[ $convert_ok -eq 1 ]]; then
@@ -164,12 +177,15 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         code=$?
         if [[ $code -eq 124 || $code -eq 137 ]]; then
           error_line="compile timeout (${TYPST_TIMEOUT}s)"
+          timeout_count=$((timeout_count + 1))
         else
           error_line=$(head -n 1 "$compile_log")
         fi
+        [[ -n "$error_line" ]] && echo "$error_line" >> "$ERRORS"
       fi
     else
       error_line="typst not found: $typst_cmd"
+      [[ -n "$error_line" ]] && echo "$error_line" >> "$ERRORS"
     fi
   fi
 
@@ -190,15 +206,40 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     echo "[fail] $name convert=$convert_label compile=$compile_label" | tee -a "$SUMMARY"
   fi
 
-  printf "| %s | %s | %s | %s |\\n" "$name" "$convert_label" "$compile_label" "$(sanitize "$error_line")" >> "$REPORT"
+  printf "| %s | %s | %s | %s | %s |\\n" "$name" "$convert_label" "$compile_label" "$(sanitize "$error_line")" "THESIS_ONLY=$name ./tools/thesis_corpus_compile.sh" >> "$REPORT"
 
 done < "$LIST"
 
-printf "\\n**Totals**\\n\\n" >> "$REPORT"
-printf -- "- Total: %s\\n" "$total" >> "$REPORT"
-printf -- "- Convert pass: %s\\n" "$convert_pass" >> "$REPORT"
-printf -- "- Compile pass: %s\\n" "$compile_pass" >> "$REPORT"
-printf -- "- Failures: %s\\n" "$failures" >> "$REPORT"
+run_total=$((total_listed - skipped))
+
+pct() {
+  local num="$1"
+  local den="$2"
+  awk -v n="$num" -v d="$den" 'BEGIN { if (d <= 0) { printf "0.0%%" } else { printf "%.1f%%", (n / d) * 100 } }'
+}
+
+printf "\\n## Summary\\n\\n" >> "$REPORT"
+printf "| Metric | Count | Percent |\\n" >> "$REPORT"
+printf "| --- | ---: | ---: |\\n" >> "$REPORT"
+printf "| Templates run | %s | %s |\\n" "$run_total" "$(pct "$run_total" "$run_total")" >> "$REPORT"
+if [[ $skipped -gt 0 ]]; then
+  printf "| Skipped | %s | %s |\\n" "$skipped" "$(pct "$skipped" "$total_listed")" >> "$REPORT"
+fi
+printf "| Convert pass | %s | %s |\\n" "$convert_pass" "$(pct "$convert_pass" "$run_total")" >> "$REPORT"
+printf "| Compile pass | %s | %s |\\n" "$compile_pass" "$(pct "$compile_pass" "$run_total")" >> "$REPORT"
+printf "| Compile timeout | %s | %s |\\n" "$timeout_count" "$(pct "$timeout_count" "$run_total")" >> "$REPORT"
+printf "| Failures | %s | %s |\\n" "$failures" "$(pct "$failures" "$run_total")" >> "$REPORT"
+
+printf "\\n**Top errors**\\n\\n" >> "$REPORT"
+if [[ -s "$ERRORS" ]]; then
+  while IFS= read -r line; do
+    count=$(echo "$line" | awk '{print $1}')
+    msg=$(echo "$line" | sed -e 's/^ *[0-9]* *//')
+    printf -- "- %s× %s\\n" "$count" "$(sanitize "$msg")" >> "$REPORT"
+  done < <(sort "$ERRORS" | uniq -c | sort -nr | head -n 5)
+else
+  printf -- "- (none)\\n" >> "$REPORT"
+fi
 
 echo "Summary written to $SUMMARY"
 echo "Report written to $REPORT"

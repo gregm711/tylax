@@ -156,6 +156,34 @@ fn test_longtable_controls_ignored() {
 }
 
 #[test]
+fn test_longtable_head_foot_filtered() {
+    let content = "H1|||CELL|||H2|||ROW|||\\endfirsthead|||ROW|||H1|||CELL|||H2|||ROW|||\\endhead|||ROW|||F1|||CELL|||F2|||ROW|||\\endfoot|||ROW|||L1|||CELL|||L2|||ROW|||\\endlastfoot|||ROW|||B1|||CELL|||B2";
+    let alignments = vec![CellAlign::Left; 2];
+    let output = parse_with_grid_parser(content, alignments);
+
+    assert!(output.contains("[H1]"));
+    assert!(output.contains("[H2]"));
+    assert!(output.contains("[B1]"));
+    assert!(output.contains("[B2]"));
+    assert!(!output.contains("[F1]"));
+    assert!(!output.contains("[F2]"));
+    assert!(!output.contains("[L1]"));
+    assert!(!output.contains("[L2]"));
+    assert_eq!(output.matches("[H1]").count(), 1);
+}
+
+#[test]
+fn test_preserve_cell_under_rowspan_conflict() {
+    // If a covered column unexpectedly has data, preserve it instead of dropping.
+    let content = "___TYPST_CELL___:table.cell(rowspan: 2)[A]|||CELL|||B|||ROW|||X|||CELL|||C";
+    let alignments = vec![CellAlign::Left; 2];
+    let output = parse_with_grid_parser(content, alignments);
+
+    assert!(output.contains("[X]"));
+    assert!(output.contains("[C]"));
+}
+
+#[test]
 fn test_row_padding_for_short_rows() {
     let content = "Only|||ROW|||A|||CELL|||B";
     let alignments = vec![CellAlign::Left; 2];

@@ -27,7 +27,11 @@ pub fn convert_formula(conv: &mut LatexConverter, elem: SyntaxElement, output: &
 
             // Apply math cleanup and strip stray delimiters if the parser left them behind
             let cleaned = conv.cleanup_math_spacing(&math_content);
+            let cleaned = super::utils::strip_unescaped_dollars(&cleaned);
             let mut cleaned = cleaned.trim().to_string();
+            if cleaned.starts_with('/') {
+                cleaned = format!("\"{}\"", cleaned.trim());
+            }
             loop {
                 let bytes = cleaned.as_bytes();
                 if cleaned.len() >= 2 && bytes[0] == b'$' && bytes[cleaned.len() - 1] == b'$' {
@@ -62,6 +66,19 @@ pub fn convert_curly(conv: &mut LatexConverter, elem: SyntaxElement, output: &mu
         SyntaxElement::Node(n) => n,
         _ => return,
     };
+
+    // Drop empty math placeholders like {$ $} in text mode.
+    if matches!(conv.state.mode, ConversionMode::Text) {
+        let raw = node.text().to_string();
+        let inner = raw.trim().trim_start_matches('{').trim_end_matches('}');
+        if !inner.is_empty()
+            && inner
+                .chars()
+                .all(|c| c == '$' || c.is_whitespace())
+        {
+            return;
+        }
+    }
 
     // Check if this is an argument for a pending operator (operatorname*)
     if let Some(op) = conv.state.pending_op.take() {
@@ -386,8 +403,8 @@ fn convert_delimiter(delim: &str) -> String {
         "]" => "]".to_string(),
         "\\{" | "\\lbrace" => "{".to_string(),
         "\\}" | "\\rbrace" => "}".to_string(),
-        "|" | "\\vert" => "bar.v".to_string(),
-        "\\|" | "\\Vert" => "bar.v.double".to_string(),
+        "|" | "\\vert" | "\\lvert" | "\\rvert" => "bar.v".to_string(),
+        "\\|" | "\\Vert" | "\\lVert" | "\\rVert" => "bar.v.double".to_string(),
         "\\langle" => "chevron.l".to_string(),
         "\\rangle" => "chevron.r".to_string(),
         "\\lfloor" => "floor.l".to_string(),

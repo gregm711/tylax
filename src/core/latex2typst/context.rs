@@ -11,6 +11,7 @@ use std::fmt::Write;
 
 use crate::data::constants::{AcronymDef, GlossaryDef};
 use crate::data::maps::TEX_COMMAND_SPEC;
+use crate::features::macros::ArgSpec;
 use crate::features::templates::{generate_title_block, generate_typst_preamble, parse_document_class, DocumentClass};
 use crate::utils::loss::{LossKind, LossRecord, LossReport};
 use fxhash::FxHashMap;
@@ -169,6 +170,37 @@ pub struct PendingOperator {
     pub is_limits: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeadingCaptureMode {
+    None,
+    Optional,
+    Required,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CitationMode {
+    Typst,
+    Text,
+}
+
+impl Default for CitationMode {
+    fn default() -> Self {
+        CitationMode::Typst
+    }
+}
+
+/// Pending section heading when arguments are parsed separately
+#[derive(Debug, Clone)]
+pub struct PendingHeading {
+    pub level: u8,
+    pub optional: Option<String>,
+    pub required: Option<String>,
+    pub capture_mode: HeadingCaptureMode,
+    pub capture_depth: usize,
+    pub capture_buffer: String,
+    pub implicit_open: bool,
+}
+
 /// Conversion state maintained during AST traversal
 #[derive(Debug, Default)]
 pub struct ConversionState {
@@ -184,6 +216,8 @@ pub struct ConversionState {
     pub known_labels: HashSet<String>,
     /// Pending operator state
     pub pending_op: Option<PendingOperator>,
+    /// Pending section heading awaiting arguments
+    pub pending_heading: Option<PendingHeading>,
     /// User-defined macros
     pub macros: HashMap<String, MacroDef>,
     /// Whether we're in preamble
@@ -217,6 +251,8 @@ pub struct ConversionState {
     pub used_acronyms: HashSet<String>,
     /// Conversion options
     pub options: L2TOptions,
+    /// Citation rendering mode
+    pub citation_mode: CitationMode,
     /// Custom theorem environments defined in preamble
     pub custom_theorems: HashMap<String, String>,
     /// Color definitions collected from preamble (name -> Typst color expression)
@@ -420,11 +456,68 @@ impl LatexConverter {
             macro_db.undefine(op);
         }
 
+        self.state.macros.clear();
+        for (name, def) in macro_db.iter() {
+            let mut default_arg = None;
+            let mut has_delimited = false;
+            for spec in &def.arg_specs {
+                match spec {
+                    ArgSpec::Optional(value) => {
+                        if default_arg.is_none() {
+                            default_arg = Some(value.clone());
+                        }
+                    }
+                    ArgSpec::Delimited(_) => {
+                        has_delimited = true;
+                    }
+                    ArgSpec::Required => {}
+                }
+            }
+            if has_delimited {
+                continue;
+            }
+            self.state.macros.insert(
+                name.clone(),
+                MacroDef {
+                    name: name.clone(),
+                    num_args: def.num_args,
+                    default_arg,
+                    replacement: def.replacement.clone(),
+                },
+            );
+        }
+
         let mut expanded_input = crate::features::macros::expand_macros(&processed_input, &macro_db);
         // Strip bibliography commands that are not meaningful in Typst output.
         expanded_input = super::utils::strip_command_with_braced_arg(&expanded_input, "bibliographystyle");
         expanded_input = super::utils::strip_sectioning_stars(&expanded_input);
-        expanded_input = super::utils::strip_env_options(&expanded_input, &["nomenclature", "nomenclature*"]);
+        expanded_input = super::utils::strip_env_stars(&expanded_input);
+        expanded_input = super::utils::normalize_spacing_primitives(&expanded_input);
+        expanded_input = super::utils::normalize_display_dollars(&expanded_input);
+        expanded_input = super::utils::normalize_math_delimiters(&expanded_input);
+        expanded_input = super::utils::normalize_unmatched_braces(&expanded_input);
+
+        let has_bib_files =
+            !super::utils::collect_bibliography_entries(&expanded_input).is_empty();
+        let has_thebibliography = super::utils::contains_thebibliography_env(&expanded_input);
+        self.state.citation_mode = if has_bib_files {
+            CitationMode::Typst
+        } else if has_thebibliography {
+            CitationMode::Text
+        } else {
+            CitationMode::Text
+        };
+        expanded_input = super::utils::strip_env_options(
+            &expanded_input,
+            &[
+                "nomenclature",
+                "nomenclature*",
+                "algorithm",
+                "algorithmic",
+                "algorithm*",
+                "algorithmic*",
+            ],
+        );
         expanded_input = super::utils::strip_command_optional_arg(&expanded_input, &["blindtext"]);
         let mut doc_class = parse_document_class(&expanded_input);
         let pkg_template = detect_template_from_packages(&expanded_input);
@@ -474,6 +567,9 @@ impl LatexConverter {
         let escaped = super::utils::escape_at_in_words(&attached);
         let normalized = super::utils::normalize_latex_quotes(&escaped);
         let sanitized = super::utils::sanitize_loss_comment_boundaries(&normalized);
+        let sanitized = super::utils::normalize_typst_double_dollars(&sanitized);
+        let sanitized = super::utils::normalize_typst_linebreaks(&sanitized);
+        let sanitized = super::utils::normalize_typst_op_brackets(&sanitized);
 
         // Restore protected commands
         restore_protected_commands(&sanitized)
@@ -563,6 +659,10 @@ impl LatexConverter {
             return;
         }
 
+        if self.consume_pending_heading(&elem, output) {
+            return;
+        }
+
         match elem.kind() {
             // Handle errors gracefully
             TokenError => {
@@ -570,6 +670,10 @@ impl LatexConverter {
                     SyntaxElement::Node(n) => n.text().to_string(),
                     SyntaxElement::Token(t) => t.text().to_string(),
                 };
+                let trimmed = text.trim();
+                if trimmed == "}" || trimmed == "document" {
+                    return;
+                }
                 self.state.warnings.push(format!("Parse error: {}", text));
                 let context = match self.state.mode {
                     ConversionMode::Math => Some("math".to_string()),
@@ -698,9 +802,7 @@ impl LatexConverter {
             }
             TokenHash => output.push_str("\\#"),
             TokenDollar => {
-                if matches!(self.state.mode, ConversionMode::Math) {
-                    output.push('$');
-                } else {
+                if !matches!(self.state.mode, ConversionMode::Math) {
                     output.push_str("\\$");
                 }
             }
@@ -780,6 +882,11 @@ impl LatexConverter {
     /// Get a required argument from a command (raw text, strips braces)
     pub fn get_required_arg(&self, cmd: &CmdItem, index: usize) -> Option<String> {
         let mut required_count = 0;
+        let cmd_name = cmd
+            .name_tok()
+            .map(|t| t.text().trim_start_matches('\\').to_string())
+            .unwrap_or_default();
+        let allow_star_arg = matches!(cmd_name.as_str(), "overset" | "underset" | "stackrel");
         for child in cmd.syntax().children() {
             if child.kind() == SyntaxKind::ClauseArgument {
                 let is_bracket = child
@@ -787,7 +894,7 @@ impl LatexConverter {
                     .any(|c| c.kind() == SyntaxKind::ItemBracket);
                 if !is_bracket {
                     let preview = extract_arg_content(&child);
-                    if preview.trim() == "*" {
+                    if preview.trim() == "*" && !allow_star_arg {
                         continue;
                     }
                     if required_count == index {
@@ -839,15 +946,29 @@ impl LatexConverter {
     /// Convert a required argument - recursively processes the content
     pub fn convert_required_arg(&mut self, cmd: &CmdItem, index: usize) -> Option<String> {
         let mut required_count = 0;
-        for child in cmd.syntax().children() {
+        let cmd_name = cmd
+            .name_tok()
+            .map(|t| t.text().trim_start_matches('\\').to_string())
+            .unwrap_or_default();
+        let allow_star_arg = matches!(cmd_name.as_str(), "overset" | "underset" | "stackrel");
+        let children: Vec<_> = cmd.syntax().children().collect();
+        for (pos, child) in children.iter().enumerate() {
             if child.kind() == SyntaxKind::ClauseArgument {
                 let is_bracket = child
                     .children()
                     .any(|c| c.kind() == SyntaxKind::ItemBracket);
                 if !is_bracket {
                     let preview = extract_arg_content(&child);
-                    if preview.trim() == "*" {
-                        continue;
+                    if preview.trim() == "*" && !allow_star_arg {
+                        let has_more_required = children[pos + 1..].iter().any(|next| {
+                            if next.kind() != SyntaxKind::ClauseArgument {
+                                return false;
+                            }
+                            !next.children().any(|c| c.kind() == SyntaxKind::ItemBracket)
+                        });
+                        if has_more_required {
+                            continue;
+                        }
                     }
                     if required_count == index {
                         let mut output = String::new();
@@ -869,11 +990,7 @@ impl LatexConverter {
     /// Get a required argument from a command and convert it to Typst
     pub fn get_converted_required_arg(&mut self, cmd: &CmdItem, index: usize) -> Option<String> {
         let raw_text = self.get_required_arg_with_braces(cmd, index)?;
-        if raw_text.contains('$') || raw_text.contains('\\') {
-            Some(convert_caption_text(&raw_text))
-        } else {
-            Some(raw_text)
-        }
+        Some(convert_caption_text(&raw_text))
     }
 
     /// Get optional argument from an environment
@@ -1527,6 +1644,223 @@ impl LatexConverter {
                 _ => self.visit_element(child, output),
             }
         }
+    }
+
+    fn convert_clause_argument_node(&mut self, node: &SyntaxNode) -> String {
+        let pending = self.state.pending_heading.take();
+        let mut output = String::new();
+        for child in node.children_with_tokens() {
+            match child.kind() {
+                SyntaxKind::TokenLBrace
+                | SyntaxKind::TokenRBrace
+                | SyntaxKind::TokenLBracket
+                | SyntaxKind::TokenRBracket => continue,
+                _ => self.visit_element(child, &mut output),
+            }
+        }
+        self.state.pending_heading = pending;
+        output.trim().to_string()
+    }
+
+    fn consume_pending_heading(&mut self, elem: &SyntaxElement, output: &mut String) -> bool {
+        if self.state.pending_heading.is_none() {
+            return false;
+        }
+
+        let kind = elem.kind();
+
+        if kind == SyntaxKind::ClauseArgument {
+            if let SyntaxElement::Node(node) = elem {
+                let is_bracket = node.children().any(|c| c.kind() == SyntaxKind::ItemBracket);
+                let is_curly = node.children().any(|c| c.kind() == SyntaxKind::ItemCurly);
+                if is_bracket || is_curly {
+                    let content = self.convert_clause_argument_node(node);
+                    if let Some(pending) = self.state.pending_heading.as_mut() {
+                        if !content.trim().is_empty() {
+                            if is_bracket && pending.optional.is_none() {
+                                pending.optional = Some(content.clone());
+                            }
+                            if is_curly && pending.required.is_none() {
+                                pending.required = Some(content);
+                            }
+                        }
+                        if pending.required.is_some() {
+                            self.flush_pending_heading(output);
+                        }
+                    }
+                    return true;
+                }
+            }
+        }
+
+        let capture_mode = self
+            .state
+            .pending_heading
+            .as_ref()
+            .map(|p| p.capture_mode)
+            .unwrap_or(HeadingCaptureMode::None);
+
+        if matches!(capture_mode, HeadingCaptureMode::Required) {
+            if let SyntaxElement::Node(node) = elem {
+                if let Some(cmd) = CmdItem::cast(node.clone()) {
+                    if let Some(name) = cmd.name_tok() {
+                        let base = name.text().trim_start_matches('\\');
+                        if base == "label" {
+                            if let Some(pending) = self.state.pending_heading.as_mut() {
+                                let content = pending.capture_buffer.trim().to_string();
+                                if !content.is_empty() && pending.required.is_none() {
+                                    pending.required = Some(content);
+                                }
+                                pending.capture_mode = HeadingCaptureMode::None;
+                                pending.capture_buffer.clear();
+                                pending.implicit_open = false;
+                                self.flush_pending_heading(output);
+                            }
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !matches!(capture_mode, HeadingCaptureMode::None) {
+            match kind {
+                SyntaxKind::TokenRBracket => {
+                    if let Some(pending) = self.state.pending_heading.as_mut() {
+                        if matches!(pending.capture_mode, HeadingCaptureMode::Optional) {
+                            pending.capture_depth = pending.capture_depth.saturating_sub(1);
+                            if pending.capture_depth == 0 {
+                                let content = pending.capture_buffer.trim().to_string();
+                                if !content.is_empty() && pending.optional.is_none() {
+                                    pending.optional = Some(content);
+                                }
+                                pending.capture_mode = HeadingCaptureMode::None;
+                                pending.capture_buffer.clear();
+                                pending.capture_mode = HeadingCaptureMode::Required;
+                                pending.capture_depth = 1;
+                                pending.capture_buffer.clear();
+                                pending.implicit_open = true;
+                            }
+                            return true;
+                        }
+                    }
+                }
+                SyntaxKind::TokenRBrace => {
+                    if let Some(pending) = self.state.pending_heading.as_mut() {
+                        if matches!(pending.capture_mode, HeadingCaptureMode::Required) {
+                            pending.capture_depth = pending.capture_depth.saturating_sub(1);
+                            if pending.capture_depth == 0 {
+                                let content = pending.capture_buffer.trim().to_string();
+                                if !content.is_empty() && pending.required.is_none() {
+                                    pending.required = Some(content);
+                                }
+                                pending.capture_mode = HeadingCaptureMode::None;
+                                pending.capture_buffer.clear();
+                                pending.implicit_open = false;
+                                self.flush_pending_heading(output);
+                            }
+                            return true;
+                        }
+                    }
+                }
+                SyntaxKind::TokenLBracket => {
+                    if let Some(pending) = self.state.pending_heading.as_mut() {
+                        if matches!(pending.capture_mode, HeadingCaptureMode::Optional) {
+                            if pending.implicit_open {
+                                pending.implicit_open = false;
+                            } else {
+                                pending.capture_depth += 1;
+                            }
+                            return true;
+                        }
+                    }
+                }
+                SyntaxKind::TokenLBrace => {
+                    if let Some(pending) = self.state.pending_heading.as_mut() {
+                        if matches!(pending.capture_mode, HeadingCaptureMode::Required) {
+                            if pending.implicit_open {
+                                pending.implicit_open = false;
+                            } else {
+                                pending.capture_depth += 1;
+                            }
+                            return true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            let mut buffer = String::new();
+            let saved = self.state.pending_heading.take();
+            self.visit_element(elem.clone(), &mut buffer);
+            self.state.pending_heading = saved;
+            if let Some(pending) = self.state.pending_heading.as_mut() {
+                pending.capture_buffer.push_str(&buffer);
+            }
+            return true;
+        }
+
+        match kind {
+            SyntaxKind::TokenWhiteSpace
+            | SyntaxKind::TokenLineBreak
+            | SyntaxKind::TokenComment
+            | SyntaxKind::ItemBlockComment => return true,
+            SyntaxKind::TokenLBracket => {
+                if let Some(pending) = self.state.pending_heading.as_mut() {
+                    pending.capture_mode = HeadingCaptureMode::Optional;
+                    pending.capture_depth = 1;
+                    pending.capture_buffer.clear();
+                    pending.implicit_open = false;
+                    return true;
+                }
+            }
+            SyntaxKind::TokenLBrace => {
+                if let Some(pending) = self.state.pending_heading.as_mut() {
+                    pending.capture_mode = HeadingCaptureMode::Required;
+                    pending.capture_depth = 1;
+                    pending.capture_buffer.clear();
+                    pending.implicit_open = false;
+                    return true;
+                }
+            }
+            _ => {}
+        }
+
+        if let Some(pending) = self.state.pending_heading.as_ref() {
+            if pending.optional.is_some() || pending.required.is_some() {
+                self.flush_pending_heading(output);
+            } else {
+                self.state.pending_heading = None;
+            }
+        }
+
+        false
+    }
+
+    fn flush_pending_heading(&mut self, output: &mut String) {
+        let pending = match self.state.pending_heading.take() {
+            Some(pending) => pending,
+            None => return,
+        };
+
+        let title = pending
+            .required
+            .or(pending.optional)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+
+        if title.is_empty() {
+            return;
+        }
+
+        output.push('\n');
+        for _ in 0..=pending.level {
+            output.push('=');
+        }
+        output.push(' ');
+        output.push_str(&title);
+        output.push('\n');
     }
 }
 
