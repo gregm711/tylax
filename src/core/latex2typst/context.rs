@@ -2299,6 +2299,24 @@ impl LatexConverter {
         output.push_str(&title);
         output.push('\n');
     }
+
+    /// Convert a complete LaTeX document to Typst with full diagnostics
+    ///
+    /// Returns both the converted output and any warnings generated during conversion.
+    pub fn convert_document_with_diagnostics(&mut self, input: &str) -> ConversionResult {
+        let output = self.convert_document(input);
+        let warnings = self.state.take_structured_warnings();
+        ConversionResult::with_warnings(output, warnings)
+    }
+
+    /// Convert math-only LaTeX to Typst with full diagnostics
+    ///
+    /// Returns both the converted output and any warnings generated during conversion.
+    pub fn convert_math_with_diagnostics(&mut self, input: &str) -> ConversionResult {
+        let output = self.convert_math(input);
+        let warnings = self.state.take_structured_warnings();
+        ConversionResult::with_warnings(output, warnings)
+    }
 }
 
 fn extract_macro_arg(raw: &str, name: &str) -> Option<String> {
@@ -2421,27 +2439,6 @@ fn find_matching_bracket(s: &str, open: char, close: char) -> Option<usize> {
         }
     }
     None
-    // ============================================================
-    // Diagnostic conversion methods
-    // ============================================================
-
-    /// Convert a complete LaTeX document to Typst with full diagnostics
-    ///
-    /// Returns both the converted output and any warnings generated during conversion.
-    pub fn convert_document_with_diagnostics(&mut self, input: &str) -> ConversionResult {
-        let output = self.convert_document(input);
-        let warnings = self.state.take_structured_warnings();
-        ConversionResult::with_warnings(output, warnings)
-    }
-
-    /// Convert math-only LaTeX to Typst with full diagnostics
-    ///
-    /// Returns both the converted output and any warnings generated during conversion.
-    pub fn convert_math_with_diagnostics(&mut self, input: &str) -> ConversionResult {
-        let output = self.convert_math(input);
-        let warnings = self.state.take_structured_warnings();
-        ConversionResult::with_warnings(output, warnings)
-    }
 }
 
 impl Default for LatexConverter {

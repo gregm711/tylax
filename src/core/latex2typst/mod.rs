@@ -45,6 +45,123 @@ pub use context::{
 };
 
 // =============================================================================
+// Warning System (mirrors typst2latex's design)
+// =============================================================================
+
+/// Kind of warning generated during LaTeX to Typst conversion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WarningKind {
+    /// Macro expansion loop or recursion limit.
+    MacroLoop,
+    /// TeX argument parsing runaway.
+    RunawayArgument,
+    /// Delimited argument pattern mismatch.
+    PatternMismatch,
+    /// Generic parse error.
+    ParseError,
+    /// LaTeX3 block skipped for safety.
+    LaTeX3Skipped,
+    /// Unsupported TeX primitive.
+    UnsupportedPrimitive,
+    /// Unsupported macro or command.
+    UnsupportedMacro,
+    /// Other/generic warning.
+    Other,
+}
+
+impl std::fmt::Display for WarningKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WarningKind::MacroLoop => write!(f, "macro loop"),
+            WarningKind::RunawayArgument => write!(f, "runaway argument"),
+            WarningKind::PatternMismatch => write!(f, "pattern mismatch"),
+            WarningKind::ParseError => write!(f, "parse error"),
+            WarningKind::LaTeX3Skipped => write!(f, "latex3 skipped"),
+            WarningKind::UnsupportedPrimitive => write!(f, "unsupported primitive"),
+            WarningKind::UnsupportedMacro => write!(f, "unsupported macro"),
+            WarningKind::Other => write!(f, "other"),
+        }
+    }
+}
+
+/// A warning generated during LaTeX to Typst conversion.
+#[derive(Debug, Clone)]
+pub struct ConversionWarning {
+    /// The kind of warning (for programmatic handling)
+    pub kind: WarningKind,
+    /// Human-readable warning message
+    pub message: String,
+    /// Optional location hint (e.g., macro name)
+    pub location: Option<String>,
+}
+
+impl ConversionWarning {
+    /// Create a new warning with a kind and message.
+    pub fn new(kind: WarningKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            location: None,
+        }
+    }
+
+    /// Attach a location hint for diagnostics.
+    pub fn with_location(mut self, location: impl Into<String>) -> Self {
+        self.location = Some(location.into());
+        self
+    }
+}
+
+impl From<ConversionWarning> for crate::utils::error::CliDiagnostic {
+    fn from(warning: ConversionWarning) -> Self {
+        use crate::utils::error::{CliDiagnostic, DiagnosticSeverity};
+
+        let severity = match warning.kind {
+            WarningKind::MacroLoop
+            | WarningKind::RunawayArgument
+            | WarningKind::PatternMismatch
+            | WarningKind::ParseError => DiagnosticSeverity::Warning,
+            WarningKind::UnsupportedPrimitive
+            | WarningKind::UnsupportedMacro
+            | WarningKind::LaTeX3Skipped => DiagnosticSeverity::Info,
+            WarningKind::Other => DiagnosticSeverity::Info,
+        };
+
+        let mut diag = CliDiagnostic::new(severity, warning.kind.to_string(), warning.message);
+        if let Some(loc) = warning.location {
+            diag = diag.with_location(loc);
+        }
+        diag
+    }
+}
+
+/// Result of a LaTeX to Typst conversion with diagnostics.
+#[derive(Debug, Clone)]
+pub struct ConversionResult {
+    /// The converted Typst output
+    pub output: String,
+    /// Warnings generated during conversion
+    pub warnings: Vec<ConversionWarning>,
+}
+
+impl ConversionResult {
+    pub fn new(output: String) -> Self {
+        Self {
+            output,
+            warnings: Vec::new(),
+        }
+    }
+
+    pub fn with_warnings(output: String, warnings: Vec<ConversionWarning>) -> Self {
+        Self { output, warnings }
+    }
+
+    pub fn has_warnings(&self) -> bool {
+        !self.warnings.is_empty()
+    }
+}
+
+// =============================================================================
 // Backward-compatible API Functions
 // =============================================================================
 

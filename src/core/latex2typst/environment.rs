@@ -78,6 +78,24 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             conv.state.pop_env();
             output.push('\n');
         }
+        "acronym" => {
+            conv.state.push_env(EnvironmentContext::Description);
+            output.push('\n');
+            conv.visit_env_content(&node, output);
+            conv.state.pop_env();
+            output.push('\n');
+        }
+        "symbollist" => {
+            conv.state.push_env(EnvironmentContext::Description);
+            output.push('\n');
+            conv.visit_env_content(&node, output);
+            conv.state.pop_env();
+            output.push('\n');
+        }
+        "anexosenv" | "apendicesenv" => {
+            // Appendix wrapper environments: emit content.
+            conv.visit_env_content(&node, output);
+        }
         "list" => {
             // Generic list environment; treat as itemize
             conv.state.push_env(EnvironmentContext::Itemize);
@@ -90,7 +108,8 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             // Ignore column layout; emit content
             conv.visit_env_content(&node, output);
         }
-        "spacing" | "onehalfspace" | "singlespace" | "doublespace" | "justifying" => {
+        "spacing" | "onehalfspace" | "singlespace" | "doublespace" | "justifying" | "justify"
+        | "LARGE" => {
             // setspace environment: ignore spacing, emit content.
             conv.visit_env_content(&node, output);
         }
@@ -115,6 +134,16 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             conv.visit_env_content(&node, output);
             output.push('\n');
         }
+        "Abstract" => {
+            output.push_str("\n= Abstract\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "Resumo" => {
+            output.push_str("\n= Abstract\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
         "refsection" => {
             // Bibliography subsection wrappers (biblatex): emit content.
             conv.visit_env_content(&node, output);
@@ -123,7 +152,16 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             // textpos/thesis wrappers: ignore layout, emit content.
             conv.visit_env_content(&node, output);
         }
+        "adjustwidth" => {
+            // changepage: ignore margins, emit content.
+            conv.visit_env_content(&node, output);
+        }
         "thesisacknowledgments" | "thesisacknowledgements" | "thankpage" => {
+            output.push_str("\n= Acknowledgments\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "AgradecimentosAutorI" | "AgradecimentosAutorII" => {
             output.push_str("\n= Acknowledgments\n\n");
             conv.visit_env_content(&node, output);
             output.push('\n');
@@ -269,7 +307,7 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             output.push('\n');
         }
         "dedication" | "acknowledgements" | "acknowledgments" | "acknowledgement"
-        | "ack" | "acks" => {
+        | "ack" | "acks" | "DedicatoriaAutorI" | "DedicatoriaAutorII" => {
             let title = match env_str {
                 "dedication" => "Dedication",
                 "acknowledgements" => "Acknowledgements",
@@ -278,6 +316,14 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             let _ = writeln!(output, "\n= {}\n", title);
             conv.visit_env_content(&node, output);
             output.push('\n');
+        }
+        "Epigrafe" => {
+            let mut content = String::new();
+            conv.visit_env_content(&node, &mut content);
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                let _ = write!(output, "\n#quote[{}]\n", trimmed);
+            }
         }
         "sidewaystable" => {
             convert_table(conv, &node, output);

@@ -22,7 +22,6 @@ pub use preprocess::{extract_let_definitions, preprocess_typst, TypstDefDb};
 
 use markup::{convert_markup_node, flush_pending_bibliography_heading};
 use math::convert_math_node;
-use utils::wrap_in_document;
 
 // =============================================================================
 // Warning System (mirroring latex2typst's design)

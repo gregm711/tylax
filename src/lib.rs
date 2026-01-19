@@ -145,7 +145,7 @@ pub fn latex_to_typst(input: &str) -> String {
 /// # Returns
 /// Typst math code
 pub fn latex_to_typst_with_options(input: &str, options: &L2TOptions) -> String {
-    convert_math_with_ast_options(input, options.clone())
+    convert_math_with_ast_options(input, options)
 }
 
 /// Convert a complete LaTeX document to Typst
@@ -155,7 +155,7 @@ pub fn latex_document_to_typst(input: &str) -> String {
 
 /// Convert a complete LaTeX document to Typst with custom options
 pub fn latex_document_to_typst_with_options(input: &str, options: &L2TOptions) -> String {
-    convert_document_with_ast_options(input, options.clone())
+    convert_document_with_ast_options(input, options)
 }
 
 /// Convert with automatic direction detection
