@@ -11,6 +11,19 @@
 
 Tylax 是一个用 Rust 编写的高性能工具，可在 LaTeX 和 Typst 格式之间转换 **数学公式、表格、完整文档和 TikZ 图形**。它专注于静态分析，旨在保留文档结构以便于人工编辑调整。
 
+## 特性
+
+- **宏引擎**: 
+  - **LaTeX**: 支持 `\newcommand`, `\def`, `\ifmmode` 以及复杂嵌套宏的完整展开。
+  - **Typst**: 内置 **Typst 求值器**，在转换前处理 `#let` 绑定、`#for` 循环和条件判断。
+- **双向转换**: LaTeX ↔ Typst (数学公式、文本、表格、图形)
+- **高性能**: 使用 Rust 编写，可编译为 WASM 供 Web 使用。
+- **表格转换**: 支持表格转换和 `multicolumn`、`multirow` 和 `booktabs`等。
+- **图形转换**: 实验性支持 TikZ ↔ CeTZ 转换。
+- **完整文档**: 支持章节、列表、参考文献等完整文档结构。
+
+> **注**: 虽然 Tylax 覆盖了多数 LaTeX 和 Typst 的常用功能，但还是存在未覆盖的情况。如果您遇到转换问题，欢迎提交 [Issue](https://github.com/scipenai/tylax/issues) 并附上最小复现示例。您的反馈对改进工具有很大帮助！谢谢各位使用者！
+
 [English](README.md) | [中文](README_CN.md)
 
 ### 🔗 [在线演示 Demo](https://convert.silkyai.cn)
@@ -55,7 +68,7 @@ t2l tikz input.tex -o output.typ
 在 `Cargo.toml` 中添加：
 ```toml
 [dependencies]
-tylax = "0.1.0"
+tylax = "0.2.0"
 ```
 
 ```rust
@@ -102,25 +115,31 @@ flowchart LR
         
         subgraph L2T ["LaTeX → Typst"]
             direction LR
+            LE[["⚙️ Macro\nEngine"]]
             MP[["🔍 MiTeX\nParser"]]
             LA[("AST")]
             LC{{"Converter"}}
-            MP --> LA --> LC
+            LE --> MP --> LA --> LC
         end
         
         subgraph T2L ["Typst → LaTeX"]
             direction LR
-            TP[["🔍 typst-syntax\nParser"]]
+            subgraph MINIEVAL ["⚙️ MiniEval"]
+                direction TB
+                TP1[["Parse"]]
+                EXEC[["Expand"]]
+                TP1 --> EXEC
+            end
+            TP2[["🔍 typst-syntax\nParser"]]
             TA[("AST")]
             TC{{"Converter"}}
-            TP --> TA --> TC
+            MINIEVAL --> TP2 --> TA --> TC
         end
         
         subgraph FEATURES ["📦 Features"]
             direction TB
             F1["Tables\n(Coverage Tracking)"]
             F2["TikZ/CeTZ\n(Coord Parser)"]
-            F3["Macros\n(Recursive Expander)"]
             F4["References"]
         end
     end
@@ -131,10 +150,10 @@ flowchart LR
         LaTeXOut["LaTeX\n.tex"]
     end
 
-    LaTeX --> MP
+    LaTeX --> LE
     LC --> TypstOut
     
-    Typst --> TP
+    Typst --> MINIEVAL
     TC --> LaTeXOut
     
     LC -.- FEATURES
@@ -146,9 +165,11 @@ flowchart LR
     style L2T fill:#e1f5fe,stroke:#0288d1
     style T2L fill:#fce4ec,stroke:#c2185b
     style FEATURES fill:#f3e5f5,stroke:#7b1fa2
+    style MINIEVAL fill:#ffebee,stroke:#c62828
     
     style MP fill:#bbdefb,stroke:#1976d2
-    style TP fill:#f8bbd0,stroke:#c2185b
+    style TP1 fill:#f8bbd0,stroke:#c2185b
+    style TP2 fill:#f8bbd0,stroke:#c2185b
     style LA fill:#fff9c4,stroke:#fbc02d
     style TA fill:#fff9c4,stroke:#fbc02d
     style LC fill:#c8e6c9,stroke:#388e3c
@@ -199,4 +220,5 @@ flowchart LR
 - [MiTeX](https://github.com/mitex-rs/mitex) - 高性能 LaTeX 解析器
 - [tex2typst](https://github.com/qwinsi/tex2typst) - 符号映射参考
 - [typst](https://github.com/typst/typst) - 官方 Typst 语法解析器
+- [typst-hs](https://github.com/jgm/typst-hs) - 求值器的设计参考
 - [Pandoc](https://github.com/jgm/pandoc) - 文档结构转换参考

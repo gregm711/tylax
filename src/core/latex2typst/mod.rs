@@ -31,6 +31,7 @@
 
 // Submodules
 pub mod context;
+pub mod engine;
 pub mod environment;
 pub mod markup;
 pub mod math;
@@ -181,6 +182,47 @@ pub fn latex_math_to_typst_with_options(input: &str, options: L2TOptions) -> Str
 pub fn latex_math_to_typst_with_report(input: &str) -> crate::utils::loss::ConversionReport {
     let mut converter = LatexConverter::new();
     converter.convert_math_with_report(input)
+}
+
+/// Convert LaTeX document to Typst with macro expansion
+///
+/// This explicitly enables macro expansion (using the token-based engine).
+/// Macros defined with `\newcommand`, `\def`, etc. are expanded before conversion.
+pub fn latex_to_typst_with_eval(input: &str) -> String {
+    let options = L2TOptions {
+        expand_macros: true,
+        ..Default::default()
+    };
+    let mut converter = LatexConverter::with_options(options);
+    converter.convert_document(input)
+}
+
+/// Convert LaTeX math to Typst with macro expansion
+///
+/// This explicitly enables macro expansion (using the token-based engine).
+/// Math mode is enabled in the expansion engine, affecting `\ifmmode` conditionals.
+pub fn latex_math_to_typst_with_eval(input: &str) -> String {
+    let options = L2TOptions {
+        expand_macros: true,
+        ..Default::default()
+    };
+    let mut converter = LatexConverter::with_options(options);
+    converter.convert_math(input)
+}
+
+/// Convert LaTeX to Typst with full diagnostics
+///
+/// Returns both the converted output and any warnings generated during conversion.
+/// This is the recommended function for applications that need to report conversion issues.
+pub fn latex_to_typst_with_diagnostics(input: &str) -> ConversionResult {
+    let mut converter = LatexConverter::new();
+    converter.convert_document_with_diagnostics(input)
+}
+
+/// Convert LaTeX math to Typst with full diagnostics
+pub fn latex_math_to_typst_with_diagnostics(input: &str) -> ConversionResult {
+    let mut converter = LatexConverter::new();
+    converter.convert_math_with_diagnostics(input)
 }
 
 // =============================================================================

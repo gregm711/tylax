@@ -11,6 +11,19 @@
 
 Tylax is a high-performance tool written in Rust that converts **mathematical formulas, tables, full documents, and TikZ graphics** between LaTeX and Typst formats. It focuses on static analysis to preserve the document structure for manual editing and adjustment.
 
+## Features
+
+- **Macro Engine**: 
+  - **LaTeX**: Full expansion support for `\newcommand`, `\def`, `\ifmmode`, and complex nested macros.
+  - **Typst**: Integrated **Typst Evaluator** handles `#let`, `#for` loops, and conditionals before conversion.
+- **Bidirectional**: LaTeX ↔ Typst (Math, Text, Tables, Graphics)
+- **High Performance**: Written in Rust, compilable to WASM for web usage.
+- **Complex Tables**: Support for `multicolumn`, `multirow`, and `booktabs`.
+- **Graphics**: Experimental TikZ ↔ CeTZ conversion.
+- **Full Document**: Handles chapters, sections, lists, and bibliographies.
+
+> **Note**: While Tylax covers most common LaTeX and Typst features, there are still uncovered edge cases. If you encounter any conversion issues, please [open an issue](https://github.com/scipenai/tylax/issues) with a minimal example. Your feedback helps improve the tool! Thank you!
+
 [English](README.md) | [中文](README_CN.md)
 
 ### 🔗 [Try Online Demo](https://convert.silkyai.cn)
@@ -55,7 +68,7 @@ t2l tikz input.tex -o output.typ
 Add to `Cargo.toml`:
 ```toml
 [dependencies]
-tylax = "0.1.0"
+tylax = "0.2.0"
 ```
 
 ```rust
@@ -102,25 +115,31 @@ flowchart LR
         
         subgraph L2T ["LaTeX → Typst"]
             direction LR
+            LE[["⚙️ Macro\nEngine"]]
             MP[["🔍 MiTeX\nParser"]]
             LA[("AST")]
             LC{{"Converter"}}
-            MP --> LA --> LC
+            LE --> MP --> LA --> LC
         end
         
         subgraph T2L ["Typst → LaTeX"]
             direction LR
-            TP[["🔍 typst-syntax\nParser"]]
+            subgraph MINIEVAL ["⚙️ MiniEval"]
+                direction TB
+                TP1[["Parse"]]
+                EXEC[["Expand"]]
+                TP1 --> EXEC
+            end
+            TP2[["🔍 typst-syntax\nParser"]]
             TA[("AST")]
             TC{{"Converter"}}
-            TP --> TA --> TC
+            MINIEVAL --> TP2 --> TA --> TC
         end
         
         subgraph FEATURES ["📦 Features"]
             direction TB
             F1["Tables\n(Coverage Tracking)"]
             F2["TikZ/CeTZ\n(Coord Parser)"]
-            F3["Macros\n(Recursive Expander)"]
             F4["References"]
         end
     end
@@ -131,10 +150,10 @@ flowchart LR
         LaTeXOut["LaTeX\n.tex"]
     end
 
-    LaTeX --> MP
+    LaTeX --> LE
     LC --> TypstOut
     
-    Typst --> TP
+    Typst --> MINIEVAL
     TC --> LaTeXOut
     
     LC -.- FEATURES
@@ -146,9 +165,11 @@ flowchart LR
     style L2T fill:#e1f5fe,stroke:#0288d1
     style T2L fill:#fce4ec,stroke:#c2185b
     style FEATURES fill:#f3e5f5,stroke:#7b1fa2
+    style MINIEVAL fill:#ffebee,stroke:#c62828
     
     style MP fill:#bbdefb,stroke:#1976d2
-    style TP fill:#f8bbd0,stroke:#c2185b
+    style TP1 fill:#f8bbd0,stroke:#c2185b
+    style TP2 fill:#f8bbd0,stroke:#c2185b
     style LA fill:#fff9c4,stroke:#fbc02d
     style TA fill:#fff9c4,stroke:#fbc02d
     style LC fill:#c8e6c9,stroke:#388e3c
@@ -226,4 +247,5 @@ This project builds upon the following excellent projects:
 - [MiTeX](https://github.com/mitex-rs/mitex) - High-performance LaTeX parser
 - [tex2typst](https://github.com/qwinsi/tex2typst) - Symbol mapping reference
 - [typst](https://github.com/typst/typst) - Official Typst syntax parser
+- [typst-hs](https://github.com/jgm/typst-hs) - Design reference for the evaluator
 - [Pandoc](https://github.com/jgm/pandoc) - Document structure conversion reference

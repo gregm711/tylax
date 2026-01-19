@@ -1786,8 +1786,8 @@ pub fn convert_tikz_to_cetz(input: &str) -> String {
     let commands = parse_tikz_picture(input);
     let mut output = String::new();
 
-    // CeTZ preamble
-    output.push_str("#import \"@preview/cetz:0.2.2\": canvas, draw\n\n");
+    // CeTZ preamble (using 0.3.4 for better coordinate handling)
+    output.push_str("#import \"@preview/cetz:0.3.4\": canvas, draw\n\n");
     output.push_str("#canvas({\n");
     output.push_str("  import draw: *\n\n");
 
@@ -1894,7 +1894,9 @@ fn convert_node_command_with_indent(output: &mut String, node: &TikZNode, indent
             .unwrap_or_else(|| "(0, 0)".to_string())
     };
 
-    let text = node.text.replace("$", "\\$").replace("#", "\\#");
+    // In Typst content blocks [...], $...$ is math mode - don't escape it
+    // Only escape # which has special meaning in Typst
+    let text = node.text.replace("#", "\\#");
 
     let mut opts = Vec::new();
     if let Some(ref anchor) = node.options.anchor {
@@ -2038,7 +2040,8 @@ fn convert_draw_command_impl(
 
             PathSegment::Node { text, anchor } => {
                 let pos = current_pos.to_cetz();
-                let escaped_text = text.replace('$', "\\$").replace('#', "\\#");
+                // In Typst content blocks [...], $...$ is math mode - don't escape it
+                let escaped_text = text.replace('#', "\\#");
 
                 if let Some(ref anch) = anchor {
                     // Apply TikZ to CeTZ anchor mapping

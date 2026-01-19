@@ -1,5 +1,7 @@
 //! Regression tests for table parsing
 
+use super::cell::GridCell;
+use super::hline::{clean_cell_content, clean_hline_args};
 use super::*;
 
 #[test]

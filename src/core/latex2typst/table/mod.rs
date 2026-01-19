@@ -33,6 +33,5 @@ mod parser;
 mod tests;
 
 // Re-export public API
-pub use cell::{CellAlign, GridCell};
-pub use hline::{clean_cell_content, clean_hline_args, extract_hline_range, HLine};
-pub use parser::{parse_with_grid_parser, GridRow, TableGridParser};
+pub use cell::CellAlign;
+pub use parser::parse_with_grid_parser;

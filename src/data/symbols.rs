@@ -794,9 +794,9 @@ lazy_static! {
         m.insert("\\Vert", "bar.v.double");
         m.insert("\\lVert", "bar.v.double");
         m.insert("\\rVert", "bar.v.double");
-        // Angle brackets
-        m.insert("\\langle", "angle.l");
-        m.insert("\\rangle", "angle.r");
+        // Angle brackets (chevron in Typst 0.14+)
+        m.insert("\\langle", "chevron.l");
+        m.insert("\\rangle", "chevron.r");
         // Floor and ceiling
         m.insert("\\lfloor", "floor.l");
         m.insert("\\rfloor", "floor.r");

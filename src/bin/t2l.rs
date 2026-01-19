@@ -10,9 +10,10 @@ use tylax::{
     convert_auto, convert_auto_document, detect_format,
     diagnostics::{check_latex, format_diagnostics},
     latex_document_to_typst, latex_math_to_typst_with_report, latex_to_typst,
-    latex_to_typst_with_report,
+    latex_to_typst_with_diagnostics, latex_to_typst_with_report,
     tikz::{convert_cetz_to_tikz, convert_tikz_to_cetz, is_cetz_code},
     typst_document_to_latex, typst_to_latex, typst_to_latex_ir, typst_to_latex_ir_with_report,
+    typst_to_latex_with_diagnostics, CliDiagnostic, T2LOptions,
     utils::repair::{AiRepairConfig, maybe_repair_typst_to_latex},
     utils::loss::{LossKind, LossRecord, LossReport, LOSS_MARKER_PREFIX},
     utils::latex_analysis::metrics_source as latex_metrics_source,
@@ -88,6 +89,23 @@ struct Cli {
     /// Use colored output (for check mode)
     #[arg(long, default_value_t = true)]
     color: bool,
+
+    /// Disable MiniEval preprocessing for Typst scripting features (loops, functions)
+    /// By default, MiniEval is enabled for T2L conversions to expand #let, #for, #if, etc.
+    #[arg(long)]
+    no_eval: bool,
+
+    /// Strict mode: exit with error if any conversion warnings occur
+    #[arg(long)]
+    strict: bool,
+
+    /// Quiet mode: suppress warning output to stderr
+    #[arg(short, long)]
+    quiet: bool,
+
+    /// Embed warnings as comments in the output file
+    #[arg(long)]
+    embed_warnings: bool,
 }
 
 #[cfg(feature = "cli")]
@@ -319,100 +337,104 @@ fn main() -> io::Result<()> {
     let mut loss_report: Option<LossReport> = None;
     let mut post_report: Option<LossReport> = None;
 
+    let mut diagnostics: Vec<CliDiagnostic> = Vec::new();
+    // Determine if this is a full document based on content or flag
+    let is_full_document = cli.full_document || is_latex_document(&input);
+
     // Convert
-    let mut result = if cli.full_document {
-        match direction {
-            Direction::L2t => {
-                if cli.auto_repair || cli.loss_log.is_some() || cli.post_repair_log.is_some() {
-                    let report = latex_to_typst_with_report(&input);
-                    loss_report = Some(report.report.clone());
-                    let repaired = tylax::utils::repair::maybe_repair_latex_to_typst(
-                        &input,
-                        &report.content,
-                        &report.report,
-                        &repair_config,
-                    );
-                    if cli.post_repair_log.is_some() {
-                        post_report = Some(build_post_report_typst(&repaired));
-                    }
-                    repaired
-                } else {
-                    latex_document_to_typst(&input)
+    let mut result = match direction {
+        Direction::L2t => {
+            if cli.auto_repair || cli.loss_log.is_some() || cli.post_repair_log.is_some() {
+                let report = latex_to_typst_with_report(&input);
+                loss_report = Some(report.report.clone());
+                let repaired = tylax::utils::repair::maybe_repair_latex_to_typst(
+                    &input,
+                    &report.content,
+                    &report.report,
+                    &repair_config,
+                );
+                if cli.post_repair_log.is_some() {
+                    post_report = Some(build_post_report_typst(&repaired));
                 }
+                repaired
+            } else {
+                let conv_result = latex_to_typst_with_diagnostics(&input);
+                diagnostics = conv_result
+                    .warnings
+                    .into_iter()
+                    .map(CliDiagnostic::from)
+                    .collect();
+                conv_result.output
             }
-            Direction::T2l => {
-                let use_ir = cli.ir
-                    || cli.auto_repair
-                    || cli.loss_log.is_some()
-                    || cli.post_repair_log.is_some();
-                if cli.auto_repair || cli.loss_log.is_some() || cli.post_repair_log.is_some() {
-                    let report = typst_to_latex_ir_with_report(&input, true);
-                    loss_report = Some(report.report.clone());
-                    let repaired = maybe_repair_typst_to_latex(
-                        &input,
-                        &report.content,
-                        &report.report,
-                        &repair_config,
-                    );
-                    if cli.post_repair_log.is_some() {
-                        post_report = Some(build_post_report_latex(&repaired));
-                    }
-                    repaired
-                } else if use_ir {
-                    typst_to_latex_ir(&input, true)
-                } else {
-                    typst_document_to_latex(&input)
-                }
-            }
-            Direction::Auto => convert_auto_document(&input).0,
         }
-    } else {
-        match direction {
-            Direction::L2t => {
-                if cli.auto_repair || cli.loss_log.is_some() || cli.post_repair_log.is_some() {
-                    let report = latex_math_to_typst_with_report(&input);
-                    loss_report = Some(report.report.clone());
-                    let repaired = tylax::utils::repair::maybe_repair_latex_to_typst(
-                        &input,
-                        &report.content,
-                        &report.report,
-                        &repair_config,
-                    );
-                    if cli.post_repair_log.is_some() {
-                        post_report = Some(build_post_report_typst(&repaired));
-                    }
-                    repaired
-                } else {
-                    latex_to_typst(&input)
+        Direction::T2l => {
+            let options = if is_full_document {
+                T2LOptions::full_document()
+            } else {
+                T2LOptions::default()
+            };
+            let use_ir = cli.ir
+                || cli.auto_repair
+                || cli.loss_log.is_some()
+                || cli.post_repair_log.is_some();
+            if cli.auto_repair || cli.loss_log.is_some() || cli.post_repair_log.is_some() {
+                let report = typst_to_latex_ir_with_report(&input, is_full_document);
+                loss_report = Some(report.report.clone());
+                let repaired = maybe_repair_typst_to_latex(
+                    &input,
+                    &report.content,
+                    &report.report,
+                    &repair_config,
+                );
+                if cli.post_repair_log.is_some() {
+                    post_report = Some(build_post_report_latex(&repaired));
                 }
-            }
-            Direction::T2l => {
-                let use_ir = cli.ir
-                    || cli.auto_repair
-                    || cli.loss_log.is_some()
-                    || cli.post_repair_log.is_some();
-                if cli.auto_repair || cli.loss_log.is_some() || cli.post_repair_log.is_some() {
-                    let report = typst_to_latex_ir_with_report(&input, false);
-                    loss_report = Some(report.report.clone());
-                    let repaired = maybe_repair_typst_to_latex(
-                        &input,
-                        &report.content,
-                        &report.report,
-                        &repair_config,
-                    );
-                    if cli.post_repair_log.is_some() {
-                        post_report = Some(build_post_report_latex(&repaired));
-                    }
-                    repaired
-                } else if use_ir {
-                    typst_to_latex_ir(&input, false)
+                repaired
+            } else if use_ir {
+                typst_to_latex_ir(&input, is_full_document)
+            } else if !cli.no_eval {
+                let conv_result = typst_to_latex_with_diagnostics(&input, &options);
+                diagnostics = conv_result
+                    .warnings
+                    .into_iter()
+                    .map(CliDiagnostic::from)
+                    .collect();
+                conv_result.output
+            } else {
+                if is_full_document {
+                    typst_document_to_latex(&input)
                 } else {
                     typst_to_latex(&input)
                 }
             }
-            Direction::Auto => convert_auto(&input).0,
+        }
+        Direction::Auto => {
+            if is_full_document {
+                convert_auto_document(&input).0
+            } else {
+                convert_auto(&input).0
+            }
         }
     };
+
+    // Print diagnostics to stderr (unless quiet mode)
+    if !cli.quiet && !diagnostics.is_empty() {
+        print_diagnostics_to_stderr(&diagnostics, cli.color);
+    }
+
+    // Check strict mode
+    if cli.strict && !diagnostics.is_empty() {
+        eprintln!(
+            "Error: {} conversion warning(s) in strict mode",
+            diagnostics.len()
+        );
+        std::process::exit(1);
+    }
+
+    // Embed diagnostics as comments if requested
+    if cli.embed_warnings && !diagnostics.is_empty() {
+        result = embed_diagnostics_as_comments(&result, &diagnostics);
+    }
 
     if let (Some(path), Some(report)) = (cli.loss_log.as_ref(), loss_report.as_ref()) {
         let serialized = serde_json::to_string_pretty(report)
@@ -505,7 +527,15 @@ fn main() -> io::Result<()> {
         Some(path) => {
             let mut file = fs::File::create(&path)?;
             writeln!(file, "{}", result)?;
-            eprintln!("✓ Output written to: {}", path);
+            if diagnostics.is_empty() {
+                eprintln!("✓ Output written to: {}", path);
+            } else {
+                eprintln!(
+                    "⚠ Output written to: {} ({} warning(s))",
+                    path,
+                    diagnostics.len()
+                );
+            }
         }
         None => {
             println!("{}", result);
@@ -1825,6 +1855,19 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
     Ok(())
 }
 
+/// Detect if input is a full LaTeX document (vs math snippet)
+#[cfg(feature = "cli")]
+fn is_latex_document(input: &str) -> bool {
+    // Check for document structure indicators
+    input.contains("\\documentclass")
+        || input.contains("\\begin{document}")
+        || input.contains("\\section")
+        || input.contains("\\chapter")
+        || input.contains("\\title")
+        || input.contains("\\maketitle")
+        || input.contains("\\usepackage")
+}
+
 #[cfg(feature = "cli")]
 fn pretty_print(input: &str) -> String {
     // Simple pretty printing: normalize indentation and spacing
@@ -1893,6 +1936,53 @@ fn build_post_report_latex(output: &str) -> LossReport {
         ));
     }
     LossReport::new("typst", "latex", records, Vec::new())
+}
+
+/// Print diagnostics to stderr with optional color coding (unified for L2T and T2L).
+#[cfg(feature = "cli")]
+fn print_diagnostics_to_stderr(diagnostics: &[CliDiagnostic], use_color: bool) {
+    eprintln!();
+    eprintln!(
+        "{}Conversion Warnings ({}):{}",
+        if use_color { "\x1b[33m" } else { "" },
+        diagnostics.len(),
+        if use_color { "\x1b[0m" } else { "" }
+    );
+    eprintln!();
+
+    for diag in diagnostics {
+        let color = if use_color { diag.color_code() } else { "" };
+        let reset = if use_color { "\x1b[0m" } else { "" };
+
+        if let Some(ref loc) = diag.location {
+            eprintln!(
+                "  {}[{}]{} {}: {}",
+                color, diag.kind, reset, loc, diag.message
+            );
+        } else {
+            eprintln!("  {}[{}]{} {}", color, diag.kind, reset, diag.message);
+        }
+    }
+    eprintln!();
+}
+
+/// Embed diagnostics as comments at the end of the output (unified for L2T and T2L).
+#[cfg(feature = "cli")]
+fn embed_diagnostics_as_comments(output: &str, diagnostics: &[CliDiagnostic]) -> String {
+    let mut result = output.to_string();
+    result.push_str("\n\n// ═══════════════════════════════════════════════════════════════\n");
+    result.push_str("// Conversion Warnings\n");
+    result.push_str("// ═══════════════════════════════════════════════════════════════\n");
+
+    for diag in diagnostics {
+        if let Some(ref loc) = diag.location {
+            result.push_str(&format!("// [{}] {}: {}\n", diag.kind, loc, diag.message));
+        } else {
+            result.push_str(&format!("// [{}] {}\n", diag.kind, diag.message));
+        }
+    }
+
+    result
 }
 
 #[cfg(not(feature = "cli"))]

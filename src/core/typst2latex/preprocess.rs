@@ -687,18 +687,6 @@ pub fn preprocess_typst(input: &str) -> String {
     expander.expand(&cleaned)
 }
 
-/// Expand variable references in Typst source (now uses AST)
-pub fn expand_variables(input: &str, db: &TypstDefDb) -> String {
-    let mut expander = MacroExpander::new(db);
-    expander.expand(input)
-}
-
-/// Expand function calls with defined functions (now uses AST)
-pub fn expand_function_calls(input: &str, db: &TypstDefDb) -> String {
-    let mut expander = MacroExpander::new(db);
-    expander.expand(input)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -715,17 +703,6 @@ Some text with #x"#;
         assert_eq!(db.get_variable("name"), Some("\"hello\""));
         assert!(!cleaned.contains("#let x"));
         assert!(cleaned.contains("Some text"));
-    }
-
-    #[test]
-    fn test_expand_variables_ast() {
-        let mut db = TypstDefDb::new();
-        db.define_variable("pi_approx", "3.14");
-
-        let input = "The value is #pi_approx";
-        let result = expand_variables(input, &db);
-
-        assert!(result.contains("3.14"));
     }
 
     #[test]

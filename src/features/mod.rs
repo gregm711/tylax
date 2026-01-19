@@ -6,12 +6,10 @@
 //! - Citations and cross-references
 //! - BibTeX parsing
 //! - TikZ to CeTZ conversion
-//! - Macro expansion
 //! - Document templates
 
 pub mod bibtex;
 pub mod images;
-pub mod macros;
 pub mod refs;
 pub mod tables;
 pub mod templates;

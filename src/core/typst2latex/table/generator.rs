@@ -110,6 +110,7 @@ impl LatexTableGenerator {
     }
 
     /// Add a full horizontal line
+    #[allow(dead_code)]
     pub fn add_full_hline(&mut self) {
         self.pending_hlines.push(LatexHLine::full());
     }

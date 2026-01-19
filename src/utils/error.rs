@@ -101,6 +101,78 @@ impl fmt::Display for ConversionWarning {
     }
 }
 
+// =============================================================================
+// Unified CLI Diagnostic System
+// =============================================================================
+
+/// Severity level for CLI diagnostics (determines coloring and behavior).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticSeverity {
+    /// Critical errors (red) - e.g., undefined variables, division by zero
+    Error,
+    /// Warnings (yellow) - e.g., partial expansion, type mismatch
+    Warning,
+    /// Informational (cyan) - e.g., skipped blocks, fallback behavior
+    Info,
+}
+
+/// Unified diagnostic type for CLI output.
+///
+/// This provides a common interface for warnings from both L2T and T2L
+/// conversions, enabling unified handling in the CLI layer.
+#[derive(Debug, Clone)]
+pub struct CliDiagnostic {
+    /// Severity level (for coloring and strict mode)
+    pub severity: DiagnosticSeverity,
+    /// Warning kind as string (e.g., "undefined variable", "unsupported macro")
+    pub kind: String,
+    /// Human-readable message
+    pub message: String,
+    /// Location context (e.g., "\\foo", "42..56", "line 10")
+    pub location: Option<String>,
+}
+
+impl CliDiagnostic {
+    /// Create a new diagnostic.
+    pub fn new(
+        severity: DiagnosticSeverity,
+        kind: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            severity,
+            kind: kind.into(),
+            message: message.into(),
+            location: None,
+        }
+    }
+
+    /// Add location context.
+    pub fn with_location(mut self, location: impl Into<String>) -> Self {
+        self.location = Some(location.into());
+        self
+    }
+
+    /// Get ANSI color code for this diagnostic's severity.
+    pub fn color_code(&self) -> &'static str {
+        match self.severity {
+            DiagnosticSeverity::Error => "\x1b[31m",   // red
+            DiagnosticSeverity::Warning => "\x1b[33m", // yellow
+            DiagnosticSeverity::Info => "\x1b[36m",    // cyan
+        }
+    }
+}
+
+impl fmt::Display for CliDiagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(ref loc) = self.location {
+            write!(f, "[{}] {}: {}", self.kind, loc, self.message)
+        } else {
+            write!(f, "[{}] {}", self.kind, self.message)
+        }
+    }
+}
+
 /// Conversion output with optional warnings
 #[derive(Debug, Clone)]
 pub struct ConversionOutput {

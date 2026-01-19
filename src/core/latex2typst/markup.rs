@@ -255,6 +255,23 @@ fn write_inline_raw(output: &mut String, content: &str, lang: Option<&str>) {
     let _ = write!(output, "#raw(\"{}\")", escaped);
 }
 
+/// Protect content that contains commas by wrapping in `{}`.
+///
+/// In Typst function calls like `sqrt(content)`, a comma inside `content`
+/// would be parsed as an argument separator. Wrapping with `{}` prevents this:
+/// - `sqrt(a, b)` → parsed as 2 arguments (error for sqrt)
+/// - `sqrt({a, b})` → parsed as 1 argument containing "a, b"
+///
+/// This function only adds `{}` when necessary (when content contains `,`).
+#[inline]
+fn protect_comma(content: &str) -> String {
+    let trimmed = content.trim();
+    if trimmed.contains(',') {
+        format!("{{{}}}", trimmed)
+    } else {
+        trimmed.to_string()
+    }
+}
 /// Convert a LaTeX command
 pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &mut String) {
     let node = match &elem {
@@ -2377,10 +2394,11 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "sqrt" => {
             let opt = conv.get_optional_arg(&cmd, 0);
             let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let protected = protect_comma(&content);
             if let Some(n) = opt {
-                let _ = write!(output, "root({}, {})", n, content.trim());
+                let _ = write!(output, "root({}, {})", n, protected);
             } else {
-                let _ = write!(output, "sqrt({})", content.trim());
+                let _ = write!(output, "sqrt({})", protected);
             }
         }
 
@@ -2915,6 +2933,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 output.push_str("\\_");
             }
         }
+        "*" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                output.push('*');
+            } else {
+                output.push_str("\\*");
+            }
+        }
+        "@" => output.push_str("\\@"),
         "{" => output.push('{'),
         "}" => output.push('}'),
 
@@ -3604,8 +3630,8 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "mod" => output.push_str("mod "),
 
         // Brackets and delimiters
-        "langle" => output.push_str("angle.l "),
-        "rangle" => output.push_str("angle.r "),
+        "langle" => output.push_str("chevron.l "),
+        "rangle" => output.push_str("chevron.r "),
         "lfloor" => output.push_str("floor.l "),
         "rfloor" => output.push_str("floor.r "),
         "lceil" => output.push_str("ceil.l "),
