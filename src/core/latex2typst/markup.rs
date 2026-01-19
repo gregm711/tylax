@@ -5,6 +5,7 @@
 use mitex_parser::syntax::{CmdItem, SyntaxElement};
 use rowan::ast::AstNode;
 use std::fmt::Write;
+use std::time::Instant;
 
 use crate::data::colors::{
     is_named_color, parse_color_with_model, sanitize_color_expression, sanitize_color_identifier,
@@ -29,6 +30,29 @@ use super::utils::{
 };
 use crate::features::images::ImageAttributes;
 use crate::utils::loss::{LossKind, LOSS_MARKER_PREFIX};
+
+struct ProfileGuard<'a> {
+    label: &'a str,
+    start: Instant,
+}
+
+impl<'a> ProfileGuard<'a> {
+    fn new(label: &'a str) -> Self {
+        ProfileGuard {
+            label,
+            start: Instant::now(),
+        }
+    }
+}
+
+impl<'a> Drop for ProfileGuard<'a> {
+    fn drop(&mut self) {
+        let elapsed = self.start.elapsed().as_secs_f64();
+        if elapsed >= 0.05 {
+            eprintln!("[tylax] cmd {} total {:.3}s", self.label, elapsed);
+        }
+    }
+}
 
 /// Convert a command symbol (e.g., \alpha, \beta, or special chars like \$, \%)
 pub fn convert_command_sym(conv: &mut LatexConverter, elem: SyntaxElement, output: &mut String) {
@@ -259,6 +283,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         return;
     }
 
+    let _profile_guard = if conv.state.profile_enabled {
+        Some(ProfileGuard::new(base_name))
+    } else {
+        None
+    };
+
     if base_name == "degree"
         && matches!(
             conv.state.template_kind,
@@ -453,6 +483,17 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
 
     // Handle document commands
     match base_name {
+        "newtheorem" => {
+            if let (Some(env), Some(title)) =
+                (conv.get_required_arg(&cmd, 0), conv.get_required_arg(&cmd, 1))
+            {
+                let display = super::utils::convert_caption_text(&title);
+                conv.state
+                    .custom_theorems
+                    .insert(env.trim().to_string(), display.trim().to_string());
+            }
+            return;
+        }
         // Section commands - Part gets special formatting with Roman numerals
         "part" => {
             let title = conv
@@ -470,7 +511,17 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             output.push_str("]\n");
             output.push_str("#v(2em)\n\n");
         }
-        "chapter" => {
+        "extrachapter" => {
+            let title = conv
+                .convert_required_arg(&cmd, 0)
+                .or_else(|| conv.get_required_arg(&cmd, 0))
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty());
+            if let Some(title) = title {
+                let _ = write!(output, "\n#heading(numbering: none)[{}]\n", title);
+            }
+        }
+        "chapter" | "chpt" => {
             let title = conv
                 .convert_required_arg(&cmd, 0)
                 .or_else(|| conv.get_required_arg(&cmd, 0))
@@ -555,6 +606,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 let _ = write!(output, "#strong[{}] ", content);
             }
         }
+        "caps" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            if !content.trim().is_empty() {
+                let _ = write!(output, "#smallcaps[{}] ", content.trim());
+            }
+        }
         "textit" | "it" | "emph" => {
             if matches!(conv.state.mode, ConversionMode::Math) {
                 write_math_text(conv, &cmd, output);
@@ -563,7 +620,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 let _ = write!(output, "#emph[{}] ", content);
             }
         }
-        "MakeUppercase" | "makeuppercase" => {
+        "MakeUppercase" | "makeuppercase" | "MakeTextUppercase" | "maketextuppercase" => {
             let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
             if !content.trim().is_empty() {
                 let _ = write!(output, "upper({}) ", content.trim());
@@ -581,6 +638,27 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             } else {
                 let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
                 write_inline_raw(output, content.trim(), None);
+            }
+        }
+        "cramped" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            if !content.trim().is_empty() {
+                output.push_str(content.trim());
+                output.push(' ');
+            }
+        }
+        "mccorrect" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            if !content.trim().is_empty() {
+                output.push_str(content.trim());
+                output.push(' ');
+            }
+        }
+        "textlatin" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            if !content.trim().is_empty() {
+                output.push_str(content.trim());
+                output.push(' ');
             }
         }
         "code" => {
@@ -643,6 +721,19 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 .unwrap_or_default();
             let _ = write!(output, "#sub[{}]", content.trim());
         }
+        "ding" => {
+            let arg = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let symbol = match arg.trim() {
+                "51" => "✓",
+                "55" => "✗",
+                _ => "",
+            };
+            if !symbol.is_empty() {
+                output.push_str(symbol);
+            } else if !arg.trim().is_empty() {
+                let _ = write!(output, "[{}]", arg.trim());
+            }
+        }
         "nicefrac" => {
             let num = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let den = conv.get_required_arg(&cmd, 1).unwrap_or_default();
@@ -700,12 +791,24 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "bstctlcite" => {
             return;
         }
+        "tablefootmark" => {
+            output.push_str("#footnote[]");
+        }
         "marginnote" => {
             if let Some(content) = conv.convert_required_arg(&cmd, 0) {
                 if !content.trim().is_empty() {
                     let _ = write!(output, "#footnote[{}]", content.trim());
                 }
             }
+        }
+        "textcircled" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            if !content.trim().is_empty() {
+                let _ = write!(output, "({})", content.trim());
+            }
+        }
+        "JPCM" => {
+            output.push_str("JPCM");
         }
         "thanklessauthor" => {
             if let Some(author) = conv.state.author.as_ref() {
@@ -722,6 +825,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "thanklesspublisher" => {
             // Unknown in most documents; ignore.
         }
+        "lhcb" => output.push_str("LHCb"),
+        "pythia" => output.push_str("Pythia"),
+        "evtgen" => output.push_str("EvtGen"),
+        "geant" => output.push_str("Geant"),
         "ce" => {
             if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
                 if conv.state.mode == ConversionMode::Math {
@@ -865,6 +972,62 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             conv.push_thesis_meta("Degree", value);
             return;
         }
+        "degreeaward" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Degree award", text);
+            }
+            return;
+        }
+        "university" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("University", text);
+            }
+            return;
+        }
+        "unilogo" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("University logo", text);
+            }
+            return;
+        }
+        "copyyear" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Copyright year", text);
+            }
+            return;
+        }
+        "defenddate" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Defense date", text);
+            }
+            return;
+        }
+        "rightsstatement" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Rights statement", text);
+            }
+            return;
+        }
+        "publishedas" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Published as", text);
+            }
+            return;
+        }
+        "pocketmaterial" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Pocket material", text);
+            }
+            return;
+        }
         "Supervisor" => {
             let name = conv
                 .get_required_arg_with_braces(&cmd, 0)
@@ -887,6 +1050,13 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 parts.push(dept.trim().to_string());
             }
             conv.push_thesis_meta("Supervisor", parts.join(", "));
+            return;
+        }
+        "supervisor" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Supervisor", text);
+            }
             return;
         }
         "Acceptor" => {
@@ -1202,6 +1372,23 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             // Title rendering is handled by templates or title blocks
             return;
         }
+        "IEEEtitleabstractindextext" => {
+            // Capture abstract/keywords stored for IEEE templates.
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                if conv.state.template_kind != Some(super::context::TemplateKind::Ieee) {
+                    output.push_str(content.trim());
+                }
+            }
+            return;
+        }
+        "IEEEdisplaynontitleabstractindextext" => {
+            // No-op: content already captured by IEEEtitleabstractindextext
+            return;
+        }
+        "IEEEraisesectionheading" => {
+            // Prefer standard section headings; ignore raised heading wrapper.
+            return;
+        }
 
         // Labels and references
         "label" => {
@@ -1219,6 +1406,41 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 return;
             }
             let _ = write!(output, "<{}>", clean_label);
+        }
+        "namedlabel" => {
+            let label = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let text = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            let clean_label = sanitize_label(&label);
+            if !text.trim().is_empty() {
+                output.push_str(text.trim());
+            }
+            if !clean_label.is_empty() {
+                let _ = write!(output, " <{}>", clean_label);
+            }
+        }
+        "IEEEPARstart" => {
+            let first = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let rest = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            if !first.trim().is_empty() || !rest.trim().is_empty() {
+                output.push_str(first.trim());
+                output.push_str(rest.trim());
+            }
+        }
+        "appendices" => {
+            output.push_str("\n// Appendix\n");
+            output.push_str("#counter(heading).update(0)\n");
+            output.push_str("#set heading(numbering: \"A.\")\n\n");
+        }
+        "MR" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                output.push_str(arg.trim());
+                output.push(' ');
+            }
+        }
+        "smash" => {
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                output.push_str(content.trim());
+            }
         }
         "ref" | "autoref" | "cref" | "Cref" => {
             let label = conv.get_required_arg(&cmd, 0).unwrap_or_default();
@@ -1288,6 +1510,11 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                         .collect();
                 }
             }
+            return;
+        }
+        "keywordname" => {
+            output.push_str("Keywords");
+            output.push(' ');
             return;
         }
         "abstract" => {
@@ -1407,6 +1634,11 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 let _ = write!(output, "#link(\"{}\")", url);
             }
         }
+        "hrefurl" => {
+            if let Some(url) = conv.get_required_arg(&cmd, 0) {
+                let _ = write!(output, "#link(\"{}\")[{}]", url, url);
+            }
+        }
         "href" => {
             let url = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let text = conv.get_required_arg(&cmd, 1).unwrap_or_else(|| url.clone());
@@ -1414,7 +1646,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
 
         // Footnotes
-        "footnote" => {
+        "footnote" | "endnote" => {
             let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
             let _ = write!(output, "#footnote[{}]", content);
         }
@@ -1543,6 +1775,13 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
         }
 
+        "centerline" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            if !content.trim().is_empty() {
+                let _ = write!(output, "#align(center)[{}]", content.trim());
+            }
+        }
+
         "rotatebox" => {
             // \rotatebox[origin=c]{90}{content}
             let _opt = conv.get_optional_arg(&cmd, 0);
@@ -1585,6 +1824,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "todo" => {
             let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
             let _ = write!(output, "#text(fill: red)[{}]", content);
+        }
+        "doccmd" | "doccmddef" | "doccmdnoindex" => {
+            let name = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let cmd_text = format!("\\{}", name.trim());
+            let escaped = super::utils::escape_typst_string(&cmd_text);
+            let _ = write!(output, "#raw(\"{}\")", escaped);
         }
         "ab" => {
             let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
@@ -1640,14 +1885,38 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "fill" => {
             output.push_str("#v(1fr)");
         }
+        "hrulefill" => {
+            output.push_str("#line(length: 100%)");
+        }
+        "hrule" => {
+            output.push_str("#line(length: 100%)");
+        }
         "nomname" => {
             output.push_str("Nomenclature");
         }
         "printnomenclature" => {
             // Ignore output; Typst doesn't generate nomenclature here.
         }
+        "theauthor" => {
+            if let Some(author) = conv.state.author.as_ref() {
+                output.push_str(author);
+            }
+        }
+        "thetitle" => {
+            if let Some(title) = conv.state.title.as_ref() {
+                output.push_str(title);
+            }
+        }
+        "thedate" => {
+            if let Some(date) = conv.state.date.as_ref() {
+                output.push_str(date);
+            }
+        }
         "pagenumbering" | "thesistitlepage" | "addcontentsline" => {
             // Ignore pagination and TOC wiring.
+        }
+        "thepage" => {
+            output.push_str("#counter(page).display()");
         }
         "endfirsthead" | "endfoot" | "endlastfoot" => {
             // longtable control commands; ignore.
@@ -1667,6 +1936,231 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
         "makeintropages" => {
             // UCLA intro pages macro; ignore.
+        }
+        "tableofcontents" | "maketableofcontents" | "thesistoc" => {
+            output.push_str("\n#outline()\n");
+        }
+        "makeabstract" => {
+            if let Some(abs) = conv.state.abstract_text.as_ref() {
+                output.push_str("\n= Abstract\n\n");
+                output.push_str(abs.trim());
+                output.push('\n');
+            }
+        }
+        "abstractpage" => {
+            output.push_str("\n= Abstract\n\n");
+        }
+        "acknowledgements" | "acknowledgments" | "thankpage" => {
+            output.push_str("\n= Acknowledgments\n\n");
+        }
+        "dedicationpage" | "thesisDedication" | "Dedicatory" => {
+            output.push_str("\n= Dedication\n\n");
+        }
+        "Declaration" => {
+            output.push_str("\n= Declaration\n\n");
+        }
+        "Certificate" => {
+            output.push_str("\n= Certificate\n\n");
+        }
+        "copyrightPage" | "thesiscopyrightpage" => {
+            output.push_str("\n= Copyright\n\n");
+        }
+        "authorization" => {
+            output.push_str("\n= Authorization\n\n");
+        }
+        "preface" => {
+            output.push_str("\n= Preface\n\n");
+        }
+        "contentspage" | "maketoc" | "customtoc" | "thesistableofcontents" => {
+            output.push_str("\n#outline()\n");
+        }
+        "listofsymbols" | "listsymbolname" | "printlosymbols" => {
+            output.push_str("\n= List of Symbols\n\n");
+        }
+        "listofacronyms" | "listofabbreviation" | "printloabbreviations" => {
+            output.push_str("\n= Abbreviations\n\n");
+        }
+        "listofcontributions" => {
+            output.push_str("\n= Contributions\n\n");
+        }
+        "listoffigandtable" => {
+            output.push_str("\n= List of Figures and Tables\n\n");
+        }
+        "listofalgorithms" => {
+            output.push_str("\n= List of Algorithms\n\n");
+        }
+        "addchap" => {
+            if let Some(title) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "\n#heading(numbering: none)[{}]\n", title.trim());
+            }
+        }
+        "thesisappendix" => {
+            output.push_str("\n// Appendix\n");
+            output.push_str("#counter(heading).update(0)\n");
+            output.push_str("#set heading(numbering: \"A.\")\n\n");
+        }
+        "epigraph" => {
+            let quote = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let author = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            if !quote.trim().is_empty() {
+                let _ = writeln!(output, "\n#quote[{}]\n", quote.trim());
+            }
+            if !author.trim().is_empty() {
+                let _ = writeln!(output, "#align(right)[— {}]\n", author.trim());
+            }
+        }
+        "iowaEpigraph" => {
+            let quote = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let author = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            if !quote.trim().is_empty() {
+                let _ = writeln!(output, "\n#quote[{}]\n", quote.trim());
+            }
+            if !author.trim().is_empty() {
+                let _ = writeln!(output, "#align(right)[— {}]\n", author.trim());
+            }
+        }
+        "iflanguage" => {
+            let then_branch = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            let else_branch = conv.convert_required_arg(&cmd, 2).unwrap_or_default();
+            let trimmed_then = then_branch.trim();
+            if trimmed_then.is_empty() {
+                output.push_str(else_branch.trim());
+            } else {
+                output.push_str(trimmed_then);
+            }
+        }
+        "eject" => {
+            output.push_str("\n#pagebreak()\n");
+        }
+        "dedication" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                if !text.trim().is_empty() {
+                    output.push_str("\n= Dedication\n\n");
+                    output.push_str(text.trim());
+                    output.push('\n');
+                }
+            }
+        }
+        "subject" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Subject", text);
+            }
+        }
+        "examiner" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Examiner", text);
+            }
+        }
+        "cauthortitle" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Author title", text);
+            }
+        }
+        "foreigntitle" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Foreign title", text);
+            }
+        }
+        "thesistitle" | "mytitle" | "ctitle" | "etitle" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                if !text.trim().is_empty() {
+                    conv.state.title = Some(text.trim().to_string());
+                    conv.push_thesis_meta("Title", text);
+                }
+            }
+        }
+        "authornames" | "myname" | "cauthor" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                if !text.trim().is_empty() {
+                    conv.state.author = Some(text.trim().to_string());
+                    conv.push_thesis_meta("Author", text);
+                }
+            }
+        }
+        "caffil" | "myinstitute" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Institution", text);
+            }
+        }
+        "csubject" | "csubjecttitle" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Subject", text);
+            }
+        }
+        "degreeprogram" | "univdegree" | "mytype" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Degree program", text);
+            }
+        }
+        "professorship" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Professorship", text);
+            }
+        }
+        "csupervisor" | "csupervisortitle" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Supervisor", text);
+            }
+        }
+        "cosupervisor" | "secondsupervisor" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Co-supervisor", text);
+            }
+        }
+        "corrector" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_author_text(&raw);
+                conv.push_thesis_meta("Corrector", text);
+            }
+        }
+        "studentid" | "idnum" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Student ID", text);
+            }
+        }
+        "submitdate" | "cdate" | "projectstart" | "projectend" | "timeend" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Date", text);
+            }
+        }
+        "specialization" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Specialization", text);
+            }
+        }
+        "mysection" | "mycurriculum" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Section", text);
+            }
+        }
+        "thesistypeshort" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                conv.push_thesis_meta("Thesis type", text);
+            }
+        }
+        "thesisacronyms" => {
+            output.push_str("\n= Acronyms\n\n");
+        }
+        "thesissymbols" => {
+            output.push_str("\n= Symbols\n\n");
         }
         "date" => {
             if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
@@ -1738,6 +2232,25 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                     "Caption"
                 };
                 let _ = write!(output, "#block[*{}:* {}]", label, caption.trim());
+            }
+        }
+        "resizebox" => {
+            // \resizebox{w}{h}{content} -> drop sizing, keep content
+            let content = conv.convert_required_arg(&cmd, 2).unwrap_or_default();
+            if !content.trim().is_empty() {
+                output.push_str(content.trim());
+            }
+        }
+        "textquote" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            if !content.trim().is_empty() {
+                let _ = write!(output, "\"{}\"", content.trim());
+            }
+        }
+        "arabic" => {
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            if !content.trim().is_empty() {
+                output.push_str(content.trim());
             }
         }
 
@@ -1907,6 +2420,72 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 let _ = write!(output, "underbrace({}) ", arg);
             }
         }
+        "overleftarrow" | "overrightarrow" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "arrow({}) ", arg);
+            }
+        }
+        "overleftrightarrow" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "arrow({}) ", arg);
+            }
+        }
+        "rlap" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                output.push_str(arg.trim());
+                output.push(' ');
+            }
+        }
+        "vertiii" => {
+            if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
+                if conv.state.mode == ConversionMode::Math {
+                    let _ = write!(output, "norm({}) ", arg);
+                } else {
+                    let _ = write!(output, "$ norm({}) $", arg);
+                }
+            }
+        }
+        "quark" => {
+            if conv.state.mode == ConversionMode::Math {
+                output.push_str("dot ");
+            } else {
+                output.push_str("dot");
+            }
+        }
+        "rd" => {
+            if conv.state.mode == ConversionMode::Math {
+                output.push_str("upright(d) ");
+            } else {
+                output.push('d');
+            }
+        }
+        "mevcc" | "gevcc" | "gevc" | "tev" => {
+            let expr = match base_name {
+                "mevcc" => "upright(\"MeV\") / c^2",
+                "gevcc" => "upright(\"GeV\") / c^2",
+                "gevc" => "upright(\"GeV\") / c",
+                "tev" => "upright(\"TeV\")",
+                _ => "",
+            };
+            if expr.is_empty() {
+                return;
+            }
+            if conv.state.mode == ConversionMode::Math {
+                output.push_str(expr);
+                output.push(' ');
+            } else {
+                let _ = write!(output, "$ {} $", expr);
+            }
+        }
+        "Bbar" => {
+            let expr = "overline(B)";
+            if conv.state.mode == ConversionMode::Math {
+                output.push_str(expr);
+                output.push(' ');
+            } else {
+                let _ = write!(output, "$ {} $", expr);
+            }
+        }
         "ddot" => {
             if let Some(arg) = conv.convert_required_arg(&cmd, 0) {
                 let _ = write!(output, "dot.double({}) ", arg);
@@ -1958,13 +2537,45 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 }
             }
         }
-        "mathcal" => {
+        "matSpace" | "polMatSpace" | "matSpaceAux" | "polMatSpaceAux" => {
+            let first = conv.get_optional_arg(&cmd, 0).unwrap_or_default();
+            let second = conv.get_optional_arg(&cmd, 1).unwrap_or_default();
+            let a = if first.trim().is_empty() {
+                String::new()
+            } else {
+                super::latex_math_to_typst(first.trim())
+            };
+            let b = if second.trim().is_empty() {
+                String::new()
+            } else {
+                super::latex_math_to_typst(second.trim())
+            };
+            let base = if base_name.contains("polMatSpace") {
+                "bb(K)[X]"
+            } else {
+                "bb(K)"
+            };
+            if !a.is_empty() && !b.is_empty() {
+                let _ = write!(output, "{}^({} times {}) ", base, a.trim(), b.trim());
+            } else if !a.is_empty() {
+                let _ = write!(output, "{}^({}) ", base, a.trim());
+            } else {
+                output.push_str(base);
+                output.push(' ');
+            }
+        }
+        "mathcal" | "symcal" => {
             if let Some(content) = conv.convert_required_arg(&cmd, 0) {
                 let _ = write!(output, "cal({}) ", content);
             }
         }
         "cal" => {
             // Old-style \cal switch (often used as \cal A)
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "cal({}) ", content.trim());
+            }
+        }
+        "pazocal" => {
             if let Some(content) = conv.convert_required_arg(&cmd, 0) {
                 let _ = write!(output, "cal({}) ", content.trim());
             }
@@ -2088,7 +2699,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
 
         // Acronym commands - auto (first use = full, subsequent = short)
-        "ac" | "gls" | "Ac" | "Gls" => {
+        "ac" | "gls" | "Ac" | "Gls" | "GLS" => {
             let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             if let Some((text, _is_first)) = conv.state.use_acronym(&key) {
                 let text = if base_name.starts_with('G') || base_name.starts_with("Ac") {
@@ -2234,6 +2845,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 let _ = write!(output, "#v({})", convert_dimension(&dim));
             }
         }
+        "mspace" => {
+            let _ = conv.get_required_arg(&cmd, 0);
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                output.push(' ');
+            }
+        }
         "quad" => output.push_str("  "),
         "qquad" => output.push_str("    "),
         "," | "thinspace" => output.push(' '),
@@ -2331,6 +2948,16 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             // cedilla
             let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             output.push_str(&apply_cedilla(&content));
+        }
+        "v" => {
+            // caron
+            let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            output.push_str(&apply_text_accent(&content, 'v'));
+        }
+        "u" => {
+            // breve
+            let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            output.push_str(&apply_text_accent(&content, 'u'));
         }
 
         // Color commands (using parse_color_expression for proper color mapping)
@@ -2544,9 +3171,16 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "hline" | "toprule" | "midrule" | "bottomrule" => {
             output.push_str("|||HLINE|||");
         }
+        "hhline" => {
+            output.push_str("|||HLINE|||");
+        }
         "cline" | "cmidrule" => {
             output.push_str("|||HLINE|||");
         }
+        "tabularnewline" => match conv.state.current_env() {
+            EnvironmentContext::Tabular => output.push_str("|||ROW|||"),
+            _ => output.push_str("\\ "),
+        },
         "multicolumn" => {
             let ncols = conv.get_required_arg(&cmd, 0).unwrap_or("1".to_string());
             let _align = conv.get_required_arg(&cmd, 1);
@@ -2937,6 +3571,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         // Dots
         "vdots" => output.push_str("dots.v "),
         "ddots" => output.push_str("dots.down "),
+        "hdots" => output.push_str("dots.h "),
 
         // Misc symbols
         "partial" => output.push_str("partial "),
@@ -2946,6 +3581,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "angle" => output.push_str("angle "),
         "ell" => output.push_str("ell "),
         "hbar" => output.push_str("planck.reduce "),
+        "upmu" => output.push_str("mu "),
         "Re" => output.push_str("Re "),
         "Im" => output.push_str("Im "),
         "wp" => output.push_str("wp "),
@@ -3170,6 +3806,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         // QED symbols
         "qed" | "qedsymbol" | "qedhere" => output.push('∎'),
 
+        "fig" => {
+            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
+                let _ = write!(output, "Fig. {}", content.trim());
+            } else {
+                output.push_str("Fig.");
+            }
+        }
+
         // Special character commands (Scandinavian, etc.)
         "o" => output.push('ø'),   // \o -> ø
         "O" => output.push('Ø'),   // \O -> Ø
@@ -3264,7 +3908,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "mdseries" | "itshape" | "scshape" | "upshape" | "slshape" | "normalsize" | "tiny"
         | "scriptsize" | "footnotesize" | "small" | "large" | "Large" | "LARGE" | "huge"
         | "Huge" | "nocite" | "printbibliography" | "printglossary" | "printacronyms"
-        | "glsresetall" | "tableofcontents" | "listoffigures" | "listoftables"
+        | "glsresetall" | "listoffigures" | "listoftables" | "addtocontents" | "addtotoc"
         | "frontmatter" | "mainmatter" | "backmatter"
         // IEEE and conference specific
         | "IEEEauthorblockN" | "IEEEauthorblockA" | "IEEEoverridecommandlockouts"
@@ -3273,7 +3917,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "authorrunning" | "titlerunning" | "institute"
         | "icmltitlerunning" | "icmlsetsymbol" | "printAffiliationsAndNotice" | "icmlEqualContribution"
         | "iclrfinalcopy"
-        | "address" | "subjclass" | "ccsdesc" | "received" | "PACS" | "altaffiliation"
+        | "address" | "subjclass" | "subclass" | "ccsdesc" | "received" | "PACS" | "altaffiliation"
         | "CCSXML" | "authornote"
         | "acmArticle" | "acmDOI" | "acmJournal" | "acmMonth" | "acmNumber" | "acmVolume"
         | "acmYear" | "acmConference" | "acmBooktitle" | "acmPrice" | "acmISBN"
@@ -3283,13 +3927,15 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "renewbibmacro" | "DeclarePairedDelimiterXPP" | "pdfbookmark"
         | "jot" | "ifpdftex" | "else" | "fi" | "setstretch" | "dnormalspacing"
         | "hbadness" | "hyphenation" | "textwidth" | "setcounter"
-        | "setlength" | "addtolength" | "parindent" | "baselineskip"
+        | "setlength" | "addtolength" | "parindent" | "baselineskip" | "addvspace"
+        | "newgeometry" | "restoregeometry"
         | "beforepreface" | "afterpreface" | "onlinesignature"
         | "lstset" | "lstdefinestyle" | "chaptermark" | "MakeOuterQuote" | "tolerance"
         | "approvalpage" | "copyrightpage" | "pagestyle" | "thispagestyle"
-        | "fancyhead" | "fancyfoot" | "fancyhf" | "fancyheadings"
+        | "fancyhead" | "fancyfoot" | "fancyhf" | "fancyheadings" | "fancypagestyle"
+        | "lhead" | "chead" | "rhead" | "lfoot" | "cfoot" | "rfoot"
         // Additional formatting switches (excluding already handled: it, bf, tt, sc, rm)
-        | "em" | "sf" | "sl"
+        | "em" | "sf" | "sl" | "justifying"
         // Floats and placement
         | "suppressfloats" | "FloatBarrier" | "clearfloats"
         // Spacing (excluding already handled: smallskip, medskip, bigskip)
@@ -3313,9 +3959,67 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "onecolumn" | "pacs" | "orcid" | "let" | "@dashdrawstore" | "adl@draw"
         | "adl@drawiv" | "parskip" | "tabcolsep" | "restylealgo" | "setcopyright"
         | "theequation" | "fontsize" | "selectfont" | "@footnotetext" | "subfile"
-        | "captionsetup" | "maketitlesupplementary"
+        | "acronymtype" | "makecover" | "includepdf" | "spacing"
+        | "leftmark" | "rightmark" | "lstlistoflistings" | "maxtocdepth"
+        | "onehalfspace" | "singlespace" | "subtitle" | "signaturepage"
+        | "captionsetup" | "maketitlesupplementary" | "titleformat" | "titlespacing"
         | "makeatletter" | "makeatother" | "ifcase" | "or" | "month" | "year" | "space"
-        | "the" | "ttfamilyError" | "mathindent" | "." | "r" => {
+        | "the" | "ttfamilyError" | "mathindent" | "mskip" | "ifx" | "alph" | "monthyear"
+        | "." | "r" | "PackageError" | "object" | "leftmargin" | "parsep"
+        | "begingroup" | "endgroup" | "gdef" | "@thefnmark"
+        | "eads" | "submitto" | "numparts" | "endnumparts" | "thetable"
+        | "beginsupplement" | "ack" | "corref" | "mailsa" | "toctitle" | "tocauthor"
+        | "IEEEbiographynophoto" | "adjustlimits"
+        | "extracolsep" | "EndOfBibitem" | "bibitem" | "endhead"
+        | "mciteBstWouldAddEndPuncttrue" | "mciteSetBstMidEndSepPunct"
+        | "mcitedefaultmidpunct" | "mcitedefaultendpunct" | "mcitedefaultseppunct"
+        | "mciteundefinedmacro" | "mcitethebibliography"
+        | "mciteSetBstSublistMode" | "mciteSetBstMaxWidthForm"
+        | "mciteSetBstSublistLabelBeginEnd"
+        | "ifCLASSOPTIONcompsoc" | "ifCLASSOPTIONcaptionsoff"
+        | "mathpalette" | "mkern" | "sloppy" | "ignorespacesrelation"
+        | "refstepcounter" | "theoremstyle" | "cellspacetoplimit" | "cellspacebottomlimit"
+        | "widebarargheight" | "widebarargwidth" | "widebarargdepth"
+        | "settoheight" | "settodepth" | "settowidth"
+        | "phantomsection" | "minitoc" | "flushbottom" | "cochairs" | "cochair" | "import"
+        | "microtypesetup" | "nomenclature" | "putbib" | "textbaselineskip"
+        | "DTMenglishmonthname" | "DTMenglishordinal" | "ExplSyntaxOn" | "ExplSyntaxOff"
+        | "SingleSpacing" | "bibsep"
+        | "dominitoc" | "droptitle" | "frontmatterbaselineskip" | "leavevmode"
+        | "makeacknowledgement" | "makebibliography" | "makecopyright" | "makededication"
+        | "mtcaddchapter" | "oneappendix" | "printthesisindex"
+        | "restorepagenumber" | "savepagenumber"
+        | "scriptsizessp" | "smallbreak" | "smallssp" | "startappendices"
+        | "tagpdfsetup" | "theendnotes"
+        | "appendixpage" | "cftbeforechapskip" | "cftchapnumwidth" | "coverimage" | "zihao"
+        | "body" | "hypersetup" | "topskip" | "titlepage" | "thesis"
+        | "ht" | "hei" | "T" | "Urlmuskip" | "strutbox" | "ifpdf" | "version"
+        | "per" | "nouppercase" | "hangindent" | "origaddvspace" | "chaptertitlefont"
+        | "oddsidemargin" | "evensidemargin" | "headheight" | "linenumbers"
+        | "cftpagenumbersoff" | "cftpagenumberson" | "cftsecnumwidth" | "cftsubsecnumwidth"
+        | "cftsubsecindent" | "cftfignumwidth" | "cftfigindent" | "cfttabnumwidth"
+        | "cfttabindent" | "cftbeforetabskip" | "cftbeforetoctitleskip" | "cftaftertoctitleskip"
+        | "shusetup" | "zhdigits" | "zhnumber" | "shorthandoff"
+        | "section@cntformat" | "subsection@cntformat" | "ps@plain" | "ps@main"
+        | "enableindents" | "sourceatright" | "center" | "changefont"
+        | "bookmarksetup" | "titlecontents" | "thecontentslabel" | "titlerule"
+        | "setglossarystyle" | "glossarystyle" | "glsaddall"
+        | "covercredit" | "song" | "songti" | "btypeout"
+        | "aliaspagestyle" | "clearforchapter"
+        | "addvspacetoc" | "addappheadtotoc"
+        | "maketitlepage" | "titlepageMS" | "signaturepageMS" | "makecoverpage"
+        | "makeapproval" | "makedeclaration" | "frontpage" | "makefirstpage"
+        | "interfootnotelinepenalty" | "emergencystretch" | "linepenalty" | "hyphenpenalty"
+        | "resetpagenumbering" | "setlanguage" | "selectlanguage"
+        | "newlist" | "setlist" | "storeinipagenumber"
+        | "definecdlabeloffsets" | "createcdlabel" | "createcdcover"
+        | "makefrontmatter" | "beginfrontmatter" | "beginmainmatter"
+        | "includeabbreviations"
+        | "@seccntformat" | "@ifundefined"
+        | "mdtheorem" | "AddToShipoutPictureBG" | "AtNextBibliography" | "arial"
+        | "chaptertitlename" | "linespread" | "mdfdefinestyle" | "noappendicestocpagenum"
+        | "place" | "thechapter" | "thesection" | "thesubsection" | "uselogo"
+        | "declaretypist" | "@dtm@day" | "@dtm@month" | "@dtm@year" => {
             // Ignore these
         }
 
@@ -3675,6 +4379,11 @@ fn extract_paired_delimiter_name(cmd: &CmdItem) -> Option<String> {
 
 /// Expand a user-defined macro
 fn expand_user_macro(conv: &mut LatexConverter, cmd: &CmdItem, macro_def: &MacroDef) -> String {
+    if macro_def.num_args == 0 {
+        if let Some(cached) = conv.state.macro_cache.get(&macro_def.name) {
+            return cached.clone();
+        }
+    }
     let mut result = macro_def.replacement.clone();
 
     // Collect arguments
@@ -3692,6 +4401,11 @@ fn expand_user_macro(conv: &mut LatexConverter, cmd: &CmdItem, macro_def: &Macro
     let mut output = String::new();
     let tree = mitex_parser::parse(&result, conv.spec.clone());
     conv.visit_node(&tree, &mut output);
+    if macro_def.num_args == 0 {
+        conv.state
+            .macro_cache
+            .insert(macro_def.name.clone(), output.clone());
+    }
     output
 }
 
@@ -3818,6 +4532,38 @@ fn apply_text_accent(content: &str, accent: char) -> String {
             'I' => "Ï".to_string(),
             'O' => "Ö".to_string(),
             'U' => "Ü".to_string(),
+            _ => content.to_string(),
+        },
+        'u' => match c {
+            'a' => "ă".to_string(),
+            'e' => "ĕ".to_string(),
+            'i' => "ĭ".to_string(),
+            'o' => "ŏ".to_string(),
+            'u' => "ŭ".to_string(),
+            'A' => "Ă".to_string(),
+            'E' => "Ĕ".to_string(),
+            'I' => "Ĭ".to_string(),
+            'O' => "Ŏ".to_string(),
+            'U' => "Ŭ".to_string(),
+            _ => content.to_string(),
+        },
+        'v' => match c {
+            'c' => "č".to_string(),
+            'C' => "Č".to_string(),
+            's' => "š".to_string(),
+            'S' => "Š".to_string(),
+            'z' => "ž".to_string(),
+            'Z' => "Ž".to_string(),
+            'r' => "ř".to_string(),
+            'R' => "Ř".to_string(),
+            'e' => "ě".to_string(),
+            'E' => "Ě".to_string(),
+            'n' => "ň".to_string(),
+            'N' => "Ň".to_string(),
+            't' => "ť".to_string(),
+            'T' => "Ť".to_string(),
+            'd' => "ď".to_string(),
+            'D' => "Ď".to_string(),
             _ => content.to_string(),
         },
         _ => content.to_string(),

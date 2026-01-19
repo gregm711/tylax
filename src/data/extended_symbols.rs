@@ -215,6 +215,7 @@ lazy_static! {
         m.insert("lneqq", "lt.nequiv");
         m.insert("lnsim", "lt.ntilde");
         m.insert("nless", "lt.not");
+        m.insert("nleq", "lt.eq.not");
         m.insert("nlessgtr", "lt.gt.not");
         m.insert("nlesssim", "lt.tilde.not");
 

@@ -4,6 +4,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
 use std::io::{self, Read, Write};
+use std::time::Instant;
 use std::path::{Component, Path, PathBuf};
 use tylax::{
     convert_auto, convert_auto_document, detect_format,
@@ -285,10 +286,19 @@ fn main() -> io::Result<()> {
     let mut graphic_dirs: Vec<String> = Vec::new();
     let mut graphics_base_dir: Option<PathBuf> = None;
 
+    let timing_enabled = std::env::var("TYLAX_TIMING").is_ok();
     if matches!(direction, Direction::L2t) && cli.full_document {
         if let Some(path) = filename.as_ref() {
             if let Some(parent) = Path::new(path).parent() {
+                let start_expand = Instant::now();
+                if timing_enabled {
+                    eprintln!("[tylax] expand inputs: start");
+                }
                 input = expand_latex_inputs(&input, parent);
+                if timing_enabled {
+                    let secs = start_expand.elapsed().as_secs_f64();
+                    eprintln!("[tylax] expand inputs: {:.3}s", secs);
+                }
                 bib_entries = collect_bibliography_entries(&input);
                 if bib_entries.is_empty() {
                     bib_entries = collect_bibliography_entries_with_includes(&input, parent);
@@ -760,8 +770,7 @@ fn populate_placeholder_bibliography(
 #[cfg(feature = "cli")]
 fn bibtex_contains_key(content: &str, key: &str) -> bool {
     let bytes = content.as_bytes();
-    let key_lower = key.to_lowercase();
-    let key_bytes = key_lower.as_bytes();
+    let key_bytes = key.as_bytes();
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'@' {
@@ -778,8 +787,8 @@ fn bibtex_contains_key(content: &str, key: &str) -> bool {
                     j += 1;
                 }
                 if j + key_bytes.len() <= bytes.len() {
-                    let slice = &content[j..j + key_bytes.len()].to_lowercase();
-                    if slice.as_bytes() == key_bytes {
+                    let slice = &bytes[j..j + key_bytes.len()];
+                    if slice.eq_ignore_ascii_case(key_bytes) {
                         return true;
                     }
                 }
@@ -808,7 +817,7 @@ fn extract_bib_entries(content: &str) -> Vec<(String, String)> {
                 i += 1;
                 continue;
             }
-            let entry_type = &content[i + 1..j];
+            let entry_type = String::from_utf8_lossy(&bytes[i + 1..j]).to_string();
             while j < bytes.len() && bytes[j].is_ascii_whitespace() {
                 j += 1;
             }
@@ -837,7 +846,7 @@ fn extract_bib_entries(content: &str) -> Vec<(String, String)> {
                     j += 1;
                 }
                 let end = j.min(bytes.len());
-                let entry_text = content[start..end].to_string();
+                let entry_text = String::from_utf8_lossy(&bytes[start..end]).to_string();
                 anon_idx += 1;
                 let key_final = format!("{}-{}", entry_type, anon_idx);
                 out.push((key_final, entry_text));
@@ -853,7 +862,7 @@ fn extract_bib_entries(content: &str) -> Vec<(String, String)> {
             while j < bytes.len() && bytes[j] != b',' && bytes[j] != close as u8 {
                 j += 1;
             }
-            let key = content[key_start..j].trim().to_string();
+            let key = String::from_utf8_lossy(&bytes[key_start..j]).trim().to_string();
 
             // Scan to matching close
             let mut depth = 1i32;
@@ -867,7 +876,7 @@ fn extract_bib_entries(content: &str) -> Vec<(String, String)> {
                 j += 1;
             }
             let end = j.min(bytes.len());
-            let entry_text = content[start..end].to_string();
+            let entry_text = String::from_utf8_lossy(&bytes[start..end]).to_string();
 
             let key_final = if entry_type.eq_ignore_ascii_case("string")
                 || entry_type.eq_ignore_ascii_case("preamble")

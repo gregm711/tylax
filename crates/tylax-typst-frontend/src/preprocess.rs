@@ -248,25 +248,53 @@ impl Evaluator {
         out
     }
 
+    fn expand_code_block(&mut self, node: &SyntaxNode) -> String {
+        let mut out = String::new();
+        for child in node.children() {
+            match child.kind() {
+                SyntaxKind::LeftBrace | SyntaxKind::RightBrace => {}
+                _ => out.push_str(&self.expand_node(&child)),
+            }
+        }
+        out
+    }
+
+    fn expand_block_body(&mut self, node: &SyntaxNode) -> String {
+        match node.kind() {
+            SyntaxKind::ContentBlock => self.expand_content_block(node),
+            SyntaxKind::CodeBlock => self.expand_code_block(node),
+            _ => self.expand_node(node),
+        }
+    }
+
     fn expand_conditional(&mut self, node: &SyntaxNode) -> String {
         let condition = self.eval_condition(node);
         match condition {
             Some(true) => self.content_block_at(node, 0),
             Some(false) => self.content_block_at(node, 1),
             None => {
-                self.losses.push(Loss::new(
-                    "preprocess-if",
-                    "Unsupported conditional expression; dropping content",
-                ));
-                String::new()
+                // Fallback: prefer the first branch to avoid dropping content.
+                let first = self.content_block_at(node, 0);
+                if !first.is_empty() {
+                    first
+                } else {
+                    self.content_block_at(node, 1)
+                }
             }
         }
     }
 
     fn expand_for_loop(&mut self, node: &SyntaxNode) -> String {
-        let (var_name, items, body) = match self.parse_for_loop(node) {
+        let (var_names, items, body) = match self.parse_for_loop(node) {
             Some(v) => v,
             None => {
+                // Fallback: preserve the body once if we can't evaluate items.
+                if let Some(body) = node
+                    .children()
+                    .find(|c| matches!(c.kind(), SyntaxKind::ContentBlock | SyntaxKind::CodeBlock))
+                {
+                    return self.expand_block_body(&body);
+                }
                 self.losses.push(Loss::new(
                     "preprocess-for",
                     "Unsupported for-loop; dropping content",
@@ -278,10 +306,22 @@ impl Evaluator {
         let mut out = String::new();
         for item in items {
             let mut scope = HashMap::new();
-            scope.insert(var_name.clone(), item);
+            if var_names.len() == 1 {
+                scope.insert(var_names[0].clone(), item);
+            } else if let Value::Array(values) = item {
+                for (idx, name) in var_names.iter().enumerate() {
+                    let value = values.get(idx).cloned().unwrap_or(Value::None);
+                    scope.insert(name.clone(), value);
+                }
+            } else {
+                scope.insert(var_names[0].clone(), item);
+                for name in var_names.iter().skip(1) {
+                    scope.insert(name.clone(), Value::None);
+                }
+            }
             self.scopes.push(scope);
             self.depth += 1;
-            out.push_str(&self.expand_content_block(&body));
+            out.push_str(&self.expand_block_body(&body));
             self.depth = self.depth.saturating_sub(1);
             self.scopes.pop();
         }
@@ -291,35 +331,62 @@ impl Evaluator {
 
     fn handle_let_binding(&mut self, node: &SyntaxNode) {
         if let Some(closure) = node.children().find(|c| c.kind() == SyntaxKind::Closure) {
-            if let Some(def) = self.parse_function_def(&closure) {
+            if let Some(def) = self.parse_closure_def(node, &closure) {
                 self.db.define_func(&def.0, def.1);
                 return;
             }
-            self.losses.push(Loss::new(
-                "preprocess-let",
-                "Unsupported function definition; skipping",
-            ));
+        }
+        if let Some(def) = self.parse_named_function_def(node) {
+            self.db.define_func(&def.0, def.1);
             return;
         }
 
-        let Some((name, value_node)) = self.parse_let_value(node) else {
-            self.losses.push(Loss::new(
-                "preprocess-let",
-                "Unsupported variable definition; skipping",
-            ));
+        if let Some((name, value_node)) = self.parse_let_value(node) {
+            if let Some(value) = self.eval_value(&value_node) {
+                self.db.define_var(&name, value);
+            } else {
+                let raw = node_full_text(&value_node);
+                self.db.define_var(&name, Value::Text(raw));
+            }
             return;
-        };
-
-        if let Some(value) = self.eval_value(&value_node) {
-            self.db.define_var(&name, value);
-        } else {
-            let raw = node_full_text(&value_node);
-            self.db.define_var(&name, Value::Text(raw));
-            self.losses.push(Loss::new(
-                "preprocess-let-raw",
-                format!("Stored raw value for #let {}", name),
-            ));
         }
+
+        if let Some((names, value_node)) = self.parse_destructuring_let(node) {
+            if let Some(value) = self.eval_value(&value_node) {
+                match value {
+                    Value::Array(values) => {
+                        for (idx, name) in names.iter().enumerate() {
+                            let v = values.get(idx).cloned().unwrap_or(Value::None);
+                            self.db.define_var(name, v);
+                        }
+                    }
+                    other => {
+                        if let Some(first) = names.first() {
+                            self.db.define_var(first, other);
+                        }
+                        for name in names.iter().skip(1) {
+                            self.db.define_var(name, Value::None);
+                        }
+                    }
+                }
+            } else {
+                let raw = node_full_text(&value_node);
+                for name in names {
+                    self.db.define_var(&name, Value::Text(raw.clone()));
+                }
+            }
+            return;
+        }
+
+        if let Some((name, raw_value)) = self.parse_let_value_fallback(node) {
+            self.db.define_var(&name, Value::Text(raw_value));
+            return;
+        }
+
+        self.losses.push(Loss::new(
+            "preprocess-let",
+            "Unsupported variable definition; skipping",
+        ));
     }
 
     fn expand_func_call(&mut self, node: &SyntaxNode) -> Option<String> {
@@ -383,16 +450,22 @@ impl Evaluator {
     fn parse_for_loop(
         &mut self,
         node: &SyntaxNode,
-    ) -> Option<(String, Vec<Value>, SyntaxNode)> {
-        let mut var_name: Option<String> = None;
+    ) -> Option<(Vec<String>, Vec<Value>, SyntaxNode)> {
+        let mut var_names: Vec<String> = Vec::new();
         let mut items: Option<Vec<Value>> = None;
         let mut body: Option<SyntaxNode> = None;
         let mut saw_in = false;
 
         for child in node.children() {
             match child.kind() {
-                SyntaxKind::Ident if var_name.is_none() => {
-                    var_name = Some(child.text().to_string());
+                SyntaxKind::Ident if !saw_in && var_names.is_empty() => {
+                    var_names.push(child.text().to_string());
+                }
+                SyntaxKind::Destructuring if !saw_in && var_names.is_empty() => {
+                    let names = extract_destructuring_idents(&child);
+                    if !names.is_empty() {
+                        var_names = names;
+                    }
                 }
                 SyntaxKind::In => {
                     saw_in = true;
@@ -411,14 +484,18 @@ impl Evaluator {
                         items = Some(values);
                     }
                 }
-                SyntaxKind::ContentBlock => {
+                SyntaxKind::ContentBlock | SyntaxKind::CodeBlock => {
                     body = Some(child.clone());
                 }
                 _ => {}
             }
         }
 
-        Some((var_name?, items?, body?))
+        if var_names.is_empty() {
+            return None;
+        }
+
+        Some((var_names, items?, body?))
     }
 
     fn eval_condition(&mut self, node: &SyntaxNode) -> Option<bool> {
@@ -438,11 +515,55 @@ impl Evaluator {
             SyntaxKind::Bool => Some(node.text().trim() == "true"),
             SyntaxKind::Unary => self.eval_unary(node),
             SyntaxKind::Binary => self.eval_binary(node.clone()),
+            SyntaxKind::Parenthesized => {
+                for child in node.children() {
+                    match child.kind() {
+                        SyntaxKind::LeftParen | SyntaxKind::RightParen | SyntaxKind::Space => {}
+                        _ => return self.eval_bool_expr(&child),
+                    }
+                }
+                None
+            }
+            SyntaxKind::FuncCall => {
+                let value = self.eval_value(node)?;
+                self.value_truthy(&value)
+            }
             SyntaxKind::Ident => match self.lookup_value(node.text().as_ref()) {
                 Some(Value::Bool(b)) => Some(b),
-                _ => None,
+                Some(Value::None) => Some(false),
+                Some(Value::Number(n)) => Some(n != 0.0),
+                Some(Value::Text(s)) => Some(!s.trim().is_empty()),
+                Some(Value::Counter(name)) => {
+                    let value = self.counters.get(name.as_str()).copied().unwrap_or(0);
+                    Some(value != 0)
+                }
+                Some(Value::Array(values)) => Some(!values.is_empty()),
+                None => None,
             },
             _ => None,
+        }
+    }
+
+    fn value_truthy(&self, value: &Value) -> Option<bool> {
+        match value {
+            Value::Bool(b) => Some(*b),
+            Value::None => Some(false),
+            Value::Number(n) => Some(*n != 0.0),
+            Value::Text(s) => {
+                let trimmed = s.trim();
+                if trimmed.eq_ignore_ascii_case("true") {
+                    Some(true)
+                } else if trimmed.eq_ignore_ascii_case("false") {
+                    Some(false)
+                } else {
+                    Some(!trimmed.is_empty())
+                }
+            }
+            Value::Counter(name) => {
+                let value = self.counters.get(name.as_str()).copied().unwrap_or(0);
+                Some(value != 0)
+            }
+            Value::Array(values) => Some(!values.is_empty()),
         }
     }
 
@@ -511,9 +632,25 @@ impl Evaluator {
         for child in node.children() {
             match child.kind() {
                 SyntaxKind::Ident if name.is_none() => name = Some(child.text().to_string()),
+                SyntaxKind::Math | SyntaxKind::Equation if name.is_none() && !seen_eq => {
+                    name = Some(child.text().to_string());
+                }
                 SyntaxKind::Eq => seen_eq = true,
                 SyntaxKind::Space => {}
                 _ => {
+                    if !seen_eq
+                        && name.is_none()
+                        && !matches!(
+                            child.kind(),
+                            SyntaxKind::Params
+                                | SyntaxKind::Closure
+                                | SyntaxKind::Destructuring
+                                | SyntaxKind::Let
+                        )
+                    {
+                        name = Some(child.text().to_string());
+                        continue;
+                    }
                     if seen_eq {
                         value = Some(child.clone());
                         break;
@@ -524,29 +661,125 @@ impl Evaluator {
         Some((name?, value?))
     }
 
-    fn parse_function_def(&mut self, node: &SyntaxNode) -> Option<(String, FunctionDef)> {
+    fn parse_destructuring_let(&self, node: &SyntaxNode) -> Option<(Vec<String>, SyntaxNode)> {
+        let mut names: Option<Vec<String>> = None;
+        let mut value: Option<SyntaxNode> = None;
+        let mut seen_eq = false;
+        for child in node.children() {
+            match child.kind() {
+                SyntaxKind::Destructuring if names.is_none() => {
+                    let extracted = extract_destructuring_idents(&child);
+                    if !extracted.is_empty() {
+                        names = Some(extracted);
+                    }
+                }
+                SyntaxKind::Eq => seen_eq = true,
+                SyntaxKind::Space => {}
+                _ => {
+                    if seen_eq {
+                        value = Some(child.clone());
+                        break;
+                    }
+                }
+            }
+        }
+        Some((names?, value?))
+    }
+
+    fn parse_closure_def(
+        &mut self,
+        let_node: &SyntaxNode,
+        closure: &SyntaxNode,
+    ) -> Option<(String, FunctionDef)> {
+        let name = closure
+            .children()
+            .find(|c| c.kind() == SyntaxKind::Ident)
+            .or_else(|| let_node.children().find(|c| c.kind() == SyntaxKind::Ident))?
+            .text()
+            .to_string();
+        let params_node = closure.children().find(|c| c.kind() == SyntaxKind::Params);
+        let params = params_node
+            .map(|p| self.parse_params(&p))
+            .unwrap_or_default();
+        let body_node = self.find_closure_body(closure)?;
+        let body = match body_node.kind() {
+            SyntaxKind::ContentBlock => self.expand_content_block(&body_node),
+            _ => node_full_text(&body_node),
+        };
+        Some((name, FunctionDef { params, body }))
+    }
+
+    fn find_closure_body(&self, node: &SyntaxNode) -> Option<SyntaxNode> {
+        if let Some(body_node) = node.children().find(|c| c.kind() == SyntaxKind::ContentBlock) {
+            return Some(body_node.clone());
+        }
+        if let Some(code_node) = node.children().find(|c| c.kind() == SyntaxKind::CodeBlock) {
+            return Some(code_node.clone());
+        }
+        if let Some(body_node) = node.children().find(|c| {
+            matches!(
+                c.kind(),
+                SyntaxKind::Raw
+                    | SyntaxKind::Math
+                    | SyntaxKind::Equation
+                    | SyntaxKind::FuncCall
+                    | SyntaxKind::Str
+                    | SyntaxKind::Ident
+                    | SyntaxKind::Parenthesized
+                    | SyntaxKind::Binary
+                    | SyntaxKind::Unary
+            )
+        }) {
+            return Some(body_node.clone());
+        }
+        node.children()
+            .find(|c| {
+            !matches!(
+                c.kind(),
+                SyntaxKind::Params | SyntaxKind::Arrow | SyntaxKind::Space
+            )
+        })
+            .cloned()
+    }
+
+    fn parse_named_function_def(&mut self, node: &SyntaxNode) -> Option<(String, FunctionDef)> {
         let name = node
             .children()
             .find(|c| c.kind() == SyntaxKind::Ident)?
             .text()
             .to_string();
-        let params_node = node.children().find(|c| c.kind() == SyntaxKind::Params);
-        let params = params_node
-            .map(|p| self.parse_params(&p))
-            .unwrap_or_default();
-        if let Some(body_node) = node.children().find(|c| c.kind() == SyntaxKind::ContentBlock) {
-            let body = self.expand_content_block(&body_node);
-            return Some((name, FunctionDef { params, body }));
+        let params_node = node.children().find(|c| c.kind() == SyntaxKind::Params)?;
+        let params = self.parse_params(&params_node);
+        let mut seen_eq = false;
+        let mut body_node: Option<SyntaxNode> = None;
+        for child in node.children() {
+            match child.kind() {
+                SyntaxKind::Eq => seen_eq = true,
+                SyntaxKind::Space => {}
+                _ => {
+                    if seen_eq {
+                        body_node = Some(child.clone());
+                        break;
+                    }
+                }
+            }
         }
-        if let Some(code_node) = node.children().find(|c| c.kind() == SyntaxKind::CodeBlock) {
-            let body = self.extract_codeblock_body(&code_node, &params);
-            self.losses.push(Loss::new(
-                "preprocess-let-codeblock",
-                format!("Simplified code block body for function {}", name),
-            ));
-            return Some((name, FunctionDef { params, body }));
+        let body_node = body_node?;
+        let body = node_full_text(&body_node);
+        Some((name, FunctionDef { params, body }))
+    }
+
+    fn parse_let_value_fallback(&self, node: &SyntaxNode) -> Option<(String, String)> {
+        let text = node_full_text(node);
+        let text = text.trim_start();
+        let text = text.strip_prefix("let")?.trim_start();
+        let mut parts = text.splitn(2, '=');
+        let name = parts.next()?.trim();
+        let value = parts.next()?.trim();
+        if name.is_empty() || value.is_empty() {
+            return None;
         }
-        None
+        Some((name.to_string(), value.to_string()))
     }
 
     fn parse_params(&mut self, node: &SyntaxNode) -> Vec<ParamDef> {
@@ -860,6 +1093,11 @@ impl Evaluator {
             SyntaxKind::None => Some(Value::None),
             SyntaxKind::Ident => self.lookup_value(node.text().as_ref()),
             SyntaxKind::ContentBlock => Some(Value::Text(self.expand_content_block(node))),
+            SyntaxKind::CodeBlock
+            | SyntaxKind::Code
+            | SyntaxKind::Raw
+            | SyntaxKind::Math
+            | SyntaxKind::Equation => Some(Value::Text(node_full_text(node))),
             SyntaxKind::Array => Some(Value::Array(self.parse_array_values(node)?)),
             SyntaxKind::FuncCall => self.eval_func_call_value(node),
             SyntaxKind::Binary => {
@@ -877,10 +1115,10 @@ impl Evaluator {
     fn content_block_at(&mut self, node: &SyntaxNode, index: usize) -> String {
         let blocks: Vec<_> = node
             .children()
-            .filter(|c| c.kind() == SyntaxKind::ContentBlock)
+            .filter(|c| matches!(c.kind(), SyntaxKind::ContentBlock | SyntaxKind::CodeBlock))
             .collect();
         if let Some(block) = blocks.get(index) {
-            self.expand_content_block(block)
+            self.expand_block_body(block)
         } else {
             String::new()
         }
@@ -1025,6 +1263,26 @@ fn node_full_text(node: &SyntaxNode) -> String {
         return text;
     }
     node.clone().into_text().to_string()
+}
+
+fn extract_destructuring_idents(node: &SyntaxNode) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut stack = vec![node.clone()];
+    while let Some(current) = stack.pop() {
+        for child in current.children() {
+            match child.kind() {
+                SyntaxKind::Ident => {
+                    let name = child.text().to_string();
+                    if name != "_" {
+                        names.push(name);
+                    }
+                }
+                SyntaxKind::Destructuring => stack.push(child.clone()),
+                _ => {}
+            }
+        }
+    }
+    names
 }
 
 fn format_number(n: f64) -> String {

@@ -876,7 +876,7 @@ fn parse_def_simple(input: &str) -> Option<Macro> {
         .map(|i| i + 1)?;
     let name = rest[1..name_end].to_string();
 
-    let mut remaining = &rest[name_end..];
+    let mut remaining = rest[name_end..].trim_start();
     let mut num_args = 0;
 
     // Count #n arguments
@@ -892,6 +892,8 @@ fn parse_def_simple(input: &str) -> Option<Macro> {
             break;
         }
     }
+
+    remaining = remaining.trim_start();
 
     // Get body
     if remaining.starts_with('{') {

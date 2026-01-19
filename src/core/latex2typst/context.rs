@@ -2,12 +2,13 @@
 //!
 //! This module contains the main converter struct and conversion state.
 
-use mitex_parser::syntax::{CmdItem, SyntaxElement, SyntaxKind, SyntaxNode};
+use mitex_parser::syntax::{CmdItem, EnvItem, SyntaxElement, SyntaxKind, SyntaxNode};
 use mitex_parser::CommandSpec;
 use mitex_spec_gen::DEFAULT_SPEC;
 use rowan::ast::AstNode;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::time::Instant;
 
 use crate::data::constants::{AcronymDef, GlossaryDef};
 use crate::data::maps::TEX_COMMAND_SPEC;
@@ -22,6 +23,39 @@ use super::utils::{
     extract_curly_inner_content, protect_zero_arg_commands, replace_verb_commands,
     attach_orphan_labels, resolve_reference_markers, restore_protected_commands,
 };
+
+struct ElementProfileGuard {
+    label: String,
+    env: Option<String>,
+    start: Instant,
+}
+
+impl ElementProfileGuard {
+    fn new(label: String, env: Option<String>) -> Self {
+        ElementProfileGuard {
+            label,
+            env,
+            start: Instant::now(),
+        }
+    }
+}
+
+impl Drop for ElementProfileGuard {
+    fn drop(&mut self) {
+        let elapsed = self.start.elapsed().as_secs_f64();
+        if elapsed >= 0.01 {
+            let env_suffix = self
+                .env
+                .as_ref()
+                .map(|env| format!(", env: {}", env))
+                .unwrap_or_default();
+            eprintln!(
+                "[tylax] slow elem {}{env_suffix} {:.3}s",
+                self.label, elapsed
+            );
+        }
+    }
+}
 
 // =============================================================================
 // LaTeX → Typst Conversion Options
@@ -220,6 +254,8 @@ pub struct ConversionState {
     pub pending_heading: Option<PendingHeading>,
     /// User-defined macros
     pub macros: HashMap<String, MacroDef>,
+    /// Cache for expanded macros with no arguments
+    pub macro_cache: HashMap<String, String>,
     /// Whether we're in preamble
     pub in_preamble: bool,
     /// Document metadata
@@ -257,6 +293,13 @@ pub struct ConversionState {
     pub custom_theorems: HashMap<String, String>,
     /// Color definitions collected from preamble (name -> Typst color expression)
     pub color_defs: Vec<(String, String)>,
+    /// Profiling flags and counters (debug)
+    pub profile_enabled: bool,
+    pub profile_nodes: usize,
+    pub profile_step: usize,
+    pub profile_last: Option<String>,
+    pub profile_last_env: Option<String>,
+    pub profile_start: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -439,6 +482,34 @@ impl LatexConverter {
         self.state.losses.clear();
         self.state.loss_seq = 0;
         self.state.in_preamble = true;
+        self.state.macro_cache.clear();
+        let timing_enabled = std::env::var("TYLAX_TIMING").is_ok();
+        self.state.profile_enabled = std::env::var("TYLAX_PROFILE").is_ok();
+        self.state.profile_nodes = 0;
+        self.state.profile_step = std::env::var("TYLAX_PROFILE_EVERY")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(2000);
+        self.state.profile_last = None;
+        self.state.profile_last_env = None;
+        self.state.profile_start = if self.state.profile_enabled {
+            Some(Instant::now())
+        } else {
+            None
+        };
+        let mut last_mark = Instant::now();
+        let mark_timing = |label: &str, last: &mut Instant, enabled: bool| {
+            if enabled {
+                let now = Instant::now();
+                let secs = (now.duration_since(*last)).as_secs_f64();
+                eprintln!("[tylax] {}: {:.3}s", label, secs);
+                *last = now;
+            }
+        };
+        if timing_enabled {
+            eprintln!("[tylax] start");
+        }
 
         // Preprocess: normalize \verb into a brace-based form so the parser can handle it.
         let verb_expanded = replace_verb_commands(input);
@@ -450,11 +521,36 @@ impl LatexConverter {
         // Preprocess: extract and expand macro definitions
         let (mut macro_db, processed_input) =
             crate::features::macros::extract_and_remove_definitions(&protected_input);
+        mark_timing("macro extract", &mut last_mark, timing_enabled);
 
         // Remove macros that we handle natively to avoid expansion issues
         for op in crate::data::constants::NATIVE_MATH_OPERATORS.iter() {
             macro_db.undefine(op);
         }
+
+        // Avoid expanding complex macros that perform TeX-style programming.
+        // These tend to break parsing when expanded pre-parse (e.g. \renewcommand chains).
+        let mut complex_macros = Vec::new();
+        for (name, def) in macro_db.iter() {
+            let replacement = def.replacement.as_str();
+            if replacement.contains("\\renewcommand")
+                || replacement.contains("\\newcommand")
+                || replacement.contains("\\def")
+                || replacement.contains("\\csname")
+                || replacement.contains("\\endcsname")
+                || replacement.contains("\\if")
+                || replacement.contains("\\hbox")
+                || replacement.contains("\\setbox")
+                || replacement.contains("\\kern")
+                || matches!(name.as_str(), "vertiii" | "quark")
+            {
+                complex_macros.push(name.clone());
+            }
+        }
+        for name in complex_macros {
+            macro_db.undefine(&name);
+        }
+        mark_timing("macro filter", &mut last_mark, timing_enabled);
 
         self.state.macros.clear();
         for (name, def) in macro_db.iter() {
@@ -496,6 +592,10 @@ impl LatexConverter {
         expanded_input = super::utils::normalize_display_dollars(&expanded_input);
         expanded_input = super::utils::normalize_math_delimiters(&expanded_input);
         expanded_input = super::utils::normalize_unmatched_braces(&expanded_input);
+        if timing_enabled {
+            eprintln!("[tylax] expanded size: {} bytes", expanded_input.len());
+        }
+        mark_timing("macro expand+normalize", &mut last_mark, timing_enabled);
 
         let has_bib_files =
             !super::utils::collect_bibliography_entries(&expanded_input).is_empty();
@@ -520,6 +620,7 @@ impl LatexConverter {
         );
         expanded_input = super::utils::strip_command_optional_arg(&expanded_input, &["blindtext"]);
         let mut doc_class = parse_document_class(&expanded_input);
+        mark_timing("class parse", &mut last_mark, timing_enabled);
         let pkg_template = detect_template_from_packages(&expanded_input);
         let class_lower = doc_class.class_name.to_lowercase();
         let mut template_kind = match class_lower.as_str() {
@@ -552,6 +653,7 @@ impl LatexConverter {
         self.state.template_kind = template_kind;
         // Parse with mitex-parser
         let tree = mitex_parser::parse(&expanded_input, self.spec.clone());
+        mark_timing("parse", &mut last_mark, timing_enabled);
 
         // Convert AST to Typst with pre-allocated buffer
         let estimated_size = (expanded_input.len() as f64 * 1.5) as usize;
@@ -559,9 +661,11 @@ impl LatexConverter {
 
         // Walk the tree
         self.visit_node(&tree, &mut output);
+        mark_timing("convert", &mut last_mark, timing_enabled);
 
         // Build final document with preamble
         let result = self.build_document(output);
+        mark_timing("build document", &mut last_mark, timing_enabled);
         let resolved = resolve_reference_markers(&result);
         let attached = attach_orphan_labels(&resolved);
         let escaped = super::utils::escape_at_in_words(&attached);
@@ -632,6 +736,35 @@ impl LatexConverter {
 
     /// Visit a syntax node and convert it
     pub fn visit_node(&mut self, node: &SyntaxNode, output: &mut String) {
+        if self.state.profile_enabled {
+            self.state.profile_nodes = self.state.profile_nodes.saturating_add(1);
+            let step = self.state.profile_step.max(1);
+            if self.state.profile_nodes % step == 0 {
+                let env_suffix = self
+                    .state
+                    .profile_last_env
+                    .as_ref()
+                    .map(|env| format!(", env: {}", env))
+                    .unwrap_or_default();
+                let elapsed = self
+                    .state
+                    .profile_start
+                    .as_ref()
+                    .map(|start| format!(" {:.1}s", start.elapsed().as_secs_f64()))
+                    .unwrap_or_default();
+                if let Some(ref last) = self.state.profile_last {
+                    eprintln!(
+                        "[tylax] visit_node: {} nodes (last: {}{}){}",
+                        self.state.profile_nodes, last, env_suffix, elapsed
+                    );
+                } else {
+                    eprintln!(
+                        "[tylax] visit_node: {} nodes{}{}",
+                        self.state.profile_nodes, env_suffix, elapsed
+                    );
+                }
+            }
+        }
         for child in node.children_with_tokens() {
             self.visit_element(child, output);
         }
@@ -640,6 +773,48 @@ impl LatexConverter {
     /// Visit a syntax element (node or token)
     pub fn visit_element(&mut self, elem: SyntaxElement, output: &mut String) {
         use SyntaxKind::*;
+        let _profile_guard = if self.state.profile_enabled {
+            let label = match elem.kind() {
+                ItemCmd => {
+                    if let SyntaxElement::Node(node) = &elem {
+                        if let Some(cmd) = CmdItem::cast(node.clone()) {
+                            let name = cmd
+                                .name_tok()
+                                .map(|t| t.text().to_string())
+                                .unwrap_or_default();
+                            format!("cmd {}", name)
+                        } else {
+                            "cmd".to_string()
+                        }
+                    } else {
+                        "cmd".to_string()
+                    }
+                }
+                ItemEnv => {
+                    if let SyntaxElement::Node(node) = &elem {
+                        if let Some(env) = EnvItem::cast(node.clone()) {
+                            let name = env
+                                .name_tok()
+                                .map(|t| t.text().to_string())
+                                .unwrap_or_default();
+                            format!("env {}", name)
+                        } else {
+                            "env".to_string()
+                        }
+                    } else {
+                        "env".to_string()
+                    }
+                }
+                other => format!("{:?}", other),
+            };
+            self.state.profile_last = Some(label.clone());
+            Some(ElementProfileGuard::new(
+                label,
+                self.state.profile_last_env.clone(),
+            ))
+        } else {
+            None
+        };
 
         if self.state.in_preamble {
             match elem.kind() {
@@ -671,7 +846,18 @@ impl LatexConverter {
                     SyntaxElement::Token(t) => t.text().to_string(),
                 };
                 let trimmed = text.trim();
-                if trimmed == "}" || trimmed == "document" {
+                if text.contains("\\)") {
+                    output.push_str(&text.replace("\\)", ")"));
+                    return;
+                }
+                if text.contains("\\]") {
+                    output.push_str(&text.replace("\\]", "]"));
+                    return;
+                }
+                if trimmed == "spacing" {
+                    return;
+                }
+                if trimmed == "}" || trimmed == "document" || trimmed == "\\begin" || trimmed == "\\end" {
                     return;
                 }
                 self.state.warnings.push(format!("Parse error: {}", text));
@@ -697,7 +883,26 @@ impl LatexConverter {
             }
 
             // Containers
-            ItemText | ItemParen | ClauseArgument => {
+            ItemText => {
+                if let SyntaxElement::Node(n) = elem {
+                    if n.children().next().is_none() {
+                        let text = n.text().to_string();
+                        if text.contains('\n') {
+                            self.visit_node(&n, output);
+                        } else if matches!(self.state.mode, ConversionMode::Math) {
+                            for c in text.chars() {
+                                output.push(c);
+                                output.push(' ');
+                            }
+                        } else {
+                            super::utils::escape_typst_text_into(&text, output);
+                        }
+                    } else {
+                        self.visit_node(&n, output);
+                    }
+                }
+            }
+            ItemParen | ClauseArgument => {
                 if let SyntaxElement::Node(n) = elem {
                     self.visit_node(&n, output);
                 }
@@ -740,16 +945,16 @@ impl LatexConverter {
             TokenWord => {
                 if let SyntaxElement::Token(t) = elem {
                     let text = t.text();
-                    if matches!(self.state.mode, ConversionMode::Math) {
-                        for c in text.chars() {
-                            output.push(c);
-                            output.push(' ');
-                        }
-                    } else {
-                        output.push_str(&super::utils::escape_typst_text(text));
+                if matches!(self.state.mode, ConversionMode::Math) {
+                    for c in text.chars() {
+                        output.push(c);
+                        output.push(' ');
                     }
+                } else {
+                    super::utils::escape_typst_text_into(text, output);
                 }
             }
+        }
 
             // Whitespace
             TokenWhiteSpace => {
@@ -1050,6 +1255,23 @@ impl LatexConverter {
     // Math post-processing
     // ============================================================
 
+    fn collapse_spaces(&self, input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        let mut prev_space = false;
+        for ch in input.chars() {
+            if ch == ' ' {
+                if !prev_space {
+                    out.push(' ');
+                    prev_space = true;
+                }
+            } else {
+                prev_space = false;
+                out.push(ch);
+            }
+        }
+        out
+    }
+
     /// Post-process math output
     pub fn postprocess_math(&self, input: String) -> String {
         let mut result = input;
@@ -1058,9 +1280,7 @@ impl LatexConverter {
         result = self.fix_blackboard_bold(&result);
         result = self.fix_empty_accent_args(&result);
 
-        while result.contains("  ") {
-            result = result.replace("  ", " ");
-        }
+        result = self.collapse_spaces(&result);
 
         result = result.replace(" ,", ",");
         result = result.replace("( ", "(");
@@ -1073,11 +1293,7 @@ impl LatexConverter {
 
     /// Clean up math spacing
     pub fn cleanup_math_spacing(&self, input: &str) -> String {
-        let mut result = input.to_string();
-
-        while result.contains("  ") {
-            result = result.replace("  ", " ");
-        }
+        let mut result = self.collapse_spaces(input);
 
         result = result.replace(" ,", ",");
         result = result.replace("( ", "(");
@@ -1093,8 +1309,10 @@ impl LatexConverter {
     /// Fix operatorname() patterns
     pub fn fix_operatorname(&self, input: &str) -> String {
         let mut result = input.to_string();
+        let mut search = 0usize;
 
-        while let Some(start) = result.find("operatorname(") {
+        while let Some(rel_start) = result[search..].find("operatorname(") {
+            let start = search + rel_start;
             let after = &result[start + 13..];
             if let Some(end) = self.find_matching_paren(after) {
                 let content = &after[..end];
@@ -1102,12 +1320,13 @@ impl LatexConverter {
                     content.chars().filter(|c| !c.is_whitespace()).collect();
                 let replacement = format!("op(\"{}\")", clean_content);
                 let total_end = start + 13 + end + 1;
-                result = format!(
-                    "{}{}{}",
-                    &result[..start],
-                    replacement,
-                    &result[total_end..]
-                );
+                let existing = &result[start..total_end];
+                if existing == replacement {
+                    search = total_end;
+                    continue;
+                }
+                result = format!("{}{}{}", &result[..start], replacement, &result[total_end..]);
+                search = start + replacement.len();
             } else {
                 break;
             }
@@ -1119,8 +1338,10 @@ impl LatexConverter {
     /// Fix bb() (blackboard bold)
     pub fn fix_blackboard_bold(&self, input: &str) -> String {
         let mut result = input.to_string();
+        let mut search = 0usize;
 
-        while let Some(start) = result.find("bb(") {
+        while let Some(rel_start) = result[search..].find("bb(") {
+            let start = search + rel_start;
             let after = &result[start + 3..];
             if let Some(end) = self.find_matching_paren(after) {
                 let content = &after[..end];
@@ -1139,12 +1360,13 @@ impl LatexConverter {
                 };
 
                 let total_end = start + 3 + end + 1;
-                result = format!(
-                    "{}{}{}",
-                    &result[..start],
-                    replacement,
-                    &result[total_end..]
-                );
+                let existing = &result[start..total_end];
+                if existing == replacement {
+                    search = total_end;
+                    continue;
+                }
+                result = format!("{}{}{}", &result[..start], replacement, &result[total_end..]);
+                search = start + replacement.len();
             } else {
                 break;
             }

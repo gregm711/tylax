@@ -1650,6 +1650,27 @@ pub fn escape_typst_text(text: &str) -> String {
     out
 }
 
+/// Escape plain text for Typst markup into an existing buffer.
+pub fn escape_typst_text_into(text: &str, out: &mut String) {
+    if !text
+        .as_bytes()
+        .iter()
+        .any(|b| matches!(b, b'@' | b'_' | b'*' | b'#' | b'$' | b'`' | b'<' | b'>'))
+    {
+        out.push_str(text);
+        return;
+    }
+    for ch in text.chars() {
+        match ch {
+            '@' | '_' | '*' | '#' | '$' | '`' | '<' | '>' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+}
+
 /// Escape content for Typst string literals.
 pub fn escape_typst_string(text: &str) -> String {
     text.replace('\\', "\\\\")

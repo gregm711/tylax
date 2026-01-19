@@ -64,6 +64,7 @@ lazy_static! {
         m.insert("\\textrightarrow", "→");
         m.insert("\\textuparrow", "↑");
         m.insert("\\textdownarrow", "↓");
+        m.insert("\\longs", "ſ");
 
         // Quotes
         m.insert("\\textquoteleft", "\u{2018}");  // '

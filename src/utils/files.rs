@@ -304,9 +304,38 @@ pub fn find_latex_includes(content: &str) -> Vec<(usize, usize, IncludeCommand)>
         }
     }
 
+    fn find_cmd_imports(content: &str, cmd: &str, includes: &mut Vec<(usize, usize, IncludeCommand)>) {
+        let mut search_start = 0;
+        while let Some(pos) = content[search_start..].find(cmd) {
+            let abs_pos = search_start + pos;
+            let after = &content[abs_pos + cmd.len()..];
+
+            if let Some(end1) = after.find('}') {
+                let path = after[..end1].to_string();
+                let rest = &after[end1 + 1..];
+                if let Some(rest) = rest.strip_prefix('{') {
+                    if let Some(end2) = rest.find('}') {
+                        let file = rest[..end2].to_string();
+                        let joined = if path.ends_with('/') || path.ends_with('\\') {
+                            format!("{}{}", path, file)
+                        } else {
+                            format!("{}/{}", path, file)
+                        };
+                        let full_end = abs_pos + cmd.len() + end1 + 1 + 1 + end2 + 1;
+                        includes.push((abs_pos, full_end, IncludeCommand::Input(joined)));
+                    }
+                }
+            }
+
+            search_start = abs_pos + cmd.len();
+        }
+    }
+
     find_cmd_includes(content, "\\input{", &mut includes, "input");
     find_cmd_includes(content, "\\include{", &mut includes, "include");
     find_cmd_includes(content, "\\subfile{", &mut includes, "subfile");
+    find_cmd_imports(content, "\\import{", &mut includes);
+    find_cmd_imports(content, "\\subimport{", &mut includes);
 
     // Sort by position
     includes.sort_by_key(|(pos, _, _)| *pos);

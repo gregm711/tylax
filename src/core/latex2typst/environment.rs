@@ -5,6 +5,7 @@
 use mitex_parser::syntax::{CmdItem, EnvItem, SyntaxElement, SyntaxKind, SyntaxNode};
 use rowan::ast::AstNode;
 use std::fmt::Write;
+use std::time::Instant;
 
 use super::context::{ConversionMode, EnvironmentContext, LatexConverter, TemplateKind};
 use super::table::{parse_with_grid_parser, CellAlign};
@@ -27,6 +28,11 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
     let env_name = env.name_tok().map(|t| t.text().to_string());
     let env_str = env_name.as_deref().unwrap_or("");
     let env_trim = env_str.trim().trim_end_matches('*');
+    if conv.state.profile_enabled {
+        conv.state.profile_last_env = Some(env_trim.to_string());
+    }
+    let profile_enabled = conv.state.profile_enabled;
+    let env_start = if profile_enabled { Some(Instant::now()) } else { None };
 
     match env_trim {
         // Document environment - marks end of preamble
@@ -46,7 +52,7 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         }
 
         // Tabular environment
-        "tabular" | "tabularx" | "longtable" | "longtabu" | "array" => {
+        "tabular" | "tabularx" | "longtable" | "longtab" | "longtabu" | "array" => {
             convert_tabular(conv, &node, output);
         }
 
@@ -58,7 +64,7 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             conv.state.pop_env();
             output.push('\n');
         }
-        "enumerate" => {
+        "enumerate" | "compactenum" => {
             conv.state.push_env(EnvironmentContext::Enumerate);
             output.push('\n');
             conv.visit_env_content(&node, output);
@@ -72,9 +78,98 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             conv.state.pop_env();
             output.push('\n');
         }
+        "list" => {
+            // Generic list environment; treat as itemize
+            conv.state.push_env(EnvironmentContext::Itemize);
+            output.push('\n');
+            conv.visit_env_content(&node, output);
+            conv.state.pop_env();
+            output.push('\n');
+        }
         "multicols" => {
             // Ignore column layout; emit content
             conv.visit_env_content(&node, output);
+        }
+        "spacing" | "onehalfspace" | "singlespace" | "doublespace" | "justifying" => {
+            // setspace environment: ignore spacing, emit content.
+            conv.visit_env_content(&node, output);
+        }
+        "vplace" => {
+            // Memoir vertical placement: approximate with flexible vertical space.
+            output.push_str("\n#v(1fr)\n");
+            conv.visit_env_content(&node, output);
+            output.push_str("\n#v(1fr)\n");
+        }
+        // Thesis/front-matter wrappers: emit content or light headings.
+        "address" | "mainf" | "bibliof" | "publishedcontent" | "bibunit"
+        | "romanpages" | "mclistof" | "mccorrection" => {
+            conv.visit_env_content(&node, output);
+        }
+        "abstractseparate" => {
+            output.push_str("\n= Abstract\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "abstractpage" | "thesisabstract" => {
+            output.push_str("\n= Abstract\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "refsection" => {
+            // Bibliography subsection wrappers (biblatex): emit content.
+            conv.visit_env_content(&node, output);
+        }
+        "textblock" | "thesis" | "body" => {
+            // textpos/thesis wrappers: ignore layout, emit content.
+            conv.visit_env_content(&node, output);
+        }
+        "thesisacknowledgments" | "thesisacknowledgements" | "thankpage" => {
+            output.push_str("\n= Acknowledgments\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "thesisdeclaration" => {
+            output.push_str("\n= Declaration\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "synopsis" => {
+            output.push_str("\n= Synopsis\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "researchpage" => {
+            output.push_str("\n= Research\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "zusammenfassung" => {
+            output.push_str("\n= Zusammenfassung\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "ozet" => {
+            output.push_str("\n= Ozet\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "otherlanguage" => {
+            conv.visit_env_content(&node, output);
+        }
+        "abbrv" => {
+            output.push_str("\n= Abbreviations\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "vita" => {
+            output.push_str("\n= Vita\n\n");
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+        "filecontents" => {
+            // LaTeX writes these to files; ignore output.
+            let mut _scratch = String::new();
+            conv.visit_env_content(&node, &mut _scratch);
         }
 
         // ICML author list (metadata only)
@@ -87,11 +182,17 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         "equation" => {
             convert_equation(conv, &node, env_str, output);
         }
+        "linenomath" => {
+            conv.visit_env_content(&node, output);
+        }
         "align" | "aligned" | "alignat" | "flalign" | "eqnarray" => {
             convert_align(conv, &node, env_str, output);
         }
         "gather" => {
             convert_gather(conv, &node, env_str, output);
+        }
+        "gathered" => {
+            convert_gathered(conv, &node, output);
         }
         "multline" => {
             convert_multline(conv, &node, env_str, output);
@@ -154,7 +255,7 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         "savequote" => {
             convert_savequote(conv, &node, output);
         }
-        "frontmatter" | "sloppypar" | "fullwidth" => {
+        "frontmatter" | "sloppypar" | "fullwidth" | "landscape" | "onecolumn" => {
             conv.visit_env_content(&node, output);
         }
         "docspec" | "docspecdef" => {
@@ -236,13 +337,42 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             }
         }
 
+        // IEEE biography blocks
+        "IEEEbiography" | "IEEEbiographynophoto" => {
+            let name = conv
+                .get_env_required_arg(&node, 0)
+                .map(|raw| convert_caption_text(&raw))
+                .unwrap_or_default();
+            output.push_str("\n#block[\n");
+            if !name.trim().is_empty() {
+                let _ = writeln!(output, "#text(weight: \"bold\")[{}]", name.trim());
+                output.push_str("#v(0.25em)\n");
+            }
+            conv.visit_env_content(&node, output);
+            output.push_str("\n]\n");
+        }
+
+        // Wrapper environments that should keep inner content
+        "subequations" | "savenotes" => {
+            output.push('\n');
+            conv.visit_env_content(&node, output);
+            output.push('\n');
+        }
+
+        // Custom shaded blocks
+        "greycustomblock" => {
+            output.push_str("\n#block(fill: luma(245), stroke: luma(200), inset: 0.6em, radius: 4pt)[\n");
+            conv.visit_env_content(&node, output);
+            output.push_str("\n]\n");
+        }
+
         // Comment environment (ignore content)
         "comment" => {
             // Ignore everything inside.
         }
 
         // Quote environments
-        "quote" | "quotation" => {
+        "quote" | "quotation" | "customblockquote" => {
             output.push_str("\n#quote(block: true)[\n");
             conv.visit_env_content(&node, output);
             output.push_str("\n]\n");
@@ -295,7 +425,7 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         }
 
         // Bibliography
-        "thebibliography" => {
+        "thebibliography" | "mcitethebibliography" => {
             convert_bibliography(conv, &node, output);
         }
 
@@ -355,6 +485,13 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
                 conv.visit_env_content(&node, output);
                 let _ = write!(output, "\n/* End {} */\n", env_trim);
             }
+        }
+    }
+
+    if let Some(start) = env_start {
+        let elapsed = start.elapsed().as_secs_f64();
+        if elapsed >= 0.05 {
+            eprintln!("[tylax] env {} total {:.3}s", env_trim, elapsed);
         }
     }
 }
@@ -565,33 +702,30 @@ fn convert_table(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Stri
     let mut caption_cmd: Option<CmdItem> = None;
     let mut label_text = String::new();
     let mut table_content = String::new();
-
-    // First pass: extract caption, label, and tabular content using AST
-    for child in node.children_with_tokens() {
-        if let SyntaxElement::Node(n) = &child {
-            if let Some(cmd) = CmdItem::cast(n.clone()) {
-                if let Some(name_tok) = cmd.name_tok() {
-                    let name = name_tok.text();
-                    if name == "\\caption" {
-                        caption_cmd = Some(cmd.clone());
-                    } else if name == "\\label" {
-                        if let Some(lbl) = conv.get_required_arg(&cmd, 0) {
-                            label_text = lbl;
-                        }
+    // First pass: extract caption, label, and tabular content using AST nodes only.
+    for child in node.children() {
+        if let Some(cmd) = CmdItem::cast(child.clone()) {
+            if let Some(name_tok) = cmd.name_tok() {
+                let name = name_tok.text();
+                if name == "\\caption" {
+                    caption_cmd = Some(cmd.clone());
+                } else if name == "\\label" {
+                    if let Some(lbl) = conv.get_required_arg(&cmd, 0) {
+                        label_text = lbl;
                     }
                 }
             }
-            // Check for tabular environment
-            if let Some(env) = EnvItem::cast(n.clone()) {
-                if env
-                    .name_tok()
-                    .map(|t| t.text().to_string())
-                    .unwrap_or_default()
-                    .starts_with("tabular")
-                {
-                    // convert_tabular handles its own push/pop of Tabular context
-                    convert_tabular(conv, n, &mut table_content);
-                }
+        }
+        // Check for tabular environment
+        if let Some(env) = EnvItem::cast(child.clone()) {
+            if env
+                .name_tok()
+                .map(|t| t.text().to_string())
+                .unwrap_or_default()
+                .starts_with("tabular")
+            {
+                // convert_tabular handles its own push/pop of Tabular context
+                convert_tabular(conv, &child, &mut table_content);
             }
         }
     }
@@ -657,7 +791,22 @@ fn convert_tabular(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut St
         output.push_str(&math_output);
     } else {
         // Use the new grid parser
+        let parse_start = if conv.state.profile_enabled {
+            Some(Instant::now())
+        } else {
+            None
+        };
         let typst_output = parse_with_grid_parser(&content, alignments);
+        if let Some(start) = parse_start {
+            let elapsed = start.elapsed().as_secs_f64();
+            if elapsed >= 0.05 {
+                eprintln!(
+                    "[tylax] tabular parse {:.3}s (len={})",
+                    elapsed,
+                    content.len()
+                );
+            }
+        }
         output.push_str(&typst_output);
     }
 
@@ -769,6 +918,9 @@ fn convert_align(
     conv.state.push_env(EnvironmentContext::Align);
     let prev_mode = conv.state.mode;
     conv.state.mode = ConversionMode::Math;
+    if conv.state.profile_enabled {
+        eprintln!("[tylax] align enter");
+    }
 
     // Only add $ for non-aligned (aligned is usually inside math mode already)
     let is_inner = env_name == "aligned";
@@ -794,10 +946,30 @@ fn convert_align(
 
     // Collect math content into a buffer for post-processing
     let mut math_content = String::new();
+    let visit_start = if conv.state.profile_enabled {
+        Some(Instant::now())
+    } else {
+        None
+    };
     conv.visit_env_content(node, &mut math_content);
+    let visit_secs = visit_start.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
 
     // Apply math cleanup
+    let cleanup_start = if conv.state.profile_enabled {
+        Some(Instant::now())
+    } else {
+        None
+    };
     let cleaned = conv.cleanup_math_spacing(&math_content);
+    let cleanup_secs = cleanup_start.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
+    if conv.state.profile_enabled {
+        eprintln!(
+            "[tylax] align len={} visit={:.3}s cleanup={:.3}s",
+            math_content.len(),
+            visit_secs,
+            cleanup_secs
+        );
+    }
 
     if !is_inner {
         output.push_str("#math.equation(block: true");
@@ -838,7 +1010,11 @@ fn convert_gather(
     conv.state.mode = prev_mode;
     conv.state.pop_env();
 
-    let processed = conv.postprocess_math(content);
+    let processed = if content.len() > 10_000 {
+        conv.cleanup_math_spacing(&content)
+    } else {
+        conv.postprocess_math(content)
+    };
 
     let mut heading = String::new();
     heading.push_str("#math.equation(block: true");
@@ -870,7 +1046,11 @@ fn convert_multline(
     conv.state.mode = prev_mode;
     conv.state.pop_env();
 
-    let processed = conv.postprocess_math(content);
+    let processed = if content.len() > 10_000 {
+        conv.cleanup_math_spacing(&content)
+    } else {
+        conv.postprocess_math(content)
+    };
 
     let mut heading = String::new();
     heading.push_str("#math.equation(block: true");
@@ -881,6 +1061,22 @@ fn convert_multline(
     heading.push_str(processed.trim());
     heading.push_str(" $\n]\n");
     let _ = write!(output, "{}", heading);
+}
+
+/// Convert a gathered environment (inner math)
+fn convert_gathered(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut String) {
+    conv.state.push_env(EnvironmentContext::Align);
+    let prev_mode = conv.state.mode;
+    conv.state.mode = ConversionMode::Math;
+
+    let mut content = String::new();
+    conv.visit_env_content(node, &mut content);
+
+    conv.state.mode = prev_mode;
+    conv.state.pop_env();
+
+    let cleaned = conv.cleanup_math_spacing(&content);
+    output.push_str(cleaned.trim());
 }
 
 /// Convert a matrix environment

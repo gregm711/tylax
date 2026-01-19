@@ -1078,11 +1078,30 @@ fn maybe_code_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Block> 
                 return Some(Block::CodeBlock(text));
             }
         }
+        if let Some(text) = find_first_string(&args) {
+            return Some(Block::CodeBlock(text));
+        }
+        return Some(Block::CodeBlock(node_full_text(&args)));
     }
     losses.push(Loss::new(
         "raw",
         "raw block without simple string content not supported",
     ));
+    Some(Block::CodeBlock(node_full_text(node)))
+}
+
+fn find_first_string(node: &SyntaxNode) -> Option<String> {
+    match node.kind() {
+        SyntaxKind::Str | SyntaxKind::Text => {
+            return Some(node.text().trim_matches('"').to_string())
+        }
+        _ => {}
+    }
+    for child in node.children() {
+        if let Some(found) = find_first_string(&child) {
+            return Some(found);
+        }
+    }
     None
 }
 
