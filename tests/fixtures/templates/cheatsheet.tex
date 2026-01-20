@@ -33,11 +33,11 @@
 
 \par\vspace{0.3em}
 
-\section{Limits}
+\section*{Limits}
 
-$\lim_(x \to a) f(x) = L$ means $\forall \epsilon > 0, \exists \delta > 0$ s.t. $|x - a| < \delta \Rightarrow |f(x) - L| < \epsilon$
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 5pt, radius: 3pt, )[ $\lim_(x \to a) f(x) = L$ means $\forall \epsilon > 0, \exists \delta > 0$ s.t. $|x - a| < \delta \Rightarrow |f(x) - L| < \epsilon$ ] \}
 
-\subsection{Key Limits}
+\subsection*{Key Limits}
 
 \begin{itemize}
   \item  \[
@@ -54,25 +54,21 @@ $\lim_(x \to a) f(x) = L$ means $\forall \epsilon > 0, \exists \delta > 0$ s.t. 
 \]
 \end{itemize}
 
-\subsection{L'Hôpital's Rule}
+\subsection*{L'Hôpital's Rule}
 
-If $\lim f(x)/g(x) = 0/0$ or $infinity/infinity$:
+If $\lim f(x)/g(x) = 0/0$ or $infinity/infinity$: \{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 5pt, radius: 3pt, )[ $\lim_(x \to a) f(x)/g(x) = \lim_(x \to a) (f'(x))/(g'(x))$ ] \}
 
-\[
-\lim_(x \to a) f(x)/g(x) = \lim_(x \to a) (f'(x))/(g'(x))
-\]
+\section*{Derivatives}
 
-\section{Derivatives}
+\subsection*{Basic Rules}
 
-\subsection{Basic Rules}
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 5pt, radius: 3pt, )[ $(f g)' = f' g + f g'$ \\ $(f/g)' = (f' g - f g')/g^2$ \\ $(f compose g)' = f'(g(x)) dot g'(x)$ ] \}
 
-$(f g)' = f' g + f g'$ \\ $(f/g)' = (f' g - f g')/g^2$ \\ $(f compose g)' = f'(g(x)) dot g'(x)$
-
-\subsection{Common Derivatives}
+\subsection*{Common Derivatives}
 
 {\small $d/(d x) x^n = n x^(n-1)$ $d/(d x) e^x = e^x$ $d/(d x) ln x = 1/x$ $d/(d x) a^x = a^x ln a$ $d/(d x) sin x = cos x$ $d/(d x) cos x = -sin x$ $d/(d x) tan x = sec^2 x$ $d/(d x) sec x = sec x tan x$ $d/(d x) arcsin x = 1/\sqrt{1-x^2}$ $d/(d x) arctan x = 1/(1+x^2)$ }
 
-\subsection{Implicit Differentiation}
+\subsection*{Implicit Differentiation}
 
 \begin{enumerate}
   \item Differentiate both sides w.r.t. $x$
@@ -80,29 +76,27 @@ $(f g)' = f' g + f g'$ \\ $(f/g)' = (f' g - f g')/g^2$ \\ $(f compose g)' = f'(g
   \item Solve for $d y \/ d x$
 \end{enumerate}
 
-\section{Integrals}
+\section*{Integrals}
 
-\subsection{Basic Forms}
+\subsection*{Basic Forms}
 
-$\int x^n d x = x^(n+1)/(n+1) + C$ (for $n eq.not -1$) \\ $\int 1/x d x = ln|x| + C$ \\ $\int e^x d x = e^x + C$
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 5pt, radius: 3pt, )[ $\int x^n d x = x^(n+1)/(n+1) + C$ (for $n eq.not -1$) \\ $\int 1/x d x = ln|x| + C$ \\ $\int e^x d x = e^x + C$ ] \}
 
-\subsection{Trig Integrals}
+\subsection*{Trig Integrals}
 
 {\small $\int sin x d x = -cos x + C$ $\int cos x d x = sin x + C$ $\int sec^2 x d x = tan x + C$ $\int sec x tan x d x = sec x + C$ }
 
-\subsection{Integration Techniques}
+\subsection*{Integration Techniques}
 
-\textbf{u-Substitution:} $\int f(g(x)) g'(x) d x = \int f(u) d u$
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 5pt, radius: 3pt, )[ \textbf{u-Substitution:} $\int f(g(x)) g'(x) d x = \int f(u) d u$ ] \}
 
 \textbf{By Parts:} $\int u d v = u v - \int v d u$
 
 \textbf{LIATE Rule:} Choose $u$ in order: Log, Inverse trig, Algebraic, Trig, Exponential
 
-\subsection{Definite Integrals}
+\subsection*{Definite Integrals}
 
-\[
-\int_a^b f(x) d x = F(b) - F(a)
-\]
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 5pt, radius: 3pt, )[ $\int_a^b f(x) d x = F(b) - F(a)$ ] \}
 
 \textbf{Properties:}
 
@@ -118,15 +112,13 @@ $\int x^n d x = x^(n+1)/(n+1) + C$ (for $n eq.not -1$) \\ $\int 1/x d x = ln|x| 
 \]
 \end{itemize}
 
-\section{Applications}
+\section*{Applications}
 
-\subsection{Area Between Curves}
+\subsection*{Area Between Curves}
 
-\[
-A = \int_a^b |f(x) - g(x)| d x
-\]
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 5pt, radius: 3pt, )[ $A = \int_a^b |f(x) - g(x)| d x$ ] \}
 
-\subsection{Volume of Revolution}
+\subsection*{Volume of Revolution}
 
 \textbf{Disk Method:} $V = \pi \int_a^b [f(x)]^2 d x$
 
@@ -134,25 +126,21 @@ A = \int_a^b |f(x) - g(x)| d x
 
 \textbf{Shell:} $V = 2 \pi \int_a^b x f(x) d x$
 
-\subsection{Arc Length}
+\subsection*{Arc Length}
 
-\[
-L = \int_a^b sqrt(1 + [f'(x)]^2) d x
-\]
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 5pt, radius: 3pt, )[ $L = \int_a^b sqrt(1 + [f'(x)]^2) d x$ ] \}
 
-\section{Series}
+\section*{Series}
 
-\subsection{Geometric Series}
+\subsection*{Geometric Series}
 
-$\sum_(n=0)^infinity a r^n = a/(1-r)$ for $|r| < 1$
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 5pt, radius: 3pt, )[ $\sum_(n=0)^infinity a r^n = a/(1-r)$ for $|r| < 1$ ] \}
 
-\subsection{Taylor Series}
+\subsection*{Taylor Series}
 
-\[
-f(x) = \sum_(n=0)^infinity (f^((n))(a))/(n!) (x-a)^n
-\]
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 5pt, radius: 3pt, )[ $f(x) = \sum_(n=0)^infinity (f^((n))(a))/(n!) (x-a)^n$ ] \}
 
-\subsection{Common Series}
+\subsection*{Common Series}
 
 \begin{itemize}
   \item  \[
@@ -167,7 +155,7 @@ cos x = \sum_(n=0)^infinity (-1)^n x^(2n) / (2n)!
   \item $1/(1-x) = \sum_(n=0)^infinity x^n$ for $|x| < 1$
 \end{itemize}
 
-\subsection{Convergence Tests}
+\subsection*{Convergence Tests}
 
 \begin{itemize}
   \item \textbf{Ratio:} $\lim |a_(n+1)/a_n| < 1 \Rightarrow$ converges
@@ -177,9 +165,9 @@ cos x = \sum_(n=0)^infinity (-1)^n x^(2n) / (2n)!
   \item \textbf{Alternating:} $a_n$ decreasing, $\lim a_n = 0 \Rightarrow$ converges
 \end{itemize}
 
-\section{Quick Reference}
+\section*{Quick Reference}
 
-\subsection{Trig Identities}
+\subsection*{Trig Identities}
 
 \begin{itemize}
   \item  \[
@@ -196,7 +184,7 @@ cos 2x = cos^2 x - sin^2 x
 \]
 \end{itemize}
 
-\subsection{Useful Values}
+\subsection*{Useful Values}
 
 {\small $\theta$ $sin$ $cos$ $tan$ $0$ $0$ $1$ $0$ $\pi/6$ $1/2$ $\sqrt{3}/2$ $1/\sqrt{3}$ $\pi/4$ $\sqrt{2}/2$ $\sqrt{2}/2$ $1$ $\pi/3$ $\sqrt{3}/2$ $1/2$ $\sqrt{3}$ $\pi/2$ $1$ $0$ undef }
 

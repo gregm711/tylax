@@ -13,6 +13,7 @@ use crate::template_adapters::iclr::maybe_convert_iclr;
 use crate::template_adapters::icml::maybe_convert_icml;
 use crate::template_adapters::jmlr::maybe_convert_jmlr;
 use crate::template_adapters::letter::maybe_convert_letter;
+use crate::template_adapters::generic::maybe_convert_template_with;
 use crate::template_adapters::neurips::maybe_convert_neurips;
 use crate::template_adapters::newsletter::maybe_convert_newsletter;
 use crate::template_adapters::tmlr::maybe_convert_tmlr;
@@ -98,6 +99,9 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
         if let Some(rendered) = maybe_convert_newsletter(input) {
             return rendered;
         }
+        if let Some(rendered) = maybe_convert_template_with(input) {
+            return rendered;
+        }
         if let Some(rendered) = maybe_convert_arxiv(input) {
             return rendered;
         }
@@ -109,11 +113,10 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
             hints.text_size.as_deref().and_then(|size| parse_length_to_pt(size, "10pt"));
         let preamble = render_article_preamble(&hints);
         let number_equations = equation_numbering_enabled(&hints);
-        let cite_command = if hints.uses_natbib {
-            Some("citep".to_string())
-        } else {
-            None
-        };
+        let cite_command = hints
+            .cite_command
+            .clone()
+            .or_else(|| if hints.uses_natbib { Some("citep".to_string()) } else { None });
         let body = render_document(
             &doc,
             LatexRenderOptions {
@@ -128,6 +131,7 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
                 bibliography_style_default: hints.bibliography_style.clone(),
                 cite_command,
                 base_font_size_pt,
+                heading_numbering_none: hints.heading_numbering_none,
             },
         );
         let mut out = String::new();
@@ -143,11 +147,10 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
     let hints = extract_preamble_hints(input);
     let base_font_size_pt =
         hints.text_size.as_deref().and_then(|size| parse_length_to_pt(size, "10pt"));
-    let cite_command = if hints.uses_natbib {
-        Some("citep".to_string())
-    } else {
-        None
-    };
+    let cite_command = hints
+        .cite_command
+        .clone()
+        .or_else(|| if hints.uses_natbib { Some("citep".to_string()) } else { None });
     render_document(
         &doc,
         LatexRenderOptions {
@@ -162,6 +165,7 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
             bibliography_style_default: hints.bibliography_style.clone(),
             cite_command,
             base_font_size_pt,
+            heading_numbering_none: hints.heading_numbering_none,
         },
     )
 }

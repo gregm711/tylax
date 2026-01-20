@@ -112,6 +112,16 @@ impl ConversionWarning {
     }
 }
 
+impl std::fmt::Display for ConversionWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(location) = &self.location {
+            write!(f, "[{}] {} ({})", self.kind, self.message, location)
+        } else {
+            write!(f, "[{}] {}", self.kind, self.message)
+        }
+    }
+}
+
 impl From<ConversionWarning> for crate::utils::error::CliDiagnostic {
     fn from(warning: ConversionWarning) -> Self {
         use crate::utils::error::{CliDiagnostic, DiagnosticSeverity};
@@ -158,6 +168,11 @@ impl ConversionResult {
 
     pub fn has_warnings(&self) -> bool {
         !self.warnings.is_empty()
+    }
+
+    /// Get warnings as formatted strings.
+    pub fn format_warnings(&self) -> Vec<String> {
+        self.warnings.iter().map(|w| w.to_string()).collect()
     }
 }
 
@@ -358,6 +373,52 @@ mod tests {
     }
 
     #[test]
+    fn test_sfrac() {
+        let input = r"\sfrac{1}{2}";
+        let output = latex_math_to_typst(input);
+        println!("sfrac output: {}", output);
+        assert!(output.contains("frac") || output.contains("/"));
+    }
+
+    #[test]
+    fn test_prescript() {
+        let input = r"\prescript{a}{b}{X}";
+        let output = latex_math_to_typst(input);
+        assert!(output.contains("_{b}"));
+        assert!(output.contains("^{a}"));
+        assert!(output.contains("X"));
+    }
+
+    #[test]
+    fn test_bbbk() {
+        let input = r"\Bbbk";
+        let output = latex_math_to_typst(input);
+        assert!(output.contains("bb(k)"));
+    }
+
+    #[test]
+    fn test_bm_shorthand() {
+        let input = r"\bmz + \bmA";
+        let output = latex_math_to_typst(input);
+        assert!(output.contains("bold(z)"));
+        assert!(output.contains("bold(A)"));
+    }
+
+    #[test]
+    fn test_bar_shorthand() {
+        let input = r"\barK";
+        let output = latex_math_to_typst(input);
+        assert!(output.contains("overline(K)"));
+    }
+
+    #[test]
+    fn test_forall_shorthand() {
+        let input = r"\forallf";
+        let output = latex_math_to_typst(input);
+        assert!(output.contains("forall f"));
+    }
+
+    #[test]
     fn test_simple_document() {
         let input = r"\documentclass{article}
 \begin{document}
@@ -400,8 +461,20 @@ Content here.
 \textbf{bold} and \textit{italic}
 \end{document}";
         let output = latex_to_typst(input);
-        assert!(output.contains("*bold*"));
-        assert!(output.contains("_italic_"));
+        assert!(output.contains("#strong[bold]"));
+        assert!(output.contains("#emph[italic]"));
+    }
+
+    #[test]
+    fn test_textasciigrave() {
+        let input = r"\documentclass{article}
+\begin{document}
+tick \textasciigrave{} tock
+\end{document}";
+        let output = latex_to_typst(input);
+        assert!(output.contains("\\`"));
+        assert!(output.contains("tick"));
+        assert!(output.contains("tock"));
     }
 
     #[test]

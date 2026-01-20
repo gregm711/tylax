@@ -21,7 +21,6 @@ pub use engine::{expand_macros, EvalError, EvalResult, MiniEval, SourceSpan, Val
 pub use preprocess::{extract_let_definitions, preprocess_typst, TypstDefDb};
 
 use markup::{convert_markup_node, flush_pending_bibliography_heading};
-use math::convert_math_node;
 
 // =============================================================================
 // Warning System (mirroring latex2typst's design)

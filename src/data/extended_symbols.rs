@@ -17,6 +17,7 @@ lazy_static! {
         m.insert("displaystyle", "display");
         m.insert("textstyle", "inline");
         m.insert("hspace", "#h");
+        m.insert("Bbbk", "bb(k)");
 
         // === Delimiters and Bars ===
         m.insert("|", "bar.v.double");

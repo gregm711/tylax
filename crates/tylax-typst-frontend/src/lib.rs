@@ -37,6 +37,24 @@ fn collect_blocks(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Block> {
     while i < children.len() {
         let child = &children[i];
         match child.kind() {
+            SyntaxKind::SetRule => {
+                if !is_supported_set_rule(child) {
+                    let msg = set_rule_name(child)
+                        .map(|name| format!("set rule {} not supported", name))
+                        .unwrap_or_else(|| "set rule not supported".to_string());
+                    losses.push(Loss::new("set-rule", msg));
+                }
+                i += 1;
+            }
+            SyntaxKind::ShowRule => {
+                if !is_supported_show_rule(child) {
+                    let msg = show_rule_target_name(child)
+                        .map(|name| format!("show rule {} not supported", name))
+                        .unwrap_or_else(|| "show rule not supported".to_string());
+                    losses.push(Loss::new("show-rule", msg));
+                }
+                i += 1;
+            }
             SyntaxKind::Import
             | SyntaxKind::ModuleImport
             | SyntaxKind::Include
@@ -233,6 +251,9 @@ fn collect_blocks(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Block> {
                 } else if let Some(block) = maybe_outline_block(&child, losses) {
                     flush_paragraph(&mut blocks, &mut current_inline);
                     blocks.push(block);
+                } else if let Some(extra_blocks) = maybe_appendix_blocks(&child, losses) {
+                    flush_paragraph(&mut blocks, &mut current_inline);
+                    blocks.extend(extra_blocks);
                 } else if let Some(block) = maybe_vspace_block(&child, losses) {
                     flush_paragraph(&mut blocks, &mut current_inline);
                     blocks.push(block);
@@ -433,6 +454,22 @@ fn collect_inlines(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Inline> {
         | SyntaxKind::ModuleImport
         | SyntaxKind::Include
         | SyntaxKind::ModuleInclude => {}
+        SyntaxKind::SetRule => {
+            if !is_supported_set_rule(node) {
+                let msg = set_rule_name(node)
+                    .map(|name| format!("set rule {} not supported", name))
+                    .unwrap_or_else(|| "set rule not supported".to_string());
+                losses.push(Loss::new("set-rule", msg));
+            }
+        }
+        SyntaxKind::ShowRule => {
+            if !is_supported_show_rule(node) {
+                let msg = show_rule_target_name(node)
+                    .map(|name| format!("show rule {} not supported", name))
+                    .unwrap_or_else(|| "show rule not supported".to_string());
+                losses.push(Loss::new("show-rule", msg));
+            }
+        }
         SyntaxKind::Text | SyntaxKind::Str => {
             let text = node.text().to_string();
             if !text.is_empty() {
@@ -1232,6 +1269,118 @@ fn get_func_call_name(node: &SyntaxNode) -> Option<String> {
     None
 }
 
+fn set_rule_name(node: &SyntaxNode) -> Option<String> {
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::Ident => return Some(child.text().to_string()),
+            SyntaxKind::FieldAccess => {
+                let mut parts = Vec::new();
+                for part in child.children() {
+                    if part.kind() == SyntaxKind::Ident {
+                        parts.push(part.text().to_string());
+                    }
+                }
+                if !parts.is_empty() {
+                    return Some(parts.join("."));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn show_rule_target_name(node: &SyntaxNode) -> Option<String> {
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::Ident => return Some(child.text().to_string()),
+            SyntaxKind::FuncCall => {
+                if let Some(name) = get_func_call_name(&child) {
+                    return Some(name);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn func_call_has_with(node: &SyntaxNode) -> bool {
+    let text = node_full_text(node);
+    text.contains(".with")
+}
+
+fn node_contains_kind(node: &SyntaxNode, kind: SyntaxKind) -> bool {
+    let mut stack = vec![node.clone()];
+    while let Some(current) = stack.pop() {
+        if current.kind() == kind {
+            return true;
+        }
+        for child in current.children() {
+            stack.push(child.clone());
+        }
+    }
+    false
+}
+
+fn is_supported_set_rule(node: &SyntaxNode) -> bool {
+    let Some(name) = set_rule_name(node) else {
+        return false;
+    };
+    matches!(
+        name.as_str(),
+        "page"
+            | "text"
+            | "par"
+            | "math.equation"
+            | "bibliography"
+            | "std.bibliography"
+            | "align"
+            | "heading"
+            | "cite"
+            | "enum"
+            | "document"
+    )
+}
+
+fn is_supported_show_rule(node: &SyntaxNode) -> bool {
+    if node_contains_kind(node, SyntaxKind::Closure) {
+        return true;
+    }
+    let mut has_direct_ident = false;
+    let mut has_func_call = false;
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::Ident => {
+                has_direct_ident = true;
+                if child.text() == "heading" {
+                    return true;
+                }
+            }
+            SyntaxKind::FuncCall => {
+                has_func_call = true;
+                if let Some(name) = get_func_call_name(&child) {
+                    if name == "heading"
+                        || name == "heading.where"
+                        || name.ends_with(".with")
+                        || func_call_has_with(&child)
+                    {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if has_direct_ident && !has_func_call {
+        return true;
+    }
+    if !has_direct_ident && !has_func_call {
+        return true;
+    }
+    has_func_call && !has_direct_ident
+}
+
 fn extract_named_key(node: &SyntaxNode) -> Option<String> {
     node.children()
         .find(|c| c.kind() == SyntaxKind::Ident)
@@ -1477,6 +1626,88 @@ fn maybe_outline_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Bloc
         }
     }
     Some(Block::Outline { title })
+}
+
+fn maybe_appendix_blocks(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<Block>> {
+    let func_name = get_func_call_name(node)?;
+    if func_name != "appendix" {
+        return None;
+    }
+
+    let mut blocks: Vec<Block> = Vec::new();
+    blocks.push(Block::Paragraph(vec![Inline::RawLatex(
+        "\\appendix".to_string(),
+    )]));
+
+    let mut title_inlines: Option<Vec<Inline>> = None;
+    let mut body_blocks: Vec<Block> = Vec::new();
+
+    let content_blocks = extract_content_blocks(node, losses);
+    if !content_blocks.is_empty() {
+        if let Some(Block::Paragraph(inlines)) = content_blocks.first() {
+            if !inlines.is_empty() {
+                title_inlines = Some(inlines.clone());
+            }
+        }
+        body_blocks.extend(content_blocks.into_iter().skip(1));
+    } else if let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) {
+        let positional = collect_positional_args(&args);
+        if let Some(first) = positional.first() {
+            title_inlines = arg_to_inlines(first, losses);
+        }
+        for arg in positional.iter().skip(1) {
+            body_blocks.extend(arg_to_blocks(arg, losses));
+        }
+    }
+
+    if let Some(title) = title_inlines {
+        blocks.push(Block::Heading {
+            level: 1,
+            content: title,
+            numbered: true,
+        });
+    }
+    blocks.extend(body_blocks);
+    Some(blocks)
+}
+
+fn collect_positional_args(args: &SyntaxNode) -> Vec<SyntaxNode> {
+    let mut out = Vec::new();
+    for child in args.children() {
+        match child.kind() {
+            SyntaxKind::Named | SyntaxKind::Comma | SyntaxKind::Space => {}
+            _ => out.push(child.clone()),
+        }
+    }
+    out
+}
+
+fn arg_to_inlines(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<Inline>> {
+    match node.kind() {
+        SyntaxKind::Str | SyntaxKind::Text => Some(vec![Inline::Text(
+            node.text().trim_matches('"').to_string(),
+        )]),
+        SyntaxKind::ContentBlock | SyntaxKind::Markup => Some(collect_inlines(node, losses)),
+        _ => {
+            if let Some(text) = parse_string_literal(node) {
+                Some(vec![Inline::Text(text)])
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn arg_to_blocks(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Block> {
+    match node.kind() {
+        SyntaxKind::ContentBlock | SyntaxKind::Markup => collect_blocks(node, losses),
+        SyntaxKind::Str | SyntaxKind::Text => vec![Block::Paragraph(vec![Inline::Text(
+            node.text().trim_matches('"').to_string(),
+        )])],
+        _ => arg_to_inlines(node, losses)
+            .map(|inlines| vec![Block::Paragraph(inlines)])
+            .unwrap_or_default(),
+    }
 }
 
 fn maybe_page_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<PageBlock> {

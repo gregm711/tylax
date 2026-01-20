@@ -18,6 +18,8 @@ use fxhash::FxHashMap;
 use lazy_static::lazy_static;
 
 use super::engine::{ArgumentErrorType, EngineWarning};
+use super::engine::lexer::{detokenize, tokenize};
+use super::engine::primitives::{parse_definitions, DefinitionKind};
 use super::{ConversionResult, ConversionWarning, WarningKind};
 
 use super::utils::{
@@ -354,7 +356,7 @@ impl ConversionState {
 
     /// Take all structured warnings
     pub fn take_structured_warnings(&mut self) -> Vec<ConversionWarning> {
-        std::mem::take(&mut self.structured_warnings)
+        dedupe_structured_warnings(std::mem::take(&mut self.structured_warnings))
     }
 }
 
@@ -524,15 +526,124 @@ impl LatexConverter {
 
             // Convert structured engine warnings to conversion warnings (type-safe!)
             for engine_warning in result.warnings {
+                if matches!(
+                    &engine_warning,
+                    EngineWarning::LetTargetNotFound { target, .. }
+                        if is_benign_let_target(target)
+                ) {
+                    continue;
+                }
+                let suppress_string_warning = matches!(
+                    &engine_warning,
+                    EngineWarning::UnsupportedPrimitive { name }
+                        if is_benign_unsupported_primitive(name)
+                ) || matches!(
+                    &engine_warning,
+                    EngineWarning::DepthExceeded { .. } | EngineWarning::TokenLimitExceeded { .. }
+                );
                 let warning = Self::convert_engine_warning(&engine_warning);
                 // Keep legacy string warning for compatibility
-                self.state.warnings.push(engine_warning.message());
+                if !suppress_string_warning {
+                    self.state.warnings.push(engine_warning.message());
+                }
                 self.state.structured_warnings.push(warning);
             }
 
             result.output
         } else {
             input.to_string()
+        }
+    }
+
+    /// Seed user-defined macros from raw input, so we can expand simple macros
+    /// even if the full macro expansion engine bails out.
+    fn seed_macros_from_input(&mut self, input: &str) {
+        let tokens = tokenize(input);
+        let (defs, _rest) = parse_definitions(tokens);
+        for def in defs {
+            match def {
+                DefinitionKind::NewCommand {
+                    name,
+                    num_args,
+                    default,
+                    body,
+                }
+                | DefinitionKind::RenewCommand {
+                    name,
+                    num_args,
+                    default,
+                    body,
+                }
+                | DefinitionKind::ProvideCommand {
+                    name,
+                    num_args,
+                    default,
+                    body,
+                } => {
+                    let replacement = detokenize(&body);
+                    let default_arg = default.map(|t| detokenize(&t));
+                    self.state.macros.insert(
+                        name.clone(),
+                        MacroDef {
+                            name,
+                            num_args: num_args as usize,
+                            default_arg,
+                            replacement,
+                        },
+                    );
+                }
+                DefinitionKind::Def {
+                    name,
+                    signature,
+                    body,
+                }
+                | DefinitionKind::Edef {
+                    name,
+                    signature,
+                    body,
+                } => {
+                    let replacement = detokenize(&body);
+                    let num_args = signature.num_args() as usize;
+                    self.state.macros.insert(
+                        name.clone(),
+                        MacroDef {
+                            name,
+                            num_args,
+                            default_arg: None,
+                            replacement,
+                        },
+                    );
+                }
+                DefinitionKind::Let { name, target } => {
+                    if let Some(existing) = self.state.macros.get(&target).cloned() {
+                        let mut cloned = existing.clone();
+                        cloned.name = name.clone();
+                        self.state.macros.insert(name, cloned);
+                    }
+                }
+                DefinitionKind::DeclareMathOperator {
+                    name,
+                    body,
+                    is_starred: _,
+                } => {
+                    let op = detokenize(&body);
+                    let replacement = format!("\\operatorname{{{}}}", op.trim());
+                    self.state.macros.insert(
+                        name.clone(),
+                        MacroDef {
+                            name,
+                            num_args: 0,
+                            default_arg: None,
+                            replacement,
+                        },
+                    );
+                }
+                DefinitionKind::NewEnvironment { .. }
+                | DefinitionKind::RenewEnvironment { .. }
+                | DefinitionKind::NewIf { .. } => {
+                    // ignore for now
+                }
+            }
         }
     }
 
@@ -633,6 +744,7 @@ impl LatexConverter {
         //   \begin{verbatim}\begin{document}\end{verbatim}  (inside verbatim - rare edge case)
         self.state.in_preamble = Self::has_real_begin_document(input);
         self.state.macro_cache.clear();
+        self.state.macros.clear();
         let timing_enabled = std::env::var("TYLAX_TIMING").is_ok();
         self.state.profile_enabled = std::env::var("TYLAX_PROFILE").is_ok();
         self.state.profile_nodes = 0;
@@ -668,9 +780,10 @@ impl LatexConverter {
         // Preprocess: protect zero-argument commands that MiTeX would otherwise lose
         let protected_input = protect_zero_arg_commands(&verb_expanded);
 
+        self.seed_macros_from_input(&protected_input);
+
         // Optionally expand macros using the token-based engine
         let mut expanded_input = self.preprocess_expansion(&protected_input, false);
-        self.state.macros.clear();
         // Strip bibliography commands that are not meaningful in Typst output.
         expanded_input = super::utils::strip_command_with_braced_arg(&expanded_input, "bibliographystyle");
         expanded_input = super::utils::strip_sectioning_stars(&expanded_input);
@@ -703,6 +816,17 @@ impl LatexConverter {
                 "algorithmic",
                 "algorithm*",
                 "algorithmic*",
+                "itemize",
+                "itemize*",
+                "enumerate",
+                "enumerate*",
+                "description",
+                "description*",
+                "list",
+                "list*",
+                "compactitem",
+                "compactenum",
+                "compactdesc",
             ],
         );
         expanded_input = super::utils::strip_command_optional_arg(&expanded_input, &["blindtext"]);
@@ -820,7 +944,7 @@ impl LatexConverter {
     /// Consume the current loss report.
     pub fn take_loss_report(&mut self) -> LossReport {
         let losses = std::mem::take(&mut self.state.losses);
-        let warnings = std::mem::take(&mut self.state.warnings);
+        let warnings = dedupe_string_warnings(std::mem::take(&mut self.state.warnings));
         LossReport::new("latex", "typst", losses, warnings)
     }
 
@@ -944,7 +1068,11 @@ impl LatexConverter {
                     output.push_str(&text.replace("\\]", "]"));
                     return;
                 }
-                if trimmed == "spacing" {
+                if trimmed == "spacing"
+                    || trimmed == "arraystretch"
+                    || trimmed == "eqnarray"
+                    || trimmed == "eqnarray*"
+                {
                     return;
                 }
                 if trimmed == "}" || trimmed == "document" || trimmed == "\\begin" || trimmed == "\\end" {
@@ -1793,9 +1921,10 @@ impl LatexConverter {
         doc.push_str(&cleaned_content);
 
         // Add warnings as comments
-        if !self.state.warnings.is_empty() {
+        let warnings = dedupe_string_warnings(self.state.warnings.clone());
+        if !warnings.is_empty() {
             doc.push_str("\n\n// Conversion warnings:\n");
-            for warning in &self.state.warnings {
+            for warning in &warnings {
                 let _ = writeln!(doc, "// - {}", warning);
             }
         }
@@ -2445,4 +2574,62 @@ impl Default for LatexConverter {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn dedupe_structured_warnings(warnings: Vec<ConversionWarning>) -> Vec<ConversionWarning> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    for warning in warnings {
+        let key = format!(
+            "{}|{}|{}",
+            warning.kind,
+            warning.message,
+            warning.location.as_deref().unwrap_or("")
+        );
+        if seen.insert(key) {
+            out.push(warning);
+        }
+    }
+    out
+}
+
+fn dedupe_string_warnings(warnings: Vec<String>) -> Vec<String> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    for warning in warnings {
+        if seen.insert(warning.clone()) {
+            out.push(warning);
+        }
+    }
+    out
+}
+
+fn is_benign_let_target(target: &str) -> bool {
+    if target.contains('@') {
+        return true;
+    }
+    matches!(
+        target,
+        "relax" | "mbox" | "allowbreak" | "makeindex"
+    )
+}
+
+fn is_benign_unsupported_primitive(name: &str) -> bool {
+    matches!(
+        name,
+        "catcode"
+            | "lccode"
+            | "uccode"
+            | "sfcode"
+            | "mathcode"
+            | "setbox"
+            | "box"
+            | "copy"
+            | "unhbox"
+            | "unvbox"
+            | "advance"
+            | "multiply"
+            | "divide"
+            | "the"
+    )
 }

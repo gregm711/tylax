@@ -16,9 +16,11 @@ pub struct PreambleHints {
     pub colors: BTreeMap<String, String>,
     pub heading_styles: BTreeMap<u8, HeadingStyle>,
     pub equation_numbering: Option<String>,
+    pub heading_numbering_none: bool,
     pub uses_natbib: bool,
     pub uses_amsthm: bool,
     pub has_headings: bool,
+    pub cite_command: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -53,6 +55,8 @@ pub fn extract_preamble_hints(input: &str) -> PreambleHints {
                         "text" => parse_text_set(&node, &mut hints),
                         "par" => parse_par_set(&node, &mut hints),
                         "math.equation" => parse_math_equation_set(&node, &mut hints),
+                        "heading" => parse_heading_set(&node, &mut hints),
+                        "cite" => parse_cite_set(&node, &mut hints),
                         "bibliography" | "std.bibliography" => {
                             parse_bibliography_set(&node, &mut hints)
                         }
@@ -397,6 +401,64 @@ fn parse_math_equation_set(node: &SyntaxNode, hints: &mut PreambleHints) {
         if key == "numbering" {
             if let Some(text) = extract_literal_string(&value) {
                 hints.equation_numbering = Some(text);
+            }
+        }
+    }
+}
+
+fn parse_heading_set(node: &SyntaxNode, hints: &mut PreambleHints) {
+    let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) else {
+        return;
+    };
+    for child in args.children() {
+        if child.kind() != SyntaxKind::Named {
+            continue;
+        }
+        let key = extract_named_key(&child).unwrap_or_default();
+        let Some(value) = extract_named_value_node(&child) else {
+            continue;
+        };
+        if key == "numbering" {
+            if value.kind() == SyntaxKind::None {
+                hints.heading_numbering_none = true;
+            } else if let Some(text) = extract_literal_string(&value) {
+                if text.trim().eq_ignore_ascii_case("none") {
+                    hints.heading_numbering_none = true;
+                }
+            }
+        }
+    }
+}
+
+fn parse_cite_set(node: &SyntaxNode, hints: &mut PreambleHints) {
+    let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) else {
+        return;
+    };
+    for child in args.children() {
+        if child.kind() != SyntaxKind::Named {
+            continue;
+        }
+        let key = extract_named_key(&child).unwrap_or_default();
+        let Some(value) = extract_named_value_node(&child) else {
+            continue;
+        };
+        if matches!(key.as_str(), "style" | "form" | "mode") {
+            if let Some(text) = extract_literal_string(&value) {
+                let lowered = text.trim().to_lowercase();
+                let cmd = if lowered.contains("author")
+                    || lowered.contains("text")
+                    || lowered.contains("prose")
+                {
+                    "citet"
+                } else if lowered.contains("year") || lowered.contains("paren") {
+                    "citep"
+                } else {
+                    "cite"
+                };
+                hints.cite_command = Some(cmd.to_string());
+                if cmd != "cite" {
+                    hints.uses_natbib = true;
+                }
             }
         }
     }

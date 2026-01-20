@@ -370,6 +370,15 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 }
                 return;
             }
+            "affil" => {
+                if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                    let text = super::utils::convert_caption_text(&raw);
+                    if !text.trim().is_empty() {
+                        conv.add_author_line(text);
+                    }
+                }
+                return;
+            }
             "date" => {
                 conv.state.date = conv.extract_metadata_arg(&cmd);
                 return;
@@ -419,6 +428,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 handle_def(conv, &cmd);
                 return;
             }
+            "DeclareMathOperator" | "DeclareMathOperator*" => {
+                handle_declare_math_operator(conv, &cmd, base_name.ends_with('*'));
+                return;
+            }
             "DeclarePairedDelimiter" => {
                 handle_declare_paired_delimiter(conv, &cmd);
                 return;
@@ -436,7 +449,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             | "bibliographystyle" | "maketitle" | "pagestyle" 
             | "thispagestyle" | "pagenumbering" | "setcounter" | "addtocounter" 
             | "setlength" | "addtolength" | "theoremstyle" 
-            | "allowdisplaybreaks" | "numberwithin" | "DeclareMathOperator"
+            | "allowdisplaybreaks" | "numberwithin"
             | "sisetup" | "NewDocumentCommand"
             | "RenewDocumentCommand" | "ProvideDocumentCommand" | "DeclareDocumentCommand"
             // Layout and spacing
@@ -473,7 +486,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             // Font and encoding setup
             | "DeclareRobustCommand" | "newrobustcmd" | "robustify"
             | "DeclareFontFamily" | "DeclareFontShape" | "DeclareSymbolFont"
-            | "SetSymbolFont" | "DeclareMathSymbol" | "DeclareMathOperator*"
+            | "SetSymbolFont" | "DeclareMathSymbol"
             // Listings and minted setup
             | "lstset" | "lstdefinestyle" | "lstdefinelanguage"
             | "usemintedstyle" | "setminted"
@@ -948,6 +961,15 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 conv.push_author_block(author);
             } else {
                 conv.state.author = Some(author);
+            }
+            return;
+        }
+        "affil" => {
+            if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                let text = super::utils::convert_caption_text(&raw);
+                if !text.trim().is_empty() {
+                    conv.add_author_line(text);
+                }
             }
             return;
         }
@@ -1459,7 +1481,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 output.push_str(content.trim());
             }
         }
-        "ref" | "autoref" | "cref" | "Cref" | "cref*" | "Cref*" | "crefrange" | "Crefrange" => {
+        "numberthis" => {
+            // Common in align* to force equation numbers; treat as no-op.
+        }
+        "ref" | "autoref" | "cref" | "Cref" | "cref*" | "Cref*" | "crefrange" | "Crefrange"
+        | "secref" | "figref" | "Figref" | "tabref" | "thmref" | "lemref" | "propref"
+        | "appref" | "Appref" => {
             let labels = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let items: Vec<String> = labels
                 .split(',')
@@ -1605,7 +1632,8 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "parencite" | "Parencite" | "footcite" | "Footcite"
         | "smartcite" | "Smartcite" | "supercite" | "fullcite"
         | "footfullcite" | "cites" | "Cites" | "textcites" | "Textcites"
-        | "parencites" | "Parencites" | "autocites" | "Autocites" => {
+        | "parencites" | "Parencites" | "autocites" | "Autocites"
+        | "shortcite" | "shortciteN" | "shortciteNP" | "citeN" | "citeNP" => {
             let keys = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let opt = conv.get_optional_arg(&cmd, 0);
             let mut cleaned_keys: Vec<String> = Vec::new();
@@ -1677,8 +1705,27 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
         "href" => {
             let url = conv.get_required_arg(&cmd, 0).unwrap_or_default();
-            let text = conv.get_required_arg(&cmd, 1).unwrap_or_else(|| url.clone());
+            let text = conv
+                .convert_required_arg(&cmd, 1)
+                .unwrap_or_else(|| escape_typst_text(&url));
             let _ = write!(output, "#link(\"{}\")[{}]", url, text);
+        }
+        "hyperref" => {
+            if let Some(label) = conv.get_optional_arg(&cmd, 0) {
+                let text = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+                let clean = sanitize_label(label.trim());
+                if clean.is_empty() {
+                    output.push_str(&text);
+                } else {
+                    let _ = write!(output, "#link(<{}>)[{}]", clean, text);
+                }
+            } else {
+                let url = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+                let text = conv
+                    .convert_required_arg(&cmd, 1)
+                    .unwrap_or_else(|| escape_typst_text(&url));
+                let _ = write!(output, "#link(\"{}\")[{}]", url, text);
+            }
         }
 
         // Footnotes
@@ -1692,6 +1739,16 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
         "footnotemark" => {
             output.push_str("#super[]");
+        }
+        "tnote" => {
+            // Threeparttable table note marker: render as a superscript marker.
+            let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                output.push_str("#super[]");
+            } else {
+                let _ = write!(output, "#super[{}]", trimmed);
+            }
         }
 
         // Conditional logic (best-effort)
@@ -2592,6 +2649,31 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
 
         // Math fractions
+        "sfrac" => {
+            let num = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let den = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            let num = num.trim();
+            let den = den.trim();
+            if num.is_empty() || den.is_empty() {
+                return;
+            }
+
+            let expr = if conv.state.options.frac_to_slash
+                && conv.is_simple_term(num)
+                && conv.is_simple_term(den)
+            {
+                format!("{}/{}", num, den)
+            } else {
+                format!("inline(frac({}, {}))", num, den)
+            };
+
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                output.push_str(&expr);
+                output.push(' ');
+            } else {
+                let _ = write!(output, "$ {} $", expr);
+            }
+        }
         "frac" => {
             let num = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
             let den = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
@@ -2624,6 +2706,38 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 let _ = write!(output, "{}/{} ", num.trim(), den.trim());
             } else {
                 let _ = write!(output, "inline(frac({}, {}))", num.trim(), den.trim());
+            }
+        }
+        "prescript" => {
+            // \prescript{pre-sup}{pre-sub}{base} -> _{pre-sub}^{pre-sup} base
+            let sup = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let sub = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
+            let base = conv.convert_required_arg(&cmd, 2).unwrap_or_default();
+
+            let sup = sup.trim();
+            let sub = sub.trim();
+            let base = base.trim();
+            if base.is_empty() {
+                return;
+            }
+
+            let mut expr = String::new();
+            if !sub.is_empty() {
+                let _ = write!(expr, "_{{{}}}", sub);
+            }
+            if !sup.is_empty() {
+                let _ = write!(expr, "^{{{}}}", sup);
+            }
+            if !expr.is_empty() {
+                expr.push(' ');
+            }
+            expr.push_str(base);
+
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                output.push_str(&expr);
+                output.push(' ');
+            } else {
+                let _ = write!(output, "$ {} $", expr);
             }
         }
         "cfrac" => {
@@ -2784,6 +2898,13 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 let _ = write!(output, "upright({}) ", content);
             }
             // If no argument, just skip
+        }
+        "Bbbk" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                output.push_str("bb(k) ");
+            } else {
+                output.push_str("$ bb(k) $");
+            }
         }
         "mathbb" | "mathds" | "mathbbm" => {
             if let Some(content) = conv.get_required_arg(&cmd, 0) {
@@ -3162,6 +3283,13 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "textbackslash" => output.push('\\'),
         "textasciitilde" => output.push('~'),
         "textasciicircum" => output.push('^'),
+        "textasciigrave" => {
+            if matches!(conv.state.mode, ConversionMode::Math) {
+                output.push('`');
+            } else {
+                output.push_str("\\`");
+            }
+        }
         "%" => output.push('%'),
         "&" => output.push('&'),
         "$" => {
@@ -3236,6 +3364,16 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             // breve
             let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             output.push_str(&apply_text_accent(&content, 'u'));
+        }
+        "k" => {
+            // ogonek
+            let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            output.push_str(&apply_text_accent(&content, 'k'));
+        }
+        "H" => {
+            // double acute
+            let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            output.push_str(&apply_text_accent(&content, 'H'));
         }
 
         // Color commands (using parse_color_expression for proper color mapping)
@@ -3455,7 +3593,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "cline" | "cmidrule" => {
             output.push_str("|||HLINE|||");
         }
-        "tabularnewline" => match conv.state.current_env() {
+        "tabularnewline" | "cr" => match conv.state.current_env() {
             EnvironmentContext::Tabular => output.push_str("|||ROW|||"),
             _ => output.push_str("\\ "),
         },
@@ -4017,6 +4155,70 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
         }
 
+        // Algorithm/problem info macros (custom templates)
+        "problemInfo" => {
+            let title = conv
+                .convert_required_arg(&cmd, 0)
+                .or_else(|| conv.get_required_arg(&cmd, 0))
+                .unwrap_or_default();
+            if !title.trim().is_empty() {
+                let _ = writeln!(output, "\n#strong[{}]\n", title.trim());
+            }
+        }
+        "algoInfo" => {
+            let title = conv
+                .convert_required_arg(&cmd, 0)
+                .or_else(|| conv.get_required_arg(&cmd, 0))
+                .unwrap_or_default();
+            if !title.trim().is_empty() {
+                let _ = writeln!(output, "\n#strong[{}]\n", title.trim());
+            }
+        }
+        "dataInfos" => {
+            let label = conv
+                .convert_required_arg(&cmd, 0)
+                .or_else(|| conv.get_required_arg(&cmd, 0))
+                .unwrap_or_default();
+            let body = conv
+                .convert_required_arg(&cmd, 1)
+                .or_else(|| conv.get_required_arg(&cmd, 1))
+                .unwrap_or_default();
+            if !label.trim().is_empty() {
+                let _ = write!(output, "*{}:* ", label.trim());
+            }
+            if !body.trim().is_empty() {
+                output.push_str(body.trim());
+            }
+            output.push('\n');
+        }
+        "dataInfo" => {
+            let label = conv
+                .convert_required_arg(&cmd, 0)
+                .or_else(|| conv.get_required_arg(&cmd, 0))
+                .unwrap_or_default();
+            let body = conv
+                .convert_required_arg(&cmd, 1)
+                .or_else(|| conv.get_required_arg(&cmd, 1))
+                .unwrap_or_default();
+            if !label.trim().is_empty() {
+                let _ = write!(output, "*{}:* ", label.trim());
+            }
+            if !body.trim().is_empty() {
+                output.push_str(body.trim());
+            }
+            output.push('\n');
+        }
+        "algoSteps" => {
+            let body = conv
+                .convert_required_arg(&cmd, 0)
+                .or_else(|| conv.get_required_arg(&cmd, 0))
+                .unwrap_or_default();
+            if !body.trim().is_empty() {
+                output.push_str(body.trim());
+                output.push('\n');
+            }
+        }
+
         // Pseudocode / game macros (cryptocode-style)
         "pcln" => output.push_str("\\ "),
         "pcreturn" => {
@@ -4126,6 +4328,9 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "def" => {
             handle_def(conv, &cmd);
         }
+        "DeclareMathOperator" | "DeclareMathOperator*" => {
+            handle_declare_math_operator(conv, &cmd, base_name.ends_with('*'));
+        }
 
         // Page breaks
         "newpage" => {
@@ -4234,6 +4439,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         // Equation numbering control
         | "nonumber" | "notag" | "balance" | "normalcolor" | "setbox" | "wd"
         | "newblock" | "boldmath" | "unboldmath"
+        // Internal/class helpers
+        | "@ifstar" | "@startsection" | "z@" | "elvbf" | "gaussianlbmain"
+        // Math style switches
+        | "displaystyle" | "textstyle" | "scriptstyle" | "scriptscriptstyle"
         | "vskip" | "abovedisplayskip" | "belowdisplayskip"
         | "linewidth" | "noalign" | "arraybackslash" | "graphicspath"
         | "itemsep" | "addtocounter" | "addlinespace" | "cdashline" | "compactitem"
@@ -4316,6 +4525,62 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
 
         // Try symbol maps for unknown commands
         _ => {
+            if matches!(conv.state.mode, ConversionMode::Text) {
+                let table_rules = [
+                    "toprule",
+                    "midrule",
+                    "bottomrule",
+                    "hline",
+                    "hhline",
+                    "cline",
+                    "cmidrule",
+                ];
+                for rule in table_rules {
+                    if let Some(rest) = base_name.strip_prefix(rule) {
+                        if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                            output.push_str("|||HLINE|||");
+                            output.push(' ');
+                            super::utils::escape_typst_text_into(rest, output);
+                            output.push(' ');
+                            return;
+                        }
+                    }
+                }
+                if let Some(rest) = base_name.strip_prefix("noindent") {
+                    if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphabetic()) {
+                        super::utils::escape_typst_text_into(rest, output);
+                        output.push(' ');
+                        return;
+                    }
+                }
+                if let Some(rest) = base_name.strip_prefix("item") {
+                    if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphabetic()) {
+                        output.push('\n');
+                        for _ in 0..conv.state.indent {
+                            output.push(' ');
+                        }
+                        match conv.state.current_env() {
+                            EnvironmentContext::Enumerate => output.push_str("+ "),
+                            EnvironmentContext::Description | EnvironmentContext::Itemize => {
+                                output.push_str("- ")
+                            }
+                            _ => {}
+                        }
+                        super::utils::escape_typst_text_into(rest, output);
+                        output.push(' ');
+                        return;
+                    }
+                }
+                if let Some(rest) = base_name.strip_prefix("par") {
+                    if !rest.is_empty() && rest.chars().next().unwrap_or('a').is_ascii_uppercase()
+                    {
+                        output.push_str("\n\n");
+                        output.push_str(rest);
+                        output.push(' ');
+                        return;
+                    }
+                }
+            }
             let lookup = format!("\\{}", base_name);
             if let Some(val) = crate::siunitx::SI_UNITS.get(lookup.as_str()) {
                 output.push_str(val);
@@ -4347,11 +4612,32 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
 
             if matches!(conv.state.mode, ConversionMode::Math) {
-                let prefixes = ["times", "in", "geq", "leq", "ge", "le"];
+                let prefixes = [
+                    "times",
+                    "in",
+                    "geq",
+                    "leq",
+                    "ge",
+                    "le",
+                    "propto",
+                    "coloneqq",
+                    "triangleq",
+                    "cap",
+                    "bigcup",
+                    "backslash",
+                    "rightarrow",
+                ];
                 for prefix in prefixes {
                     if let Some(rest) = base_name.strip_prefix(prefix) {
-                        if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
-                            output.push_str(prefix);
+                        let rest_is_word = rest.chars().all(|c| c.is_ascii_alphanumeric());
+                        let allow_short_rest = rest.len() == 1
+                            || ((prefix == "leq" || prefix == "geq") && rest.len() <= 2);
+                        if rest_is_word && allow_short_rest {
+                            if let Some(typst) = lookup_symbol(prefix) {
+                                output.push_str(typst);
+                            } else {
+                                output.push_str(prefix);
+                            }
                             output.push(' ');
                             output.push_str(rest);
                             output.push(' ');
@@ -4377,6 +4663,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                         }
                     }
                 }
+            }
+
+            if try_expand_shorthand_command(conv, base_name, output) {
+                return;
+            }
+
+            if try_split_merged_command(conv, base_name, output) {
+                return;
             }
 
             let context = match conv.state.mode {
@@ -4434,6 +4728,177 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
         }
     }
+}
+
+fn try_expand_shorthand_command(
+    conv: &mut LatexConverter,
+    base_name: &str,
+    output: &mut String,
+) -> bool {
+    match conv.state.mode {
+        ConversionMode::Math => {
+            if let Some(rest) = base_name.strip_prefix("mathbf") {
+                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    let _ = write!(output, "upright(bold({})) ", rest);
+                    return true;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("mathcal") {
+                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    let _ = write!(output, "cal({}) ", rest);
+                    return true;
+                }
+            }
+            for prefix in ["mathbb", "mathds", "mathbbm"] {
+                if let Some(rest) = base_name.strip_prefix(prefix) {
+                    if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                        if matches!(rest, "R" | "Z" | "N" | "C" | "Q") {
+                            let _ = write!(output, "{}{} ", rest, rest);
+                        } else {
+                            let _ = write!(output, "bb({}) ", rest);
+                        }
+                        return true;
+                    }
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("mathfrak") {
+                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    let _ = write!(output, "frak({}) ", rest);
+                    return true;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("mathscr") {
+                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    let _ = write!(output, "scr({}) ", rest);
+                    return true;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("mathsf") {
+                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    let _ = write!(output, "sans({}) ", rest);
+                    return true;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("mathtt") {
+                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    let _ = write!(output, "mono({}) ", rest);
+                    return true;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("bm") {
+                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    let _ = write!(output, "bold({}) ", rest);
+                    return true;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("bar") {
+                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    let _ = write!(output, "overline({}) ", rest);
+                    return true;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("rm") {
+                if rest == "argmin" || rest == "argmax" || rest == "diag" {
+                    let _ = write!(output, "op(\"{}\") ", rest);
+                    return true;
+                }
+                if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    let _ = write!(output, "upright({}) ", rest);
+                    return true;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("forall") {
+                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    output.push_str("forall ");
+                    output.push_str(rest);
+                    output.push(' ');
+                    return true;
+                }
+            }
+        }
+        ConversionMode::Text => {
+            if let Some(rest) = base_name.strip_prefix("bf") {
+                if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphabetic()) {
+                    let _ = write!(output, "*{}* ", rest);
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+fn try_split_merged_command(
+    conv: &mut LatexConverter,
+    base_name: &str,
+    output: &mut String,
+) -> bool {
+    if base_name.len() < 2 {
+        return false;
+    }
+
+    let is_math = matches!(conv.state.mode, ConversionMode::Math);
+
+    for i in (2..base_name.len()).rev() {
+        let prefix = &base_name[..i];
+        let suffix = &base_name[i..];
+        if !suffix.chars().all(|c| c.is_ascii_alphanumeric()) {
+            continue;
+        }
+
+        if let Some(macro_def) = conv.state.macros.get(prefix).cloned() {
+            if let Some(expanded) = expand_zero_arg_macro(conv, &macro_def) {
+                output.push_str(expanded.trim_end());
+                output.push(' ');
+                output.push_str(suffix);
+                output.push(' ');
+                return true;
+            }
+        }
+
+        if is_math {
+            if let Some(sym) = lookup_symbol(prefix) {
+                output.push_str(sym);
+                output.push(' ');
+                output.push_str(suffix);
+                output.push(' ');
+                return true;
+            }
+        }
+
+        if let Some(spacing) = match prefix {
+            "quad" => Some("  "),
+            "qquad" => Some("    "),
+            "enspace" => Some(" "),
+            "thinspace" => Some(" "),
+            "thickspace" => Some("  "),
+            _ => None,
+        } {
+            output.push_str(spacing);
+            output.push_str(suffix);
+            output.push(' ');
+            return true;
+        }
+    }
+
+    false
+}
+
+fn expand_zero_arg_macro(conv: &mut LatexConverter, macro_def: &MacroDef) -> Option<String> {
+    if macro_def.num_args != 0 {
+        return None;
+    }
+    if let Some(cached) = conv.state.macro_cache.get(&macro_def.name) {
+        return Some(cached.clone());
+    }
+    let mut output = String::new();
+    let tree = mitex_parser::parse(&macro_def.replacement, conv.spec.clone());
+    conv.visit_node(&tree, &mut output);
+    conv.state
+        .macro_cache
+        .insert(macro_def.name.clone(), output.clone());
+    Some(output)
 }
 
 fn resolve_color_expression(conv: &mut LatexConverter, raw: &str) -> String {
@@ -4553,6 +5018,35 @@ fn handle_def(conv: &mut LatexConverter, cmd: &CmdItem) {
                 },
             );
         }
+    }
+}
+
+/// Handle \DeclareMathOperator and \DeclareMathOperator*
+fn handle_declare_math_operator(conv: &mut LatexConverter, cmd: &CmdItem, is_star: bool) {
+    let name = conv
+        .get_required_arg(cmd, 0)
+        .map(|n| n.trim().trim_start_matches('\\').to_string());
+    let op_name = conv.get_required_arg(cmd, 1);
+
+    if let (Some(name), Some(op_name)) = (name, op_name) {
+        let op_name = op_name.trim();
+        if op_name.is_empty() {
+            return;
+        }
+        let replacement = if is_star {
+            format!("\\operatorname*{{{}}}", op_name)
+        } else {
+            format!("\\operatorname{{{}}}", op_name)
+        };
+        conv.state.macros.insert(
+            name.clone(),
+            MacroDef {
+                name,
+                num_args: 0,
+                default_arg: None,
+                replacement,
+            },
+        );
     }
 }
 
@@ -4855,6 +5349,20 @@ fn apply_text_accent(content: &str, accent: char) -> String {
             'T' => "Ť".to_string(),
             'd' => "ď".to_string(),
             'D' => "Ď".to_string(),
+            _ => content.to_string(),
+        },
+        'k' => match c {
+            'a' => "ą".to_string(),
+            'A' => "Ą".to_string(),
+            'e' => "ę".to_string(),
+            'E' => "Ę".to_string(),
+            _ => content.to_string(),
+        },
+        'H' => match c {
+            'o' => "ő".to_string(),
+            'O' => "Ő".to_string(),
+            'u' => "ű".to_string(),
+            'U' => "Ű".to_string(),
             _ => content.to_string(),
         },
         _ => content.to_string(),

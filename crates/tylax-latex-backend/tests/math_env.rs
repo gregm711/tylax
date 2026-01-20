@@ -21,6 +21,7 @@ fn math_block_uses_gather_without_alignment() {
             bibliography_style_default: None,
             cite_command: None,
             base_font_size_pt: None,
+            heading_numbering_none: false,
         },
     );
     assert!(out.contains("\\begin{gather}"));
@@ -47,6 +48,7 @@ fn math_block_uses_align_with_alignment_points() {
             bibliography_style_default: None,
             cite_command: None,
             base_font_size_pt: None,
+            heading_numbering_none: false,
         },
     );
     assert!(out.contains("\\begin{align}"));

@@ -18,6 +18,7 @@ pub struct LatexRenderOptions {
     pub bibliography_style_default: Option<String>,
     pub cite_command: Option<String>,
     pub base_font_size_pt: Option<f64>,
+    pub heading_numbering_none: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +48,7 @@ impl Default for LatexRenderOptions {
             bibliography_style_default: None,
             cite_command: None,
             base_font_size_pt: None,
+            heading_numbering_none: false,
         }
     }
 }
@@ -655,6 +657,7 @@ fn render_block(block: &Block, options: &LatexRenderOptions) -> String {
             content,
             numbered,
         } => {
+            let numbered = *numbered && !options.heading_numbering_none;
             let cmd = match *level {
                 1 => "\\section",
                 2 => "\\subsection",
@@ -662,7 +665,7 @@ fn render_block(block: &Block, options: &LatexRenderOptions) -> String {
                 4 => "\\paragraph",
                 _ => "\\section",
             };
-            let cmd = if *numbered {
+            let cmd = if numbered {
                 cmd.to_string()
             } else {
                 format!("{}*", cmd)

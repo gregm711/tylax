@@ -24,21 +24,21 @@
 San Francisco, CA | \href{mailto:you@email.com}{you@email.com} | \href{https://linkedin.com/in/yourprofile}{linkedin.com/in/yourprofile} | \href{https://github.com/yourusername}{github.com/yourusername}
 \end{center}
 
-Education
+\{ v(0.5em) text(size: 11pt, weight: "bold", fill: rgb(""))[] v(-0.3em) line(length: 100\%, stroke: 0.5pt + rgb("")) v(0.3em) \}
 
-Bachelor of Science in Computer Science Aug 2020 - May 2024 University Name City, State
+\{ grid( columns: (1fr, auto), text(weight: "bold")[Bachelor of Science in Computer Science], text(style: "italic")[Aug 2020 - May 2024], ) grid( columns: (1fr, auto), text(style: "italic")[University Name], text[City, State], ) if details.len() > 0 \{ v(0.2em) for detail in details \{ [- ] \} \} v(0.5em) \}
 
-Experience
+\{ v(0.5em) text(size: 11pt, weight: "bold", fill: rgb(""))[] v(-0.3em) line(length: 100\%, stroke: 0.5pt + rgb("")) v(0.3em) \}
 
-Software Engineer Intern May 2023 - Aug 2023 Tech Company San Francisco, CA
+\{ grid( columns: (1fr, auto), text(weight: "bold")[Software Engineer Intern], text(style: "italic")[May 2023 - Aug 2023], ) grid( columns: (1fr, auto), text(style: "italic")[Tech Company], text[San Francisco, CA], ) if details.len() > 0 \{ v(0.2em) for detail in details \{ [- ] \} \} v(0.5em) \}
 
-Research Assistant Jan 2022 - May 2023 University Research Lab City, State
+\{ grid( columns: (1fr, auto), text(weight: "bold")[Research Assistant], text(style: "italic")[Jan 2022 - May 2023], ) grid( columns: (1fr, auto), text(style: "italic")[University Research Lab], text[City, State], ) if details.len() > 0 \{ v(0.2em) for detail in details \{ [- ] \} \} v(0.5em) \}
 
-Projects
+\{ v(0.5em) text(size: 11pt, weight: "bold", fill: rgb(""))[] v(-0.3em) line(length: 100\%, stroke: 0.5pt + rgb("")) v(0.3em) \}
 
-Project Name 2023 Personal Project
+\{ grid( columns: (1fr, auto), text(weight: "bold")[Project Name], text(style: "italic")[2023], ) grid( columns: (1fr, auto), text(style: "italic")[Personal Project], text[], ) if details.len() > 0 \{ v(0.2em) for detail in details \{ [- ] \} \} v(0.5em) \}
 
-Skills
+\{ v(0.5em) text(size: 11pt, weight: "bold", fill: rgb(""))[] v(-0.3em) line(length: 100\%, stroke: 0.5pt + rgb("")) v(0.3em) \}
 
 \textbf{Languages:} Python, TypeScript, Go, Rust, SQL \\ \textbf{Frameworks:} React, Next.js, FastAPI, PyTorch \\ \textbf{Tools:} Git, Docker, Kubernetes, AWS, PostgreSQL, Redis
 \end{document}

@@ -356,6 +356,21 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
             convert_gameproof(conv, &node, output);
         }
 
+        // Thmtools restatable environment: treat as theorem-like.
+        "restatable" => {
+            let kind_raw = conv
+                .get_env_required_arg(&node, 0)
+                .unwrap_or_else(|| "theorem".to_string());
+            let kind_trim = kind_raw.trim();
+            let kind_lower = kind_trim.to_lowercase();
+            let env_name = if THEOREM_TYPES.contains_key(kind_lower.as_str()) {
+                kind_lower.as_str()
+            } else {
+                kind_trim
+            };
+            convert_theorem(conv, &node, env_name, output);
+        }
+
         // Theorem-like environments
         "theorem" | "lemma" | "proposition" | "corollary" | "definition" | "example" | "remark"
         | "proof" | "conjecture" | "claim" | "fact" | "observation" | "property" | "question"
@@ -748,30 +763,47 @@ fn convert_table(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Stri
     let mut caption_cmd: Option<CmdItem> = None;
     let mut label_text = String::new();
     let mut table_content = String::new();
+    let mut notes_content = String::new();
     // First pass: extract caption, label, and tabular content using AST nodes only.
-    for child in node.children() {
-        if let Some(cmd) = CmdItem::cast(child.clone()) {
+    // Some tables wrap tabular/caption inside helper envs (e.g., threeparttable),
+    // so scan descendants instead of only direct children.
+    for descendant in node.descendants() {
+        if let Some(cmd) = CmdItem::cast(descendant.clone()) {
             if let Some(name_tok) = cmd.name_tok() {
                 let name = name_tok.text();
-                if name == "\\caption" {
+                if caption_cmd.is_none() && name == "\\caption" {
                     caption_cmd = Some(cmd.clone());
-                } else if name == "\\label" {
+                } else if label_text.is_empty() && name == "\\label" {
                     if let Some(lbl) = conv.get_required_arg(&cmd, 0) {
                         label_text = lbl;
                     }
                 }
             }
         }
-        // Check for tabular environment
-        if let Some(env) = EnvItem::cast(child.clone()) {
-            if env
-                .name_tok()
-                .map(|t| t.text().to_string())
-                .unwrap_or_default()
-                .starts_with("tabular")
-            {
-                // convert_tabular handles its own push/pop of Tabular context
-                convert_tabular(conv, &child, &mut table_content);
+        if table_content.is_empty() {
+            if let Some(env) = EnvItem::cast(descendant.clone()) {
+                if env
+                    .name_tok()
+                    .map(|t| t.text().to_string())
+                    .unwrap_or_default()
+                    .starts_with("tabular")
+                {
+                    // convert_tabular handles its own push/pop of Tabular context
+                    convert_tabular(conv, &descendant, &mut table_content);
+                }
+            }
+        }
+        if notes_content.is_empty() {
+            if let Some(env) = EnvItem::cast(descendant.clone()) {
+                let env_name = env
+                    .name_tok()
+                    .map(|t| t.text().to_string())
+                    .unwrap_or_default();
+                if env_name == "tablenotes" || env_name == "tablenotes*" {
+                    conv.state.push_env(EnvironmentContext::Description);
+                    conv.visit_env_content(&descendant, &mut notes_content);
+                    conv.state.pop_env();
+                }
             }
         }
     }
@@ -788,6 +820,11 @@ fn convert_table(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Stri
 
     output.push_str(")[\n");
     output.push_str(&table_content);
+    if !notes_content.trim().is_empty() {
+        output.push('\n');
+        output.push_str(notes_content.trim());
+        output.push('\n');
+    }
     output.push_str("\n] ");
 
     if !label_text.is_empty() {

@@ -176,6 +176,8 @@ COMMANDS_WITH_ARGS = {
     
     # Limits and stacking (2 args)
     "overset": 2, "underset": 2, "stackrel": 2,
+    # Left scripts
+    "prescript": 3,
     
     # Extensible arrows (1 arg, optional arg handled by parser)
     "xleftarrow": 1, "xrightarrow": 1, "xmapsto": 1, "xleftrightarrow": 1,
@@ -190,7 +192,7 @@ COMMANDS_WITH_ARGS = {
     "boxed": 1, "fbox": 1,
     
     # Fractions and roots (2 args)
-    "frac": 2, "dfrac": 2, "tfrac": 2, "cfrac": 2, "binom": 2,
+    "frac": 2, "dfrac": 2, "tfrac": 2, "cfrac": 2, "sfrac": 2, "binom": 2,
     
     # Colors (1-2 args)
     "textcolor": 2, "colorbox": 2, "color": 1,

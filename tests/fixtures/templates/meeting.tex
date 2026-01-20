@@ -27,9 +27,25 @@
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
 
-Q4 Product Planning Meeting November 28, 2024 2:00 PM - 3:30 PM Conference Room B / Zoom Sarah Chen
+\{ block( width: 100\%, fill: light, stroke: 1pt + accent, inset: 15pt, radius: 5pt, )[
 
-Agenda
+\begin{tabular}{cc}
+{\LARGE \textcolor{primary}{\textbf{}}}
+\par\vspace{0.3em}
+\textcolor{gray}{ · } \\
+\end{tabular}
+
+\par\vspace{0.8em}
+
+\par\vspace{0.5em}
+
+{\small \textbf{Attendees: }} {\small ", "} ] \}
+
+\{ v(1em) block(width: 100\%)[ {\large \textcolor{primary}{\textbf{}}}
+
+\par\vspace{0.3em}
+
+\par\vspace{0.5em}
 
 \begin{enumerate}
   \item Review Q3 metrics and outcomes
@@ -38,7 +54,13 @@ Agenda
   \item Open discussion and questions
 \end{enumerate}
 
-Discussion Notes
+] \}
+
+\{ v(1em) block(width: 100\%)[ {\large \textcolor{primary}{\textbf{}}}
+
+\par\vspace{0.3em}
+
+\par\vspace{0.5em}
 
 \subsection{Q3 Review}
 
@@ -55,8 +77,14 @@ Key learnings from the quarter:
 \begin{itemize}
   \item Mobile users engaging 2x more than desktop
   \item Onboarding flow improvements reduced drop-off by 15\%
-  \item Support ticket volume down 30\% after help center launch The mobile engagement data suggests we should prioritize mobile-first features in Q4.
+  \item Support ticket volume down 30\% after help center launch
 \end{itemize}
+
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 10pt, radius: 3pt, )[ {\small \textbf{📝 NOTE: }}
+
+The mobile engagement data suggests we should prioritize mobile-first features in Q4.
+
+] v(0.5em) \}
 
 \subsection{Q4 Priorities}
 
@@ -86,8 +114,14 @@ The team discussed three major initiatives:
   \item SSO integration (SAML, OIDC)
   \item Advanced admin controls
   \item Audit logging
-  \item Target: February 15 Mobile App v2.0 is the priority for Q4. API Platform will run in parallel with a smaller team. Enterprise features will begin planning now for Q1 execution.
+  \item Target: February 15
 \end{itemize}
+
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 10pt, radius: 3pt, )[ {\small \textbf{✓ DECISION: }}
+
+Mobile App v2.0 is the priority for Q4. API Platform will run in parallel with a smaller team. Enterprise features will begin planning now for Q1 execution.
+
+] v(0.5em) \}
 
 \subsection{Resource Discussion}
 
@@ -104,12 +138,32 @@ Alex raised concern about timeline for mobile launch given holiday schedules. Te
 \begin{itemize}
   \item Front-load critical work before Dec 20
   \item Skeleton crew Dec 23-Jan 2
-  \item Buffer week built into January Hire one contract developer for Nov-Dec to support mobile push. Jordan to coordinate with recruiting.
+  \item Buffer week built into January
 \end{itemize}
 
-Action Items Draft mobile v2.0 PRD with detailed requirements Sarah Dec 2 Create mobile UI mockups for team review Jordan Dec 5 Spike on offline sync architecture Alex Dec 3 Prepare Q4 marketing calendar Taylor Dec 4 Set up mobile testing environment Morgan Dec 2 Post contract developer job listing Jordan Nov 29
+\{ block( width: 100\%, fill: rgb(""), stroke: 0.5pt + rgb(""), inset: 10pt, radius: 3pt, )[ {\small \textbf{✓ DECISION: }}
 
-Decisions Summary
+Hire one contract developer for Nov-Dec to support mobile push. Jordan to coordinate with recruiting.
+
+] v(0.5em) \}
+
+] \}
+
+\{ v(1em) block(width: 100\%)[ {\large \textcolor{primary}{\textbf{}}}
+
+\par\vspace{0.3em}
+
+\par\vspace{0.5em}
+
+\{ grid( columns: (auto, 1fr, auto, auto), column-gutter: 8pt, align: (center, left, left, left), box( width: 12pt, height: 12pt, stroke: 1pt + gray, radius: 2pt, ), task, text(size: 9pt, fill: gray)[→ Sarah], text(size: 9pt, weight: "bold")[Due: Dec 2], ) v(0.3em) \} \{ grid( columns: (auto, 1fr, auto, auto), column-gutter: 8pt, align: (center, left, left, left), box( width: 12pt, height: 12pt, stroke: 1pt + gray, radius: 2pt, ), task, text(size: 9pt, fill: gray)[→ Jordan], text(size: 9pt, weight: "bold")[Due: Dec 5], ) v(0.3em) \} \{ grid( columns: (auto, 1fr, auto, auto), column-gutter: 8pt, align: (center, left, left, left), box( width: 12pt, height: 12pt, stroke: 1pt + gray, radius: 2pt, ), task, text(size: 9pt, fill: gray)[→ Alex], text(size: 9pt, weight: "bold")[Due: Dec 3], ) v(0.3em) \} \{ grid( columns: (auto, 1fr, auto, auto), column-gutter: 8pt, align: (center, left, left, left), box( width: 12pt, height: 12pt, stroke: 1pt + gray, radius: 2pt, ), task, text(size: 9pt, fill: gray)[→ Taylor], text(size: 9pt, weight: "bold")[Due: Dec 4], ) v(0.3em) \} \{ grid( columns: (auto, 1fr, auto, auto), column-gutter: 8pt, align: (center, left, left, left), box( width: 12pt, height: 12pt, stroke: 1pt + gray, radius: 2pt, ), task, text(size: 9pt, fill: gray)[→ Morgan], text(size: 9pt, weight: "bold")[Due: Dec 2], ) v(0.3em) \} \{ grid( columns: (auto, 1fr, auto, auto), column-gutter: 8pt, align: (center, left, left, left), box( width: 12pt, height: 12pt, stroke: 1pt + gray, radius: 2pt, ), task, text(size: 9pt, fill: gray)[→ Jordan], text(size: 9pt, weight: "bold")[Due: Nov 29], ) v(0.3em) \}
+
+] \}
+
+\{ v(1em) block(width: 100\%)[ {\large \textcolor{primary}{\textbf{}}}
+
+\par\vspace{0.3em}
+
+\par\vspace{0.5em}
 
 \begingroup
 \setlength{\tabcolsep}{6pt}
@@ -124,7 +178,17 @@ Decisions Summary
 \end{tabular}
 \endgroup
 
-Next Meeting \textbf{Date:} December 5, 2024 \\ \textbf{Time:} 2:00 PM - 3:00 PM \\ \textbf{Topic:} Mobile v2.0 Design Review \\ \textbf{Pre-work:} Review Jordan's mockups (will be shared Dec 4)
+] \}
+
+\{ v(1em) block(width: 100\%)[ {\large \textcolor{primary}{\textbf{}}}
+
+\par\vspace{0.3em}
+
+\par\vspace{0.5em}
+
+\textbf{Date:} December 5, 2024 \\ \textbf{Time:} 2:00 PM - 3:00 PM \\ \textbf{Topic:} Mobile v2.0 Design Review \\ \textbf{Pre-work:} Review Jordan's mockups (will be shared Dec 4)
+
+] \}
 
 \par\vspace{\fill}
 

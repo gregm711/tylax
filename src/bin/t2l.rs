@@ -21,7 +21,8 @@ use tylax::{
 };
 use tylax::core::latex2typst::utils::{
     collect_bibliography_entries, collect_graphicspath_entries, collect_includegraphics_paths,
-    expand_latex_inputs, sanitize_bibtex_content, sanitize_citation_key,
+    collect_usepackage_entries, expand_latex_inputs, expand_local_packages_with_skip,
+    sanitize_bibtex_content, sanitize_citation_key,
 };
 
 #[cfg(feature = "cli")]
@@ -304,8 +305,11 @@ fn main() -> io::Result<()> {
     let mut graphic_dirs: Vec<String> = Vec::new();
     let mut graphics_base_dir: Option<PathBuf> = None;
 
+    // Determine if this is a full document based on content or flag.
+    let is_full_document = cli.full_document || is_latex_document(&input);
+
     let timing_enabled = std::env::var("TYLAX_TIMING").is_ok();
-    if matches!(direction, Direction::L2t) && cli.full_document {
+    if matches!(direction, Direction::L2t) && is_full_document {
         if let Some(path) = filename.as_ref() {
             if let Some(parent) = Path::new(path).parent() {
                 let start_expand = Instant::now();
@@ -313,6 +317,25 @@ fn main() -> io::Result<()> {
                     eprintln!("[tylax] expand inputs: start");
                 }
                 input = expand_latex_inputs(&input, parent);
+                let mut skip_packages = std::collections::HashSet::new();
+                let mut skipped_list: Vec<String> = Vec::new();
+                for pkg in collect_usepackage_entries(&input) {
+                    if is_macro_expansion_blacklisted_package(&pkg) {
+                        let lower = pkg.trim().to_lowercase();
+                        if skip_packages.insert(lower.clone()) {
+                            skipped_list.push(lower);
+                        }
+                    }
+                }
+                if !skipped_list.is_empty() {
+                    skipped_list.sort();
+                    skipped_list.dedup();
+                    eprintln!(
+                        "⚠ Skipping local package expansion for: {}",
+                        skipped_list.join(", ")
+                    );
+                }
+                input = expand_local_packages_with_skip(&input, parent, &skip_packages);
                 if timing_enabled {
                     let secs = start_expand.elapsed().as_secs_f64();
                     eprintln!("[tylax] expand inputs: {:.3}s", secs);
@@ -338,9 +361,6 @@ fn main() -> io::Result<()> {
     let mut post_report: Option<LossReport> = None;
 
     let mut diagnostics: Vec<CliDiagnostic> = Vec::new();
-    // Determine if this is a full document based on content or flag
-    let is_full_document = cli.full_document || is_latex_document(&input);
-
     // Convert
     let mut result = match direction {
         Direction::L2t => {
@@ -543,6 +563,16 @@ fn main() -> io::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn is_macro_expansion_blacklisted_package(name: &str) -> bool {
+    let lower = name.trim().to_lowercase();
+    lower == "eccv"
+        || lower.starts_with("iclr")
+        || lower.starts_with("icml")
+        || lower.starts_with("neurips")
+        || lower.starts_with("aaai")
 }
 
 #[cfg(feature = "cli")]
@@ -1479,6 +1509,25 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                 if let Some(path) = filename.as_ref() {
                     if let Some(parent) = Path::new(path).parent() {
                         content = expand_latex_inputs(&content, parent);
+                        let mut skip_packages = std::collections::HashSet::new();
+                        let mut skipped_list: Vec<String> = Vec::new();
+                        for pkg in collect_usepackage_entries(&content) {
+                            if is_macro_expansion_blacklisted_package(&pkg) {
+                                let lower = pkg.trim().to_lowercase();
+                                if skip_packages.insert(lower.clone()) {
+                                    skipped_list.push(lower);
+                                }
+                            }
+                        }
+                        if !skipped_list.is_empty() {
+                            skipped_list.sort();
+                            skipped_list.dedup();
+                            eprintln!(
+                                "⚠ Skipping local package expansion for: {}",
+                                skipped_list.join(", ")
+                            );
+                        }
+                        content = expand_local_packages_with_skip(&content, parent, &skip_packages);
                         bib_entries = collect_bibliography_entries(&content);
                         bib_base_dir = Some(parent.to_path_buf());
                         graphic_dirs = collect_graphicspath_entries(&content);

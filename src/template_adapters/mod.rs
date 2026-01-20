@@ -4,6 +4,7 @@ pub mod common;
 pub mod ieee;
 pub mod letter;
 pub mod newsletter;
+pub mod generic;
 pub mod arxiv;
 pub mod neurips;
 pub mod icml;

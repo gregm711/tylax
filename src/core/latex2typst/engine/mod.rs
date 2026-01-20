@@ -203,8 +203,8 @@ pub fn expand_latex_with_warnings(input: &str, math_mode: bool) -> ExpandResult 
     // Collect structured warnings
     let warnings = engine.take_structured_warnings();
 
-    // If infinite recursion or token explosion was detected, return original input for safety
-    // This is more predictable than returning a partially-expanded mess
+    // If infinite recursion or token explosion was detected, return original input for safety.
+    // This avoids emitting a partially-expanded mess when the expansion engine hit limits.
     let has_critical_error = warnings.iter().any(|w| {
         matches!(
             w,

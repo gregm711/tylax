@@ -156,7 +156,7 @@ impl MacroDb {
 // ============================================================================
 
 /// Default maximum expansion depth (prevents stack overflow on recursive macros).
-const DEFAULT_MAX_DEPTH: usize = 200;
+const DEFAULT_MAX_DEPTH: usize = 256;
 
 /// Default maximum token count (prevents exponential macro expansion).
 const DEFAULT_MAX_TOKENS: usize = 100_000;
@@ -429,7 +429,8 @@ impl Engine {
                             if let Some(TexToken::ControlSeq(cmd_name)) = iter.next() {
                                 let rest =
                                     self.handle_definition(&cmd_name, &mut iter, true, depth);
-                                result.extend(rest.into_inner());
+                                iter = rest.into_inner().into_iter().peekable();
+                                continue;
                             }
                         } else {
                             result.push(token.clone());
@@ -440,7 +441,8 @@ impl Engine {
                 }
                 TexToken::ControlSeq(name) if primitives::is_definition_command(name) => {
                     let rest = self.handle_definition(name, &mut iter, false, depth);
-                    result.extend(rest.into_inner());
+                    iter = rest.into_inner().into_iter().peekable();
+                    continue;
                 }
                 TexToken::ControlSeq(name) if name == "begin" => {
                     if let Some(env_name) = self.read_env_name(&mut iter) {
@@ -477,7 +479,7 @@ impl Engine {
                             new_tokens.extend(iter); // Consumes the rest
 
                             // Continue expansion
-                            return self.expand(TokenList::from_vec(new_tokens), depth);
+                            return self.expand(TokenList::from_vec(new_tokens), depth + 1);
                         } else {
                             result.push(t1);
                         }
@@ -488,7 +490,7 @@ impl Engine {
                         // Reconstruct stream: [expanded_cs] + Rest
                         let mut new_tokens = vec![expanded_cs];
                         new_tokens.extend(iter);
-                        return self.expand(TokenList::from_vec(new_tokens), depth);
+                        return self.expand(TokenList::from_vec(new_tokens), depth + 1);
                     } else {
                         result.push(token.clone());
                     }
@@ -933,9 +935,9 @@ impl Engine {
                         }
                     }
                 }
-                self.expand(rest, depth)
+                rest
             }
-            Err(remaining) => self.expand(remaining, depth),
+            Err(remaining) => remaining,
         }
     }
 

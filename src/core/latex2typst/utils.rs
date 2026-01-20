@@ -228,7 +228,7 @@ pub fn sanitize_bibtex_content(input: &str) -> String {
 
 /// Normalize BibTeX field values to avoid unresolved abbreviations and concatenations.
 fn normalize_bibtex_field_values(input: &str) -> (String, HashMap<String, String>) {
-    let mut out = String::with_capacity(input.len());
+    let mut out = Vec::with_capacity(input.len());
     let bytes = input.as_bytes();
     let mut i = 0usize;
     let mut string_map: HashMap<String, String> = HashMap::new();
@@ -236,36 +236,40 @@ fn normalize_bibtex_field_values(input: &str) -> (String, HashMap<String, String
     while i < bytes.len() {
         if bytes[i] == b'@' {
             if let Some((entry, next)) = normalize_bibtex_entry(input, i, &mut string_map) {
-                out.push_str(&entry);
+                out.extend_from_slice(entry.as_bytes());
                 i = next;
                 continue;
             }
         }
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
-    (out, string_map)
+    (
+        String::from_utf8(out).unwrap_or_else(|_| input.to_string()),
+        string_map,
+    )
 }
 
 fn expand_bare_bibtex_values(input: &str, string_map: &HashMap<String, String>) -> String {
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
+    let mut out = Vec::with_capacity(input.len());
     let mut i = 0usize;
     let mut depth = 0i32;
     let mut in_quote = false;
 
     while i < bytes.len() {
-        let ch = bytes[i] as char;
+        let b = bytes[i];
+        let ch = b as char;
         if ch == '"' && (i == 0 || bytes[i - 1] != b'\\') {
             in_quote = !in_quote;
-            out.push(ch);
+            out.push(b);
             i += 1;
             continue;
         }
         if !in_quote {
             if ch == '{' {
                 depth += 1;
-                out.push(ch);
+                out.push(b'{');
                 i += 1;
                 continue;
             }
@@ -273,17 +277,17 @@ fn expand_bare_bibtex_values(input: &str, string_map: &HashMap<String, String>) 
                 if depth > 0 {
                     depth -= 1;
                 }
-                out.push(ch);
+                out.push(b'}');
                 i += 1;
                 continue;
             }
         }
 
         if ch == '=' && depth == 1 && !in_quote {
-            out.push(ch);
+            out.push(b'=');
             i += 1;
             while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-                out.push(bytes[i] as char);
+                out.push(bytes[i]);
                 i += 1;
             }
             if i >= bytes.len() {
@@ -295,21 +299,21 @@ fn expand_bare_bibtex_values(input: &str, string_map: &HashMap<String, String>) 
             }
             let (value, next_idx) = parse_bibtex_value(input, i);
             let normalized = normalize_bibtex_value(&value, string_map);
-            out.push('{');
-            out.push_str(&normalized);
-            out.push('}');
+            out.push(b'{');
+            out.extend_from_slice(normalized.as_bytes());
+            out.push(b'}');
             if next_idx > 0 && input.as_bytes()[next_idx - 1] == b',' {
-                out.push(',');
+                out.push(b',');
             }
             i = next_idx;
             continue;
         }
 
-        out.push(ch);
+        out.push(b);
         i += 1;
     }
 
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 fn normalize_bibtex_entry(
@@ -707,7 +711,7 @@ pub fn normalize_spacing_primitives(input: &str) -> String {
 /// on malformed inputs while preserving valid pairs.
 pub fn normalize_math_delimiters(input: &str) -> String {
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(bytes.len());
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0usize;
     let mut square = 0i32;
     let mut round = 0i32;
@@ -719,7 +723,7 @@ pub fn normalize_math_delimiters(input: &str) -> String {
             while i < bytes.len() && bytes[i] != b'\n' {
                 i += 1;
             }
-            out.push_str(&input[start..i]);
+            out.extend_from_slice(&bytes[start..i]);
             continue;
         }
 
@@ -728,32 +732,32 @@ pub fn normalize_math_delimiters(input: &str) -> String {
             match next {
                 b'[' => {
                     square += 1;
-                    out.push_str("\\[");
+                    out.extend_from_slice(b"\\[");
                     i += 2;
                     continue;
                 }
                 b']' => {
                     if square > 0 {
                         square -= 1;
-                        out.push_str("\\]");
+                        out.extend_from_slice(b"\\]");
                     } else {
-                        out.push(']');
+                        out.push(b']');
                     }
                     i += 2;
                     continue;
                 }
                 b'(' => {
                     round += 1;
-                    out.push_str("\\(");
+                    out.extend_from_slice(b"\\(");
                     i += 2;
                     continue;
                 }
                 b')' => {
                     if round > 0 {
                         round -= 1;
-                        out.push_str("\\)");
+                        out.extend_from_slice(b"\\)");
                     } else {
-                        out.push(')');
+                        out.push(b')');
                     }
                     i += 2;
                     continue;
@@ -762,17 +766,17 @@ pub fn normalize_math_delimiters(input: &str) -> String {
             }
         }
 
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
 
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 /// Normalize $$ ... $$ display math to \[ ... \] pairs.
 pub fn normalize_display_dollars(input: &str) -> String {
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(bytes.len());
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0usize;
     let mut open = false;
 
@@ -782,44 +786,44 @@ pub fn normalize_display_dollars(input: &str) -> String {
             while i < bytes.len() && bytes[i] != b'\n' {
                 i += 1;
             }
-            out.push_str(&input[start..i]);
+            out.extend_from_slice(&bytes[start..i]);
             continue;
         }
 
         if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'$' {
-            out.push_str("\\$");
+            out.extend_from_slice(b"\\$");
             i += 2;
             continue;
         }
 
         if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'$' {
             if open {
-                out.push_str("\\]");
+                out.extend_from_slice(b"\\]");
             } else {
-                out.push_str("\\[");
+                out.extend_from_slice(b"\\[");
             }
             open = !open;
             i += 2;
             continue;
         }
 
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
 
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 /// Collapse double-dollar sequences in Typst output to single dollars.
 pub fn normalize_typst_double_dollars(input: &str) -> String {
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(bytes.len());
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'\\' {
-            out.push('\\');
+            out.push(b'\\');
             if i + 1 < bytes.len() {
-                out.push(bytes[i + 1] as char);
+                out.push(bytes[i + 1]);
                 i += 2;
             } else {
                 i += 1;
@@ -827,14 +831,14 @@ pub fn normalize_typst_double_dollars(input: &str) -> String {
             continue;
         }
         if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'$' {
-            out.push('$');
+            out.push(b'$');
             i += 2;
             continue;
         }
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 /// Replace #linebreak() with a plain space to avoid math parse errors.
@@ -845,27 +849,27 @@ pub fn normalize_typst_linebreaks(input: &str) -> String {
 /// Normalize `op([...])` patterns in math output to plain parentheses.
 pub fn normalize_typst_op_brackets(input: &str) -> String {
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
+    let mut out: Vec<u8> = Vec::with_capacity(input.len());
     let mut i = 0usize;
     let mut in_string = false;
     let mut op_depth = 0i32;
     while i < bytes.len() {
-        let ch = bytes[i] as char;
-        if ch == '"' && (i == 0 || bytes[i - 1] != b'\\') {
+        let ch = bytes[i];
+        if ch == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
             in_string = !in_string;
-            out.push(ch);
+            out.push(b'"');
             i += 1;
             continue;
         }
         if !in_string && i + 3 < bytes.len() && &bytes[i..i + 4] == b"op([" {
-            out.push('(');
+            out.push(b'(');
             i += 4;
             op_depth += 1;
             continue;
         }
         if !in_string && op_depth > 0 && bytes[i] == b']' {
             if i + 1 < bytes.len() && bytes[i + 1] == b')' {
-                out.push(')');
+                out.push(b')');
                 i += 2;
                 op_depth -= 1;
                 continue;
@@ -874,13 +878,13 @@ pub fn normalize_typst_op_brackets(input: &str) -> String {
         out.push(ch);
         i += 1;
     }
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 /// Drop unmatched closing braces to avoid parser errors after macro expansion.
 pub fn normalize_unmatched_braces(input: &str) -> String {
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(bytes.len());
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut depth = 0i32;
     let mut i = 0usize;
     let mut in_comment = false;
@@ -890,21 +894,21 @@ pub fn normalize_unmatched_braces(input: &str) -> String {
             if bytes[i] == b'\n' {
                 in_comment = false;
             }
-            out.push(bytes[i] as char);
+            out.push(bytes[i]);
             i += 1;
             continue;
         }
         if bytes[i] == b'%' {
             in_comment = true;
-            out.push('%');
+            out.push(b'%');
             i += 1;
             continue;
         }
         if bytes[i] == b'\\' && i + 1 < bytes.len() {
             let next = bytes[i + 1];
             if next == b'{' || next == b'}' {
-                out.push('\\');
-                out.push(next as char);
+                out.push(b'\\');
+                out.push(next);
                 i += 2;
                 continue;
             }
@@ -913,22 +917,22 @@ pub fn normalize_unmatched_braces(input: &str) -> String {
         match bytes[i] {
             b'{' => {
                 depth += 1;
-                out.push('{');
+                out.push(b'{');
             }
             b'}' => {
                 if depth > 0 {
                     depth -= 1;
-                    out.push('}');
+                    out.push(b'}');
                 } else {
                     // Drop unmatched closing brace
                 }
             }
-            _ => out.push(bytes[i] as char),
+            _ => out.push(bytes[i]),
         }
         i += 1;
     }
 
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 /// Strip optional bracket arguments from specific environments (e.g., nomenclature).
@@ -1038,20 +1042,20 @@ pub fn strip_command_optional_arg(input: &str, commands: &[&str]) -> String {
 /// Replace inline math blocks that only contain a superscript (e.g., $^{th}$) with \textsuperscript{...}.
 pub fn replace_empty_math_superscripts(input: &str) -> String {
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
+    let mut out: Vec<u8> = Vec::with_capacity(input.len());
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'\\' {
             if i + 1 < bytes.len() {
-                out.push(bytes[i] as char);
-                out.push(bytes[i + 1] as char);
+                out.push(bytes[i]);
+                out.push(bytes[i + 1]);
                 i += 2;
                 continue;
             }
         }
         if bytes[i] == b'$' {
             if i > 0 && bytes[i - 1] == b'\\' {
-                out.push('$');
+                out.push(b'$');
                 i += 1;
                 continue;
             }
@@ -1071,18 +1075,18 @@ pub fn replace_empty_math_superscripts(input: &str) -> String {
                         content = &content[1..content.len() - 1];
                         content = content.trim();
                     }
-                    out.push_str("\\textsuperscript{");
-                    out.push_str(content);
-                    out.push('}');
+                    out.extend_from_slice(b"\\textsuperscript{");
+                    out.extend_from_slice(content.as_bytes());
+                    out.push(b'}');
                     i = j + 1;
                     continue;
                 }
             }
         }
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 /// Avoid accidental "*/" sequences before loss markers (e.g. "*/* tylax:loss:" -> "* /* tylax:loss:")
@@ -1455,13 +1459,13 @@ pub fn strip_unescaped_dollars(input: &str) -> String {
 
 fn convert_string_entries(input: &str) -> String {
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
+    let mut out = Vec::with_capacity(input.len());
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'@' {
             let tail = &input[i..];
             if tail.len() >= 8 && tail[..8].eq_ignore_ascii_case("@string(") {
-                out.push_str("@string{");
+                out.extend_from_slice(b"@string{");
                 let mut j = i + 8;
                 let mut depth = 1usize;
                 while j < bytes.len() {
@@ -1470,8 +1474,8 @@ fn convert_string_entries(input: &str) -> String {
                         ')' => {
                             depth = depth.saturating_sub(1);
                             if depth == 0 {
-                                out.push_str(&input[i + 8..j]);
-                                out.push('}');
+                                out.extend_from_slice(input[i + 8..j].as_bytes());
+                                out.push(b'}');
                                 i = j + 1;
                                 break;
                             }
@@ -1481,21 +1485,21 @@ fn convert_string_entries(input: &str) -> String {
                     j += 1;
                 }
                 if j >= bytes.len() {
-                    out.push_str(&input[i + 8..]);
+                    out.extend_from_slice(input[i + 8..].as_bytes());
                     break;
                 }
                 continue;
             }
         }
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 fn sanitize_bibtex_keys(input: &str) -> String {
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
+    let mut out = Vec::with_capacity(input.len());
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'@' {
@@ -1506,7 +1510,7 @@ fn sanitize_bibtex_keys(input: &str) -> String {
             }
             let at_line_start = k == 0 || bytes[k - 1] == b'\n';
             if !at_line_start {
-                out.push('@');
+                out.push(b'@');
                 i += 1;
                 continue;
             }
@@ -1542,7 +1546,7 @@ fn sanitize_bibtex_keys(input: &str) -> String {
                         j += 1;
                     }
                     let end = j.min(bytes.len());
-                    out.push_str(&input[start..end]);
+                    out.extend_from_slice(input[start..end].as_bytes());
                     i = end;
                     continue;
                 }
@@ -1560,22 +1564,22 @@ fn sanitize_bibtex_keys(input: &str) -> String {
                 }
                 if k < bytes.len() && bytes[k] == b',' {
                     let sanitized = sanitize_citation_key(key_raw);
-                    out.push('@');
-                    out.push_str(&entry_type);
-                    out.push(open);
-                    out.push_str(&sanitized);
-                    out.push(',');
+                    out.push(b'@');
+                    out.extend_from_slice(entry_type.as_bytes());
+                    out.push(open as u8);
+                    out.extend_from_slice(sanitized.as_bytes());
+                    out.push(b',');
                     i = k + 1;
                     continue;
                 }
             }
-            out.push_str(&input[start..i]);
+            out.extend_from_slice(input[start..i].as_bytes());
             continue;
         }
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 /// Escape plain text for Typst markup.
@@ -1626,7 +1630,7 @@ pub fn escape_typst_string(text: &str) -> String {
 /// Strip a \label{...} command from raw text and return (clean_text, label).
 pub fn strip_label_from_text(raw: &str) -> (String, Option<String>) {
     let bytes = raw.as_bytes();
-    let mut out = String::with_capacity(raw.len());
+    let mut out = Vec::with_capacity(raw.len());
     let mut label: Option<String> = None;
     let mut i = 0usize;
     while i < bytes.len() {
@@ -1661,10 +1665,11 @@ pub fn strip_label_from_text(raw: &str) -> (String, Option<String>) {
                 }
             }
         }
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
-    let cleaned = out.trim().to_string();
+    let cleaned = String::from_utf8(out).unwrap_or_else(|_| raw.to_string());
+    let cleaned = cleaned.trim().to_string();
     let cleaned_label = label.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     (cleaned, cleaned_label)
 }
@@ -1711,7 +1716,7 @@ pub fn escape_at_in_words(input: &str) -> String {
 
 /// Normalize LaTeX-style quotes to plain double quotes.
 pub fn normalize_latex_quotes(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
+    let mut out: Vec<u8> = Vec::with_capacity(input.len());
     let mut in_code_block = false;
     let mut in_inline_raw = false;
     let mut in_string = false;
@@ -1720,34 +1725,34 @@ pub fn normalize_latex_quotes(input: &str) -> String {
         let trimmed = line.trim_start();
         if trimmed.starts_with("```") {
             in_code_block = !in_code_block;
-            out.push_str(line);
+            out.extend_from_slice(line.as_bytes());
             continue;
         }
         if in_code_block {
-            out.push_str(line);
+            out.extend_from_slice(line.as_bytes());
             continue;
         }
 
         let bytes = line.as_bytes();
         let mut i = 0usize;
         while i < bytes.len() {
-            let ch = bytes[i] as char;
-            if ch == '\\' {
+            let ch = bytes[i];
+            if ch == b'\\' {
                 if !in_inline_raw && !in_string && i + 2 < bytes.len() {
                     if bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
-                        out.push('"');
+                        out.push(b'"');
                         i += 3;
                         continue;
                     }
                     if bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
-                        out.push('"');
+                        out.push(b'"');
                         i += 3;
                         continue;
                     }
                 }
-                out.push(ch);
+                out.push(b'\\');
                 if i + 1 < bytes.len() {
-                    out.push(bytes[i + 1] as char);
+                    out.push(bytes[i + 1]);
                     i += 2;
                 } else {
                     i += 1;
@@ -1756,28 +1761,28 @@ pub fn normalize_latex_quotes(input: &str) -> String {
             }
 
             if !in_inline_raw && !in_string {
-                if ch == '`' && i + 1 < bytes.len() && bytes[i + 1] == b'`' {
-                    out.push('"');
+                if ch == b'`' && i + 1 < bytes.len() && bytes[i + 1] == b'`' {
+                    out.push(b'"');
                     i += 2;
                     continue;
                 }
-                if ch == '\'' && i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
-                    out.push('"');
+                if ch == b'\'' && i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                    out.push(b'"');
                     i += 2;
                     continue;
                 }
             }
 
-            if ch == '`' && !in_string {
+            if ch == b'`' && !in_string {
                 in_inline_raw = !in_inline_raw;
-                out.push('`');
+                out.push(b'`');
                 i += 1;
                 continue;
             }
 
-            if ch == '"' && !in_inline_raw {
+            if ch == b'"' && !in_inline_raw {
                 in_string = !in_string;
-                out.push('"');
+                out.push(b'"');
                 i += 1;
                 continue;
             }
@@ -1787,13 +1792,13 @@ pub fn normalize_latex_quotes(input: &str) -> String {
         }
     }
 
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 /// Replace \verb delimiters with a brace-based \texttt{...} form so the parser can handle it.
 pub fn replace_verb_commands(input: &str) -> String {
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
+    let mut out = Vec::with_capacity(input.len());
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'\\' {
@@ -1806,17 +1811,17 @@ pub fn replace_verb_commands(input: &str) -> String {
                     j += 1;
                 }
                 if j >= bytes.len() {
-                    out.push_str(&input[i..]);
+                    out.extend_from_slice(input[i..].as_bytes());
                     break;
                 }
-                let delim = bytes[j] as char;
+                let delim = bytes[j];
                 j += 1;
                 let start = j;
-                while j < bytes.len() && bytes[j] as char != delim {
+                while j < bytes.len() && bytes[j] != delim {
                     j += 1;
                 }
                 if j >= bytes.len() {
-                    out.push_str(&input[i..]);
+                    out.extend_from_slice(input[i..].as_bytes());
                     break;
                 }
                 let content = &input[start..j];
@@ -1828,17 +1833,17 @@ pub fn replace_verb_commands(input: &str) -> String {
                         _ => escaped.push(ch),
                     }
                 }
-                out.push_str("\\texttt{");
-                out.push_str(&escaped);
-                out.push('}');
+                out.extend_from_slice(b"\\texttt{");
+                out.extend_from_slice(escaped.as_bytes());
+                out.push(b'}');
                 i = j + 1;
                 continue;
             }
         }
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 /// Collect all \label{...} occurrences from LaTeX source.
@@ -2078,6 +2083,129 @@ pub fn expand_latex_inputs(input: &str, base_dir: &std::path::Path) -> String {
     expand_latex_inputs_inner(input, base_dir, 0, &mut seen)
 }
 
+/// Collect package names from \usepackage / \RequirePackage commands.
+pub fn collect_usepackage_entries(input: &str) -> Vec<String> {
+    let mut packages = Vec::new();
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            let remaining = &input[i..];
+            let (_cmd, cmd_len) = if remaining.starts_with("\\usepackage") {
+                ("\\usepackage", 11usize)
+            } else if remaining.starts_with("\\RequirePackage") {
+                ("\\RequirePackage", 15usize)
+            } else {
+                ("", 0usize)
+            };
+            if cmd_len > 0 {
+                if i + cmd_len < bytes.len() && bytes[i + cmd_len].is_ascii_alphabetic() {
+                    i += 1;
+                    continue;
+                }
+                let mut j = i + cmd_len;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                // Optional [..] options
+                if j < bytes.len() && bytes[j] == b'[' {
+                    let mut depth = 1usize;
+                    j += 1;
+                    while j < bytes.len() && depth > 0 {
+                        match bytes[j] {
+                            b'[' => depth += 1,
+                            b']' => depth = depth.saturating_sub(1),
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                        j += 1;
+                    }
+                }
+                if j < bytes.len() && bytes[j] == b'{' {
+                    let (content, used) = extract_braced_content(&input[j..]);
+                    if let Some(content) = content {
+                        for part in content.split(',') {
+                            let trimmed = part.trim();
+                            if !trimmed.is_empty() {
+                                packages.push(trimmed.to_string());
+                            }
+                        }
+                    }
+                    i = j + used;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    packages
+}
+
+/// Expand local \usepackage / \RequirePackage files found on disk.
+/// Only includes package files that exist under base_dir.
+pub fn expand_local_packages(input: &str, base_dir: &std::path::Path) -> String {
+    expand_local_packages_with_skip(input, base_dir, &HashSet::new())
+}
+
+/// Expand local \usepackage / \RequirePackage files found on disk, skipping any
+/// package names present in `skip_packages` (case-insensitive).
+pub fn expand_local_packages_with_skip(
+    input: &str,
+    base_dir: &std::path::Path,
+    skip_packages: &HashSet<String>,
+) -> String {
+    let mut seen = HashSet::new();
+    let mut expanded = String::new();
+    for pkg in collect_usepackage_entries(input) {
+        let pkg_trimmed = pkg.trim();
+        if pkg_trimmed.is_empty() {
+            continue;
+        }
+        let pkg_lower = pkg_trimmed.to_lowercase();
+        if skip_packages.contains(&pkg_lower) {
+            continue;
+        }
+        let path = std::path::PathBuf::from(pkg_trimmed);
+        let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+        if path.extension().is_none() {
+            let mut sty = path.clone();
+            sty.set_extension("sty");
+            candidates.push(sty);
+            let mut tex = path.clone();
+            tex.set_extension("tex");
+            candidates.push(tex);
+        } else {
+            candidates.push(path.clone());
+        }
+        for cand in candidates {
+            let full_path = if cand.is_absolute() {
+                cand
+            } else {
+                base_dir.join(&cand)
+            };
+            if !full_path.exists() || seen.contains(&full_path) {
+                continue;
+            }
+            if let Ok(content) = std::fs::read_to_string(&full_path) {
+                seen.insert(full_path.clone());
+                expanded.push_str("% --- local package: ");
+                expanded.push_str(full_path.to_string_lossy().as_ref());
+                expanded.push_str(" ---\n");
+                expanded.push_str("\\makeatletter\n");
+                expanded.push_str(&content);
+                expanded.push_str("\n\\makeatother\n");
+            }
+        }
+    }
+    if expanded.is_empty() {
+        input.to_string()
+    } else {
+        format!("{}\n{}", expanded, input)
+    }
+}
+
 fn expand_latex_inputs_inner(
     input: &str,
     base_dir: &std::path::Path,
@@ -2090,7 +2218,7 @@ fn expand_latex_inputs_inner(
     }
 
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
+    let mut out = Vec::with_capacity(input.len());
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'\\' {
@@ -2105,7 +2233,7 @@ fn expand_latex_inputs_inner(
             if cmd_len > 0 {
                 // Avoid matching commands like \inputenc
                 if i + cmd_len < bytes.len() && bytes[i + cmd_len].is_ascii_alphabetic() {
-                    out.push(bytes[i] as char);
+                    out.push(bytes[i]);
                     i += 1;
                     continue;
                 }
@@ -2145,7 +2273,7 @@ fn expand_latex_inputs_inner(
 
                     if seen.contains(&full_path) {
                         if end_idx > i {
-                            out.push_str(&input[i..end_idx]);
+                            out.extend_from_slice(input[i..end_idx].as_bytes());
                             i = end_idx;
                             continue;
                         }
@@ -2155,7 +2283,7 @@ fn expand_latex_inputs_inner(
                         seen.insert(full_path.clone());
                         let next_base = full_path.parent().unwrap_or(base_dir);
                         let expanded = expand_latex_inputs_inner(&content, next_base, depth + 1, seen);
-                        out.push_str(&expanded);
+                        out.extend_from_slice(expanded.as_bytes());
                         if end_idx > 0 {
                             i = end_idx;
                         } else {
@@ -2163,17 +2291,17 @@ fn expand_latex_inputs_inner(
                         }
                         continue;
                     } else if end_idx > i {
-                        out.push_str(&input[i..end_idx]);
+                        out.extend_from_slice(input[i..end_idx].as_bytes());
                         i = end_idx;
                         continue;
                     }
                 }
             }
         }
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
-    out
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 /// Strip occurrences of \command{...} (single braced argument) from LaTeX source.
@@ -2857,7 +2985,10 @@ pub fn convert_author_text(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::convert_author_text;
+    use super::{
+        convert_author_text, normalize_display_dollars, normalize_math_delimiters,
+        normalize_unmatched_braces, replace_verb_commands, strip_label_from_text,
+    };
 
     #[test]
     fn author_text_drops_thanks_and_comments() {
@@ -2867,5 +2998,23 @@ mod tests {
         assert!(!out.contains('%'));
         assert!(out.contains("\\\\"));
         assert!(out.contains("\\and"));
+    }
+
+    #[test]
+    fn unicode_preserved_in_preprocess_helpers() {
+        let input = "Cafe\u{2014}test \\\\label{sec:intro} $x$";
+        let out = normalize_math_delimiters(input);
+        let out = normalize_display_dollars(&out);
+        let out = normalize_unmatched_braces(&out);
+        let (stripped, label) = strip_label_from_text(&out);
+        assert_eq!(label.as_deref(), Some("sec:intro"));
+        assert!(stripped.contains('\u{2014}'));
+    }
+
+    #[test]
+    fn replace_verb_keeps_unicode() {
+        let input = "code \\\\verb|a{b}\u{2014}c| end";
+        let out = replace_verb_commands(input);
+        assert!(out.contains("\\texttt{a\\{b\\}—c}"));
     }
 }

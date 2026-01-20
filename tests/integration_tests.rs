@@ -272,6 +272,40 @@ The formula $E = mc^2$ is famous.
         let result = latex_document_to_typst(latex);
         assert!(!result.contains("Error"));
     }
+
+    #[test]
+    fn test_table_with_nested_tabular() {
+        let latex = r#"
+\documentclass{article}
+\begin{document}
+\begin{table}[ht]
+ \centering
+  \small
+  \begin{threeparttable}[b]
+  \caption{Comparison of the public-key stegosystems}
+  \begin{tabular}{lcc}
+    Paper & Security & Channels\\
+    \hline
+    von Ahn and Hopper & passive & universal\\
+  \end{tabular}
+  \label{table:one}
+  \end{threeparttable}
+\end{table}
+\end{document}
+"#;
+
+        let result = latex_document_to_typst(latex);
+        assert!(
+            result.contains("#table("),
+            "Expected table conversion, got: {}",
+            result
+        );
+        assert!(
+            result.contains("<table-one>"),
+            "Expected label conversion, got: {}",
+            result
+        );
+    }
 }
 
 // ============================================================================
@@ -1548,6 +1582,77 @@ Some text
         for s in formatted {
             assert!(s.is_ascii() || !s.is_empty());
         }
+    }
+}
+
+mod merged_command_handling {
+    use tylax::core::latex2typst::latex_to_typst_with_report;
+
+    #[test]
+    fn test_split_zero_arg_macro_prefixes() {
+        let input = r"
+\\documentclass{article}
+\\newcommand{\\reals}{\\mathbb{R}}
+\\newcommand{\\nbd}{\\nobreakdash-\\hspace{0pt}}
+\\begin{document}
+$\\realsG$ and a G\\nbdset.
+\\end{document}
+";
+        let result = latex_to_typst_with_report(input);
+        assert!(
+            result.report.losses.is_empty(),
+            "Expected no losses, got: {:?}",
+            result.report.losses
+        );
+    }
+
+    #[test]
+    fn test_split_declared_math_operator_suffix() {
+        let input = r"
+\\documentclass{article}
+\\DeclareMathOperator{\\Irr}{Irr}
+\\begin{document}
+$\\IrrU$
+\\end{document}
+";
+        let result = latex_to_typst_with_report(input);
+        assert!(
+            result.report.losses.is_empty(),
+            "Expected no losses, got: {:?}",
+            result.report.losses
+        );
+    }
+
+    #[test]
+    fn test_split_spacing_command_suffix() {
+        let input = r"
+\\documentclass{article}
+\\begin{document}
+$a \\quadx b$
+\\end{document}
+";
+        let result = latex_to_typst_with_report(input);
+        assert!(
+            result.report.losses.is_empty(),
+            "Expected no losses, got: {:?}",
+            result.report.losses
+        );
+    }
+
+    #[test]
+    fn test_split_mathbb_shorthand_suffix() {
+        let input = r"
+\\documentclass{article}
+\\begin{document}
+$\\mathbbR$
+\\end{document}
+";
+        let result = latex_to_typst_with_report(input);
+        assert!(
+            result.report.losses.is_empty(),
+            "Expected no losses, got: {:?}",
+            result.report.losses
+        );
     }
 }
 

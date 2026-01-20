@@ -39,7 +39,7 @@ pub fn maybe_convert_icml(input: &str) -> Option<String> {
     let hints = extract_preamble_hints(input);
     let base_font_size_pt =
         hints.text_size.as_deref().and_then(|size| parse_length_to_pt(size, "10pt"));
-    let cite_command = Some("citep".to_string());
+    let cite_command = hints.cite_command.clone().or_else(|| Some("citep".to_string()));
 
     let doc = typst_to_ir(input);
     let body = render_document(
@@ -56,6 +56,7 @@ pub fn maybe_convert_icml(input: &str) -> Option<String> {
             bibliography_style_default: Some("plainnat".to_string()),
             cite_command,
             base_font_size_pt,
+            heading_numbering_none: hints.heading_numbering_none,
         },
     );
 

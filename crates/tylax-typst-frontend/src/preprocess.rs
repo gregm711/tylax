@@ -164,12 +164,30 @@ impl Evaluator {
 
         match node.kind() {
             SyntaxKind::LetBinding
-            | SyntaxKind::SetRule
-            | SyntaxKind::ShowRule
             | SyntaxKind::Import
             | SyntaxKind::ModuleImport
             | SyntaxKind::Include
             | SyntaxKind::ModuleInclude => String::new(),
+            SyntaxKind::SetRule => {
+                if !is_supported_set_rule(node) {
+                    let name = set_rule_name(node)
+                        .map(|n| format!("set rule {} not supported", n))
+                        .unwrap_or_else(|| "set rule not supported".to_string());
+                    self.losses
+                        .push(Loss::new("set-rule", name));
+                }
+                String::new()
+            }
+            SyntaxKind::ShowRule => {
+                if !is_supported_show_rule(node) {
+                    let msg = show_rule_target_name(node)
+                        .map(|name| format!("show rule {} not supported", name))
+                        .unwrap_or_else(|| "show rule not supported".to_string());
+                    self.losses
+                        .push(Loss::new("show-rule", msg));
+                }
+                String::new()
+            }
             SyntaxKind::ContentBlock => self.expand_content_block(node),
             SyntaxKind::Conditional => self.expand_conditional(node),
             SyntaxKind::ForLoop => self.expand_for_loop(node),
@@ -819,6 +837,7 @@ impl Evaluator {
         params
     }
 
+    #[allow(dead_code)]
     fn extract_codeblock_body(&self, node: &SyntaxNode, params: &[ParamDef]) -> String {
         let mut out: Vec<String> = Vec::new();
         let param_names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
@@ -1263,6 +1282,136 @@ fn node_full_text(node: &SyntaxNode) -> String {
         return text;
     }
     node.clone().into_text().to_string()
+}
+
+fn is_supported_set_rule(node: &SyntaxNode) -> bool {
+    let Some(name) = set_rule_name(node) else {
+        return false;
+    };
+    matches!(
+        name.as_str(),
+        "page"
+            | "text"
+            | "par"
+            | "math.equation"
+            | "bibliography"
+            | "std.bibliography"
+            | "align"
+            | "heading"
+            | "cite"
+            | "enum"
+            | "document"
+    )
+}
+
+fn is_supported_show_rule(node: &SyntaxNode) -> bool {
+    if node_contains_kind(node, SyntaxKind::Closure) {
+        return true;
+    }
+    let mut has_direct_ident = false;
+    let mut has_func_call = false;
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::Ident => {
+                has_direct_ident = true;
+                if child.text() == "heading" {
+                    return true;
+                }
+            }
+            SyntaxKind::FuncCall => {
+                has_func_call = true;
+                if let Some(name) = get_func_call_name(&child) {
+                    if name == "heading" || name == "heading.where" {
+                        return true;
+                    }
+                    if name.ends_with(".with") || func_call_has_with(&child) {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if has_direct_ident && !has_func_call {
+        return true;
+    }
+    if !has_direct_ident && !has_func_call {
+        return true;
+    }
+    has_func_call && !has_direct_ident
+}
+
+fn set_rule_name(node: &SyntaxNode) -> Option<String> {
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::Ident => return Some(child.text().to_string()),
+            SyntaxKind::FieldAccess => {
+                let mut parts = Vec::new();
+                for part in child.children() {
+                    if part.kind() == SyntaxKind::Ident {
+                        parts.push(part.text().to_string());
+                    }
+                }
+                if !parts.is_empty() {
+                    return Some(parts.join("."));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn get_func_call_name(node: &SyntaxNode) -> Option<String> {
+    let first = node.children().next()?;
+    if first.kind() == SyntaxKind::Ident {
+        return Some(first.text().to_string());
+    }
+    if first.kind() == SyntaxKind::FieldAccess {
+        let mut parts = Vec::new();
+        for child in first.children() {
+            if child.kind() == SyntaxKind::Ident {
+                parts.push(child.text().to_string());
+            }
+        }
+        if !parts.is_empty() {
+            return Some(parts.join("."));
+        }
+    }
+    None
+}
+
+fn func_call_has_with(node: &SyntaxNode) -> bool {
+    let text = node_full_text(node);
+    text.contains(".with")
+}
+
+fn node_contains_kind(node: &SyntaxNode, kind: SyntaxKind) -> bool {
+    let mut stack = vec![node.clone()];
+    while let Some(current) = stack.pop() {
+        if current.kind() == kind {
+            return true;
+        }
+        for child in current.children() {
+            stack.push(child.clone());
+        }
+    }
+    false
+}
+
+fn show_rule_target_name(node: &SyntaxNode) -> Option<String> {
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::Ident => return Some(child.text().to_string()),
+            SyntaxKind::FuncCall => {
+                if let Some(name) = get_func_call_name(&child) {
+                    return Some(name);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn extract_destructuring_idents(node: &SyntaxNode) -> Vec<String> {
