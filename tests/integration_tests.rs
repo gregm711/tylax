@@ -151,6 +151,40 @@ mod l2t_math {
 }
 
 // ============================================================================
+// Figure/Image Tests - LaTeX to Typst
+// ============================================================================
+
+mod l2t_figures {
+    use super::*;
+
+    #[test]
+    fn test_includegraphics_options_in_figure() {
+        let latex = r"\begin{figure}\includegraphics[width=0.5\textwidth,scale=0.75,angle=90]{fig.png}\caption{Cap}\end{figure}";
+        let result = latex_to_typst(latex);
+        assert!(
+            result.contains("image(\"fig.png\""),
+            "Expected image conversion, got: {}",
+            result
+        );
+        assert!(
+            result.contains("width: 50%"),
+            "Expected width conversion, got: {}",
+            result
+        );
+        assert!(
+            result.contains("scale(x: 0.75"),
+            "Expected scale conversion, got: {}",
+            result
+        );
+        assert!(
+            result.contains("rotate(90deg"),
+            "Expected rotate conversion, got: {}",
+            result
+        );
+    }
+}
+
+// ============================================================================
 // Math Mode Tests - Typst to LaTeX
 // ============================================================================
 

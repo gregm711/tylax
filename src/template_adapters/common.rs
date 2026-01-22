@@ -151,7 +151,10 @@ pub fn extract_array_strings(node: &SyntaxNode, lets: &HashMap<String, SyntaxNod
     out
 }
 
-pub fn extract_string_like(node: &SyntaxNode, lets: &HashMap<String, SyntaxNode>) -> Option<String> {
+pub fn extract_string_like(
+    node: &SyntaxNode,
+    lets: &HashMap<String, SyntaxNode>,
+) -> Option<String> {
     let resolved = resolve_ident(node, lets);
     match resolved.kind() {
         SyntaxKind::Str => Some(resolved.text().trim_matches('"').to_string()),
@@ -251,7 +254,10 @@ pub fn extract_year_from_name(name: &str, prefix: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    let digits: String = trimmed.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+    let digits: String = trimmed
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
     if digits.is_empty() {
         None
     } else {
@@ -480,6 +486,8 @@ fn parse_affl_lines(node: &SyntaxNode, lets: &HashMap<String, SyntaxNode>) -> Ve
             }
             lines
         }
-        _ => extract_string_like(&resolved, lets).map(|v| vec![v]).unwrap_or_default(),
+        _ => extract_string_like(&resolved, lets)
+            .map(|v| vec![v])
+            .unwrap_or_default(),
     }
 }

@@ -132,8 +132,8 @@ fn template_snapshots() {
 
 #[test]
 fn ieee_adapter_structure() {
-    let input = std::fs::read_to_string("../public/templates/ieee.typ")
-        .expect("missing ieee template");
+    let input =
+        std::fs::read_to_string("../public/templates/ieee.typ").expect("missing ieee template");
     let output = typst_to_latex_ir(&input, true);
     assert!(
         output.contains("\\documentclass[conference]{IEEEtran}"),

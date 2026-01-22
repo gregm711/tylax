@@ -28,7 +28,7 @@ use super::utils::{
     convert_caption_text, escape_typst_string, escape_typst_text, sanitize_citation_key,
     sanitize_label, to_roman_numeral,
 };
-use crate::features::images::ImageAttributes;
+use crate::features::images::{render_image_expr, ImageAttributes};
 use crate::utils::loss::{LossKind, LOSS_MARKER_PREFIX};
 
 struct ProfileGuard<'a> {
@@ -227,18 +227,16 @@ fn write_math_class(output: &mut String, class_name: &str, arg: &str) {
     }
     if trimmed.contains('#') {
         let escaped = escape_typst_string(trimmed);
-        let _ = write!(
-            output,
-            "class(\"{}\", text(\"{}\")) ",
-            class_name, escaped
-        );
+        let _ = write!(output, "class(\"{}\", text(\"{}\")) ", class_name, escaped);
     } else {
         let _ = write!(output, "class(\"{}\", {}) ", class_name, trimmed);
     }
 }
 
 fn write_math_text(conv: &mut LatexConverter, cmd: &CmdItem, output: &mut String) {
-    let raw = conv.get_required_arg_with_braces(cmd, 0).unwrap_or_default();
+    let raw = conv
+        .get_required_arg_with_braces(cmd, 0)
+        .unwrap_or_default();
     let text = convert_caption_text(&raw);
     let escaped = escape_typst_string(text.trim());
     let _ = write!(output, "text(\"{}\")", escaped);
@@ -332,6 +330,73 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 }
                 return;
             }
+            "usepackage" | "RequirePackage" => {
+                if let Some(pkgs) = conv.get_required_arg(&cmd, 0) {
+                    if package_list_contains(&pkgs, "geometry") {
+                        let opts = conv
+                            .get_optional_arg(&cmd, 0)
+                            .or_else(|| extract_first_bracket_arg(&cmd.syntax().text().to_string()));
+                        if let Some(opts) = opts {
+                            apply_geometry_options(conv, &opts);
+                        }
+                    }
+                }
+                return;
+            }
+            "geometry" => {
+                if let Some(opts) = conv.get_required_arg(&cmd, 0) {
+                    apply_geometry_options(conv, &opts);
+                }
+                return;
+            }
+            "setlength" => {
+                if let (Some(target), Some(value)) =
+                    (conv.get_required_arg(&cmd, 0), conv.get_required_arg(&cmd, 1))
+                {
+                    apply_length_setting(conv, &target, &value);
+                }
+                return;
+            }
+            "parskip" | "parindent" => {
+                if let Some(value) = conv.get_required_arg(&cmd, 0) {
+                    apply_length_setting(conv, base_name, &value);
+                }
+                return;
+            }
+            "onehalfspacing" => {
+                conv.state.line_spacing = Some("0.8em".to_string());
+                return;
+            }
+            "doublespacing" => {
+                conv.state.line_spacing = Some("1.4em".to_string());
+                return;
+            }
+            "singlespacing" => {
+                conv.state.line_spacing = None;
+                return;
+            }
+            "linespread" => {
+                if let Some(value) = conv.get_required_arg(&cmd, 0) {
+                    apply_line_spread(conv, &value);
+                }
+                return;
+            }
+            "pagestyle" => {
+                if let Some(style) = conv.get_required_arg(&cmd, 0) {
+                    if style.trim() == "fancy" {
+                        conv.state.header.enabled = true;
+                    }
+                }
+                return;
+            }
+            "fancyhead" => {
+                apply_fancy_head(conv, &cmd);
+                return;
+            }
+            "titleformat" => {
+                apply_titleformat(conv, &cmd);
+                return;
+            }
             "definecolor" => {
                 let name = conv.get_required_arg(&cmd, 0).unwrap_or_default();
                 let model = conv.get_required_arg(&cmd, 1).unwrap_or_default();
@@ -355,9 +420,8 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
             "title" => {
                 if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
-                    let cleaned = raw.replace("\\\\", " ");
-                    conv.state.title =
-                        Some(super::utils::convert_caption_text(&cleaned).trim().to_string());
+                    let cleaned = super::utils::convert_author_text(&raw);
+                    conv.state.title = Some(cleaned.trim().to_string());
                 }
                 return;
             }
@@ -445,16 +509,15 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 return;
             }
             // Preamble/setup commands to ignore
-            "usepackage" | "RequirePackage" | "input" | "include" | "includeonly"
-            | "bibliographystyle" | "maketitle" | "pagestyle" 
+            "input" | "include" | "includeonly"
+            | "bibliographystyle" | "maketitle"
             | "thispagestyle" | "pagenumbering" | "setcounter" | "addtocounter" 
-            | "setlength" | "addtolength" | "theoremstyle" 
+            | "addtolength" | "theoremstyle" 
             | "allowdisplaybreaks" | "numberwithin"
             | "sisetup" | "NewDocumentCommand"
             | "RenewDocumentCommand" | "ProvideDocumentCommand" | "DeclareDocumentCommand"
             // Layout and spacing
-            | "geometry" | "onehalfspacing" | "doublespacing" | "singlespacing"
-            | "linespread" | "baselinestretch" | "parindent" | "parskip"
+            | "baselinestretch"
             // AtBegin/AtEnd hooks
             | "makeatletter" | "makeatother" | "AtBeginDocument" | "AtEndDocument"
             // Environment definitions
@@ -464,7 +527,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             // Graphics
             | "graphicspath" | "DeclareGraphicsExtensions"
             // Captions and floats
-            | "captionsetup" | "floatsetup"
+            | "captionsetup" | "floatsetup" | "titlespacing"
             // Lists
             | "setlist"
             // Glossary and acronyms
@@ -591,7 +654,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         // Sectioning - adjust level based on documentclass
         "section" => {
             // article: section = level 1 (=), report/book: section = level 2 (==)
-            let base_level = if conv.state.document_class.as_deref() == Some("article") {
+            let is_article = conv.state.document_class.as_deref() == Some("article")
+                || conv
+                    .state
+                    .document_class_info
+                    .as_ref()
+                    .map(|info| info.class_name == "article")
+                    .unwrap_or(false);
+            let base_level = if is_article {
                 0
             } else {
                 1
@@ -599,7 +669,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             convert_section(conv, &cmd, base_level, output);
         }
         "subsection" => {
-            let base_level = if conv.state.document_class.as_deref() == Some("article") {
+            let is_article = conv.state.document_class.as_deref() == Some("article")
+                || conv
+                    .state
+                    .document_class_info
+                    .as_ref()
+                    .map(|info| info.class_name == "article")
+                    .unwrap_or(false);
+            let base_level = if is_article {
                 1
             } else {
                 2
@@ -607,7 +684,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             convert_section(conv, &cmd, base_level, output);
         }
         "subsubsection" => {
-            let base_level = if conv.state.document_class.as_deref() == Some("article") {
+            let is_article = conv.state.document_class.as_deref() == Some("article")
+                || conv
+                    .state
+                    .document_class_info
+                    .as_ref()
+                    .map(|info| info.class_name == "article")
+                    .unwrap_or(false);
+            let base_level = if is_article {
                 2
             } else {
                 3
@@ -615,12 +699,8 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             convert_section(conv, &cmd, base_level, output);
         }
         "paragraph" => {
-            let base_level = if conv.state.document_class.as_deref() == Some("article") {
-                3
-            } else {
-                4
-            };
-            convert_section(conv, &cmd, base_level, output);
+            let title = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let _ = write!(output, "\n#text(weight: \"bold\")[{}]\n", title);
         }
         "subparagraph" => {
             let title = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
@@ -1785,33 +1865,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             let options = conv.get_optional_arg(&cmd, 0).unwrap_or_default();
             let path = conv.get_required_arg(&cmd, 0).unwrap_or_default();
 
-            // Use the images module for proper parsing
             let attrs = ImageAttributes::parse(&options);
-            let args = attrs.to_typst_args();
-
-            let trimmed = path.trim();
-            if trimmed.is_empty()
-                || trimmed.contains('\\')
-                || trimmed.contains('{')
-                || trimmed.contains('}')
-            {
-                output.push_str("#box(stroke: 0.5pt, inset: 6pt)[Missing image]");
-            } else if trimmed
-                .rsplit('.')
-                .next()
-                .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "eps" | "epsi" | "ps"))
-                .unwrap_or(false)
-            {
-                let _ = write!(
-                    output,
-                    "#box(stroke: 0.5pt, inset: 6pt)[Image omitted (unsupported EPS): {}]",
-                    trimmed
-                );
-            } else if args.is_empty() {
-                let _ = write!(output, "#image(\"{}\")", trimmed);
-            } else {
-                let _ = write!(output, "#image(\"{}\", {})", trimmed, args);
-            }
+            let expr = render_image_expr(&path, &attrs);
+            output.push('#');
+            output.push_str(&expr);
         }
 
         // Scalebox
@@ -4911,10 +4968,9 @@ fn resolve_color_expression(conv: &mut LatexConverter, raw: &str) -> String {
         return sanitize_color_expression(trimmed);
     }
 
-    let is_ident = trimmed
-        .chars()
-        .enumerate()
-        .all(|(i, ch)| (i > 0 || !ch.is_ascii_digit()) && (ch.is_ascii_alphanumeric() || ch == '_'));
+    let is_ident = trimmed.chars().enumerate().all(|(i, ch)| {
+        (i > 0 || !ch.is_ascii_digit()) && (ch.is_ascii_alphanumeric() || ch == '_')
+    });
     if is_ident {
         let ident = sanitize_color_identifier(trimmed);
         if !conv.state.color_defs.iter().any(|(name, _)| name == &ident) {
@@ -5469,4 +5525,169 @@ fn extract_first_braced_arg(raw: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn extract_first_bracket_arg(raw: &str) -> Option<String> {
+    let start = raw.find('[')?;
+    let mut depth = 0i32;
+    for (idx, ch) in raw[start..].char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    let end = start + idx;
+                    return Some(raw[start + 1..end].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn package_list_contains(pkgs: &str, name: &str) -> bool {
+    pkgs.split(',')
+        .map(|s| s.trim())
+        .any(|pkg| pkg == name)
+}
+
+fn apply_geometry_options(conv: &mut LatexConverter, options: &str) {
+    for raw in options.split(',') {
+        let opt = raw.trim();
+        if opt.is_empty() {
+            continue;
+        }
+        if let Some((key, value)) = opt.split_once('=') {
+            let key = key.trim();
+            let value = value.trim();
+            match key {
+                "margin" => conv.state.page_margin.all = Some(value.to_string()),
+                "left" => conv.state.page_margin.left = Some(value.to_string()),
+                "right" => conv.state.page_margin.right = Some(value.to_string()),
+                "top" => conv.state.page_margin.top = Some(value.to_string()),
+                "bottom" => conv.state.page_margin.bottom = Some(value.to_string()),
+                "hmargin" => {
+                    conv.state.page_margin.left = Some(value.to_string());
+                    conv.state.page_margin.right = Some(value.to_string());
+                }
+                "vmargin" => {
+                    conv.state.page_margin.top = Some(value.to_string());
+                    conv.state.page_margin.bottom = Some(value.to_string());
+                }
+                "paper" => {
+                    conv.state.page_paper = Some(value.to_string());
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if opt.ends_with("paper") && opt.len() > "paper".len() {
+            let paper = opt.trim_end_matches("paper");
+            if !paper.is_empty() {
+                conv.state.page_paper = Some(paper.to_string());
+            }
+        }
+    }
+}
+
+fn apply_length_setting(conv: &mut LatexConverter, target: &str, value: &str) {
+    let mut name = target.trim().trim_start_matches('\\').to_string();
+    name.retain(|c| c.is_ascii_alphabetic());
+    let val = value.trim().trim_matches(|c| c == '{' || c == '}');
+    if name.contains("parskip") {
+        conv.state.par_skip = Some(val.to_string());
+    } else if name.contains("parindent") {
+        conv.state.par_indent = Some(val.to_string());
+    }
+}
+
+fn apply_line_spread(conv: &mut LatexConverter, value: &str) {
+    let val = value.trim();
+    let Ok(scale) = val.parse::<f32>() else {
+        return;
+    };
+    if scale <= 1.0 {
+        conv.state.line_spacing = None;
+        return;
+    }
+    let leading = scale - 1.0;
+    conv.state.line_spacing = Some(format!("{:.3}em", leading));
+}
+
+fn apply_fancy_head(conv: &mut LatexConverter, cmd: &CmdItem) {
+    let opt = conv
+        .get_optional_arg(cmd, 0)
+        .or_else(|| extract_first_bracket_arg(&cmd.syntax().text().to_string()))
+        .unwrap_or_default();
+    let content = conv
+        .get_required_arg_with_braces(cmd, 0)
+        .or_else(|| extract_first_braced_arg(&cmd.syntax().text().to_string()))
+        .unwrap_or_default();
+    let text = convert_caption_text(&content);
+    if opt.trim().is_empty() {
+        return;
+    }
+    let key = opt.trim().to_uppercase();
+    if key.contains('L') {
+        conv.state.header.left = Some(text.trim().to_string());
+    }
+    if key.contains('C') {
+        conv.state.header.center = Some(text.trim().to_string());
+    }
+    if key.contains('R') {
+        conv.state.header.right = Some(text.trim().to_string());
+    }
+}
+
+fn apply_titleformat(conv: &mut LatexConverter, cmd: &CmdItem) {
+    let target = conv.get_required_arg(cmd, 0).unwrap_or_default();
+    let format = conv.get_required_arg(cmd, 1).unwrap_or_default();
+    let level = match target.trim().trim_start_matches('\\') {
+        "section" => Some(1),
+        "subsection" => Some(2),
+        "subsubsection" => Some(3),
+        "paragraph" => Some(4),
+        "subparagraph" => Some(5),
+        _ => None,
+    };
+    let Some(level) = level else {
+        return;
+    };
+    let style = parse_heading_style(&format);
+    conv.state.heading_styles.insert(level, style);
+}
+
+fn parse_heading_style(format: &str) -> super::context::HeadingStyleDef {
+    let mut style = super::context::HeadingStyleDef::default();
+    let fmt = format.replace('{', " ").replace('}', " ");
+    let sizes = [
+        ("\\Huge", "2em"),
+        ("\\huge", "1.8em"),
+        ("\\LARGE", "1.6em"),
+        ("\\Large", "1.4em"),
+        ("\\large", "1.2em"),
+        ("\\normalsize", "1em"),
+        ("\\small", "0.9em"),
+        ("\\footnotesize", "0.8em"),
+        ("\\scriptsize", "0.7em"),
+        ("\\tiny", "0.6em"),
+    ];
+    for (latex, size) in sizes {
+        if fmt.contains(latex) {
+            style.size = Some(size.to_string());
+            break;
+        }
+    }
+    if fmt.contains("\\bfseries") || fmt.contains("\\textbf") || fmt.contains("\\bf") {
+        style.bold = true;
+    }
+    if fmt.contains("\\itshape")
+        || fmt.contains("\\textit")
+        || fmt.contains("\\emph")
+        || fmt.contains("\\it")
+    {
+        style.italic = true;
+    }
+    style
 }

@@ -9,8 +9,11 @@ use std::time::Instant;
 
 use super::context::{ConversionMode, EnvironmentContext, LatexConverter, TemplateKind};
 use super::table::{parse_with_grid_parser, CellAlign};
-use super::utils::{convert_caption_text, escape_typst_string, sanitize_label, strip_label_from_text};
+use super::utils::{
+    convert_caption_text, escape_typst_string, sanitize_label, strip_label_from_text,
+};
 use crate::data::constants::{CodeBlockOptions, TheoremStyle, LANGUAGE_MAP, THEOREM_TYPES};
+use crate::features::images::{render_image_expr, ImageAttributes};
 use crate::utils::loss::{LossKind, LOSS_MARKER_PREFIX};
 
 /// Convert a LaTeX environment
@@ -32,7 +35,11 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         conv.state.profile_last_env = Some(env_trim.to_string());
     }
     let profile_enabled = conv.state.profile_enabled;
-    let env_start = if profile_enabled { Some(Instant::now()) } else { None };
+    let env_start = if profile_enabled {
+        Some(Instant::now())
+    } else {
+        None
+    };
 
     match env_trim {
         // Document environment - marks end of preamble
@@ -451,8 +458,10 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
                 conv.visit_env_content(&node, &mut buffer);
                 conv.state.abstract_text = Some(buffer.trim().to_string());
             } else {
-                output.push_str("\n#block(width: 100%, inset: 1em)[\n");
-                output.push_str("  #align(center)[#text(weight: \"bold\")[Abstract]]\n  ");
+                output.push_str("\n#block(width: 100%)[\n");
+                output.push_str("  #align(center)[#text(weight: \"bold\")[Abstract]]\n");
+                output.push_str("  #v(0.5em)\n");
+                output.push_str("  #set par(first-line-indent: 0pt)\n  ");
                 conv.visit_env_content(&node, output);
                 output.push_str("\n]\n");
             }
@@ -630,8 +639,15 @@ fn convert_program(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut St
 fn convert_figure(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut String) {
     conv.state.push_env(EnvironmentContext::Figure);
 
+    let placement_opt = conv
+        .get_env_optional_arg(node)
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>();
+
     // Find image and caption using AST
-    let mut image_expr: Option<String> = None;
+    let mut image_exprs: Vec<String> = Vec::new();
     let mut caption_cmd: Option<CmdItem> = None;
     let mut label_text = String::new();
     let mut subfigs: Vec<String> = Vec::new();
@@ -649,15 +665,12 @@ fn convert_figure(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Str
                         continue;
                     }
                     if name == "\\includegraphics" {
-                        if let Some(path) = conv.get_required_arg(&cmd, 0) {
-                            let trimmed = path.trim();
-                            if !trimmed.is_empty()
-                                && !trimmed.contains('\\')
-                                && !trimmed.contains('{')
-                                && !trimmed.contains('}')
-                            {
-                                image_expr = Some(format!("  image(\"{}\")", trimmed));
-                            }
+                        let options = conv.get_optional_arg(&cmd, 0).unwrap_or_default();
+                        let path = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+                        let attrs = ImageAttributes::parse(&options);
+                        let expr = render_image_expr(&path, &attrs);
+                        if !expr.trim().is_empty() {
+                            image_exprs.push(expr);
                         }
                     } else if name == "\\caption" {
                         // Store the command for later conversion
@@ -672,49 +685,72 @@ fn convert_figure(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Str
         }
     }
 
-    output.push_str("\n#figure(\n");
-    let has_image = image_expr.is_some();
-    let mut wrote_arg = has_image;
+    output.push_str("\n#figure(");
+    let has_images = !image_exprs.is_empty();
     let has_subfigs = !subfigs.is_empty();
-    if !has_image && !has_subfigs {
-        output.push_str("  []");
-        wrote_arg = true;
-    }
-    if has_image && !has_subfigs {
-        if let Some(expr) = image_expr.take() {
-            output.push_str(&expr);
+    let single_image = has_images && image_exprs.len() == 1 && !has_subfigs;
+    let mut header_lines: Vec<String> = Vec::new();
+    if !placement_opt.is_empty() {
+        let placement = if placement_opt.contains('H') || placement_opt.contains('h') {
+            "none"
+        } else if placement_opt.contains('t') {
+            "top"
+        } else if placement_opt.contains('b') {
+            "bottom"
+        } else {
+            ""
+        };
+        if !placement.is_empty() {
+            header_lines.push(format!("  placement: {}", placement));
         }
+    }
+    if single_image {
+        header_lines.push(format!("  {}", image_exprs[0].trim()));
     }
 
     // Convert caption content (may contain math like $\downarrow$)
     if let Some(ref cmd) = caption_cmd {
         if let Some(cap) = conv.get_converted_required_arg(cmd, 0) {
-            if wrote_arg {
-                output.push_str(",\n");
-            } else {
-                output.push('\n');
-            }
-            let _ = write!(output, "  caption: [{}]", cap);
-            wrote_arg = true;
+            header_lines.push(format!("  caption: [{}]", cap));
         }
     }
 
-    if wrote_arg {
+    if !header_lines.is_empty() {
+        output.push('\n');
+        output.push_str(&header_lines.join(",\n"));
         output.push('\n');
     }
 
     output.push(')');
 
+    let mut body_items: Vec<String> = Vec::new();
     if has_subfigs {
+        for sub in &subfigs {
+            let trimmed = sub.trim();
+            if !trimmed.is_empty() {
+                body_items.push(trimmed.to_string());
+            }
+        }
+    }
+    if has_images && (!single_image || has_subfigs) {
+        for expr in &image_exprs {
+            let trimmed = expr.trim();
+            if !trimmed.is_empty() {
+                body_items.push(format!("#{}", trimmed));
+            }
+        }
+    }
+
+    if !body_items.is_empty() || (!has_images && !has_subfigs) {
         output.push_str("[\n");
-        if subfigs.len() > 1 {
-            let columns = if subfigs.len() >= 3 { 3 } else { 2 };
+        if body_items.len() > 1 {
+            let columns = if body_items.len() >= 3 { 3 } else { 2 };
             let _ = writeln!(output, "#grid(columns: {}, gutter: 1em)[", columns);
-            for sub in &subfigs {
-                let _ = writeln!(output, "  {},", sub.trim());
+            for item in &body_items {
+                let _ = writeln!(output, "  {},", item.trim());
             }
             output.push_str("]\n");
-        } else if let Some(first) = subfigs.first() {
+        } else if let Some(first) = body_items.first() {
             output.push_str(first.trim());
             output.push('\n');
         }
@@ -731,7 +767,9 @@ fn convert_figure(conv: &mut LatexConverter, node: &SyntaxNode, output: &mut Str
 }
 
 fn render_subcaptionbox(conv: &mut LatexConverter, cmd: &CmdItem) -> String {
-    let raw_caption = conv.get_required_arg_with_braces(cmd, 0).unwrap_or_default();
+    let raw_caption = conv
+        .get_required_arg_with_braces(cmd, 0)
+        .unwrap_or_default();
     let (caption, label) = strip_label_from_text(&raw_caption);
     let caption_text = convert_caption_text(&caption);
     let content = conv.convert_required_arg(cmd, 1).unwrap_or_default();
@@ -1035,7 +1073,9 @@ fn convert_align(
         None
     };
     conv.visit_env_content(node, &mut math_content);
-    let visit_secs = visit_start.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
+    let visit_secs = visit_start
+        .map(|s| s.elapsed().as_secs_f64())
+        .unwrap_or(0.0);
 
     // Apply math cleanup
     let cleanup_start = if conv.state.profile_enabled {
@@ -1044,7 +1084,9 @@ fn convert_align(
         None
     };
     let cleaned = conv.cleanup_math_spacing(&math_content);
-    let cleanup_secs = cleanup_start.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
+    let cleanup_secs = cleanup_start
+        .map(|s| s.elapsed().as_secs_f64())
+        .unwrap_or(0.0);
     if conv.state.profile_enabled {
         eprintln!(
             "[tylax] align len={} visit={:.3}s cleanup={:.3}s",

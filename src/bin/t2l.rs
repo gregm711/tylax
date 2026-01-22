@@ -4,8 +4,13 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
 use std::io::{self, Read, Write};
-use std::time::Instant;
 use std::path::{Component, Path, PathBuf};
+use std::time::Instant;
+use tylax::core::latex2typst::utils::{
+    collect_bibliography_entries, collect_graphicspath_entries, collect_includegraphics_paths,
+    collect_usepackage_entries, expand_latex_inputs, expand_local_packages_with_skip,
+    sanitize_bibtex_content, sanitize_citation_key,
+};
 use tylax::{
     convert_auto, convert_auto_document, detect_format,
     diagnostics::{check_latex, format_diagnostics},
@@ -13,16 +18,12 @@ use tylax::{
     latex_to_typst_with_diagnostics, latex_to_typst_with_report,
     tikz::{convert_cetz_to_tikz, convert_tikz_to_cetz, is_cetz_code},
     typst_document_to_latex, typst_to_latex, typst_to_latex_ir, typst_to_latex_ir_with_report,
-    typst_to_latex_with_diagnostics, CliDiagnostic, T2LOptions,
-    utils::repair::{AiRepairConfig, maybe_repair_typst_to_latex},
-    utils::loss::{LossKind, LossRecord, LossReport, LOSS_MARKER_PREFIX},
+    typst_to_latex_with_diagnostics,
     utils::latex_analysis::metrics_source as latex_metrics_source,
+    utils::loss::{LossKind, LossRecord, LossReport, LOSS_MARKER_PREFIX},
+    utils::repair::{maybe_repair_typst_to_latex, AiRepairConfig},
     utils::typst_analysis::metrics_source as typst_metrics_source,
-};
-use tylax::core::latex2typst::utils::{
-    collect_bibliography_entries, collect_graphicspath_entries, collect_includegraphics_paths,
-    collect_usepackage_entries, expand_latex_inputs, expand_local_packages_with_skip,
-    sanitize_bibtex_content, sanitize_citation_key,
+    CliDiagnostic, T2LOptions,
 };
 
 #[cfg(feature = "cli")]
@@ -755,7 +756,10 @@ fn extract_bibitem_keys_from_typst(input: &str) -> std::collections::HashSet<Str
 }
 
 #[cfg(feature = "cli")]
-fn write_stub_bibliography(path: &Path, keys: &std::collections::HashSet<String>) -> io::Result<()> {
+fn write_stub_bibliography(
+    path: &Path,
+    keys: &std::collections::HashSet<String>,
+) -> io::Result<()> {
     if keys.is_empty() {
         return Ok(());
     }
@@ -922,7 +926,9 @@ fn extract_bib_entries(content: &str) -> Vec<(String, String)> {
             while j < bytes.len() && bytes[j] != b',' && bytes[j] != close as u8 {
                 j += 1;
             }
-            let key = String::from_utf8_lossy(&bytes[key_start..j]).trim().to_string();
+            let key = String::from_utf8_lossy(&bytes[key_start..j])
+                .trim()
+                .to_string();
 
             // Scan to matching close
             let mut depth = 1i32;
@@ -973,10 +979,7 @@ fn rewrite_bibliography_paths(
 }
 
 #[cfg(feature = "cli")]
-fn collect_bibliography_entries_with_includes(
-    input: &str,
-    base_dir: &Path,
-) -> Vec<String> {
+fn collect_bibliography_entries_with_includes(input: &str, base_dir: &Path) -> Vec<String> {
     let mut entries = collect_bibliography_entries(input);
     if !entries.is_empty() {
         return entries;
@@ -1180,6 +1183,61 @@ fn resolve_graphics_path(
 }
 
 #[cfg(feature = "cli")]
+fn normalize_image_extension(ext: &str) -> String {
+    let lower = ext.trim_start_matches('.').to_ascii_lowercase();
+    match lower.as_str() {
+        "jpeg" | "jpe" => "jpg".to_string(),
+        "tif" => "tiff".to_string(),
+        other => other.to_string(),
+    }
+}
+
+#[cfg(feature = "cli")]
+fn is_known_image_extension(ext: &str) -> bool {
+    matches!(
+        normalize_image_extension(ext).as_str(),
+        "png" | "jpg" | "gif" | "svg" | "pdf" | "bmp" | "webp" | "tiff"
+    )
+}
+
+#[cfg(feature = "cli")]
+fn detect_image_extension(path: &Path) -> Option<&'static str> {
+    let mut file = fs::File::open(path).ok()?;
+    let mut buf = [0u8; 512];
+    let n = file.read(&mut buf).ok()?;
+    let data = &buf[..n];
+
+    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some("png");
+    }
+    if data.starts_with(b"\xFF\xD8\xFF") {
+        return Some("jpg");
+    }
+    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        return Some("gif");
+    }
+    if data.starts_with(b"%PDF-") {
+        return Some("pdf");
+    }
+    if data.starts_with(b"BM") {
+        return Some("bmp");
+    }
+    if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+        return Some("webp");
+    }
+
+    let text = std::str::from_utf8(data).ok()?;
+    let trimmed = text
+        .trim_start_matches(|c: char| c.is_ascii_whitespace() || c == '\u{feff}')
+        .to_lowercase();
+    if trimmed.starts_with("<svg") || (trimmed.starts_with("<?xml") && trimmed.contains("<svg")) {
+        return Some("svg");
+    }
+
+    None
+}
+
+#[cfg(feature = "cli")]
 fn normalize_rel_path(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in path.components() {
@@ -1230,8 +1288,28 @@ fn copy_graphics_assets(
             if rel.is_empty() {
                 continue;
             }
-            if seen.insert(rel.clone()) {
-                let dest = out_dir.join(&rel);
+            let mut final_rel = rel.clone();
+            let rel_ext = Path::new(&rel)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("");
+
+            let detected_ext = detect_image_extension(&src);
+            if let Some(actual_ext) = detected_ext {
+                let actual_norm = normalize_image_extension(actual_ext);
+                let rel_norm = normalize_image_extension(rel_ext);
+                if !rel_norm.is_empty() && actual_norm != rel_norm {
+                    let mut rel_path = PathBuf::from(&rel);
+                    rel_path.set_extension(&actual_norm);
+                    final_rel = rel_path.to_string_lossy().to_string();
+                }
+            } else if is_known_image_extension(rel_ext) {
+                missing.push(trimmed.to_string());
+                continue;
+            }
+
+            if seen.insert(final_rel.clone()) {
+                let dest = out_dir.join(&final_rel);
                 if dest == src {
                     continue;
                 }
@@ -1240,7 +1318,8 @@ fn copy_graphics_assets(
                 }
                 let mut copied = fs::copy(&src, &dest).is_ok();
                 if copied {
-                    if let (Ok(src_meta), Ok(dest_meta)) = (fs::metadata(&src), fs::metadata(&dest)) {
+                    if let (Ok(src_meta), Ok(dest_meta)) = (fs::metadata(&src), fs::metadata(&dest))
+                    {
                         if src_meta.len() > 0 && dest_meta.len() == 0 {
                             copied = false;
                         }
@@ -1256,8 +1335,8 @@ fn copy_graphics_assets(
                     missing.push(trimmed.to_string());
                 }
             }
-            if trimmed != rel {
-                mapping.insert(trimmed.to_string(), rel);
+            if trimmed != final_rel {
+                mapping.insert(trimmed.to_string(), final_rel);
             }
         } else {
             missing.push(trimmed.to_string());
@@ -1397,6 +1476,26 @@ mod tests {
     }
 
     #[test]
+    fn test_graphicspath_rewrites_mismatched_extension() {
+        let base_dir = temp_dir("graphics-mismatch");
+        let out_dir = temp_dir("graphics-mismatch-out");
+        let imgs_dir = base_dir.join("images");
+        fs::create_dir_all(&imgs_dir).unwrap();
+        let mut file = fs::File::create(imgs_dir.join("photo.png")).unwrap();
+        file.write_all(&[0xFF, 0xD8, 0xFF, 0xE0, b'J', b'F', b'I', b'F', 0x00])
+            .unwrap();
+
+        let paths = vec!["images/photo.png".to_string()];
+        let mapping = copy_graphics_assets(&paths, &[], &base_dir, &out_dir).unwrap();
+
+        assert_eq!(
+            mapping.get("images/photo.png").map(|s| s.as_str()),
+            Some("images/photo.jpg")
+        );
+        assert!(out_dir.join("images").join("photo.jpg").exists());
+    }
+
+    #[test]
     fn test_bibliography_copy() {
         let base_dir = temp_dir("bib-base");
         let out_dir = temp_dir("bib-out");
@@ -1416,11 +1515,7 @@ mod tests {
     fn test_bibliography_fallback_ignores_generated_files() {
         let base_dir = temp_dir("bib-ignore");
         fs::write(base_dir.join("refs.bib"), "@article{a, title={x}}\n").unwrap();
-        fs::write(
-            base_dir.join("refs.typst.bib"),
-            "@article{b, title={y}}\n",
-        )
-        .unwrap();
+        fs::write(base_dir.join("refs.typst.bib"), "@article{b, title={y}}\n").unwrap();
 
         let entries = collect_bibliography_entries_with_includes("no bibliography here", &base_dir);
 
@@ -1566,7 +1661,8 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                         }
                     }
                     Direction::T2l => {
-                        let use_ir = ir || auto_repair || loss_log.is_some() || post_repair_log.is_some();
+                        let use_ir =
+                            ir || auto_repair || loss_log.is_some() || post_repair_log.is_some();
                         if auto_repair || loss_log.is_some() || post_repair_log.is_some() {
                             let report = typst_to_latex_ir_with_report(&content, true);
                             loss_report = Some(report.report.clone());
@@ -1609,7 +1705,8 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                         }
                     }
                     Direction::T2l => {
-                        let use_ir = ir || auto_repair || loss_log.is_some() || post_repair_log.is_some();
+                        let use_ir =
+                            ir || auto_repair || loss_log.is_some() || post_repair_log.is_some();
                         if auto_repair || loss_log.is_some() || post_repair_log.is_some() {
                             let report = typst_to_latex_ir_with_report(&content, false);
                             loss_report = Some(report.report.clone());
@@ -1675,8 +1772,7 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                                     }
                                 }
                             }
-                            let mut mapped_files: Vec<String> =
-                                mapping.values().cloned().collect();
+                            let mut mapped_files: Vec<String> = mapping.values().cloned().collect();
                             mapped_files.sort();
                             mapped_files.dedup();
                             let _ = populate_placeholder_bibliography(
@@ -1692,7 +1788,9 @@ fn handle_subcommand(cmd: Commands) -> io::Result<()> {
                     result.push_str("\n#hide(bibliography(\"references.typst.bib\"))\n");
                 }
             }
-            if let (Some(output_path), Some(base_dir)) = (output.as_ref(), graphics_base_dir.as_ref()) {
+            if let (Some(output_path), Some(base_dir)) =
+                (output.as_ref(), graphics_base_dir.as_ref())
+            {
                 let out_dir = Path::new(output_path)
                     .parent()
                     .map(|p| p.to_path_buf())

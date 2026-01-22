@@ -151,9 +151,7 @@ pub fn render_article_preamble(hints: &PreambleHints) -> String {
                 let format = render_heading_format(style);
                 out.push_str(&format!(
                     "\\titleformat{{\\{}}}{{{}}}{{\\the{}}}{{1em}}{{}}\n",
-                    cmd,
-                    format,
-                    cmd
+                    cmd, format, cmd
                 ));
                 if style.before.is_some() || style.after.is_some() {
                     let before = style.before.as_deref().unwrap_or("0pt");
@@ -567,7 +565,13 @@ pub fn equation_number_within(hints: &PreambleHints) -> Option<&'static str> {
 }
 
 fn theorem_number_within(hints: &PreambleHints) -> Option<&'static str> {
-    equation_number_within(hints).or_else(|| if hints.has_headings { Some("section") } else { None })
+    equation_number_within(hints).or_else(|| {
+        if hints.has_headings {
+            Some("section")
+        } else {
+            None
+        }
+    })
 }
 
 fn heading_command(level: u8) -> Option<&'static str> {
@@ -591,7 +595,10 @@ fn render_heading_format(style: &HeadingStyle) -> String {
     if let Some(size) = style.size.as_deref() {
         if let Some(pt) = parse_length_to_pt(size, "10pt") {
             let baseline = (pt * 1.2).max(pt + 1.0);
-            out.push_str(&format!("\\fontsize{{{:.1}pt}}{{{:.1}pt}}\\selectfont", pt, baseline));
+            out.push_str(&format!(
+                "\\fontsize{{{:.1}pt}}{{{:.1}pt}}\\selectfont",
+                pt, baseline
+            ));
         }
     }
     if out.is_empty() {
@@ -904,7 +911,10 @@ fn extract_hex_color(node: &SyntaxNode) -> Option<String> {
             let mut nums = Vec::new();
             if let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) {
                 for child in args.children() {
-                    if matches!(child.kind(), SyntaxKind::Numeric | SyntaxKind::Int | SyntaxKind::Float) {
+                    if matches!(
+                        child.kind(),
+                        SyntaxKind::Numeric | SyntaxKind::Int | SyntaxKind::Float
+                    ) {
                         if let Some(n) = parse_number(&child.text()) {
                             nums.push(n);
                         }
@@ -918,7 +928,12 @@ fn extract_hex_color(node: &SyntaxNode) -> Option<String> {
                         *v *= 255.0;
                     }
                 }
-                let hex = format!("{:02X}{:02X}{:02X}", clamp_byte(vals[0]), clamp_byte(vals[1]), clamp_byte(vals[2]));
+                let hex = format!(
+                    "{:02X}{:02X}{:02X}",
+                    clamp_byte(vals[0]),
+                    clamp_byte(vals[1]),
+                    clamp_byte(vals[2])
+                );
                 return Some(hex);
             }
         }

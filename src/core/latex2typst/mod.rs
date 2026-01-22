@@ -436,7 +436,44 @@ Hello World
 Content here.
 \end{document}";
         let output = latex_to_typst(input);
-        assert!(output.contains("== Introduction"));
+        assert!(output.contains("= Introduction"));
+    }
+
+    #[test]
+    fn test_preamble_spacing_and_headers() {
+        let input = r"\documentclass{article}
+\usepackage[a4paper,margin=1in]{geometry}
+\setlength{\parskip}{0.75em}
+\setlength{\parindent}{0pt}
+\onehalfspacing
+\pagestyle{fancy}
+\fancyhead{}
+\fancyhead[L]{Left}
+\fancyhead[R]{Right}
+\titleformat{\section}{\Large\bfseries}{\thesection}{1em}{}
+\begin{document}
+Hi
+\end{document}";
+        let mut pre_state = super::context::ConversionState::default();
+        super::context::capture_fancyhdr_hints(&mut pre_state, input);
+        assert_eq!(pre_state.header.left.as_deref(), Some("Left"));
+        assert_eq!(pre_state.header.right.as_deref(), Some("Right"));
+        let mut converter = super::context::LatexConverter::new();
+        let output = converter.convert_document(input);
+        assert_eq!(converter.state.par_skip.as_deref(), Some("0.75em"));
+        assert_eq!(converter.state.par_indent.as_deref(), Some("0pt"));
+        assert_eq!(converter.state.line_spacing.as_deref(), Some("0.8em"));
+        assert!(converter.state.header.enabled);
+        assert_eq!(converter.state.header.left.as_deref(), Some("Left"));
+        assert_eq!(converter.state.header.right.as_deref(), Some("Right"));
+        assert!(output.contains("#set page(margin: 1in)"));
+        assert!(output.contains("spacing: 0.75em"));
+        assert!(output.contains("first-line-indent: 0pt"));
+        assert!(output.contains("leading: 0.8em"));
+        assert!(output.contains("page(header: context"));
+        assert!(output.contains("Left"));
+        assert!(output.contains("Right"));
+        assert!(output.contains("heading.where(level: 1)"));
     }
 
     #[test]
@@ -592,7 +629,11 @@ Linear & 1.21 & 0.88 & 0.60 \\
             output
         );
         assert!(output.contains("_("), "Should keep subscript: {}", output);
-        assert!(output.contains("^(n)"), "Should keep superscript: {}", output);
+        assert!(
+            output.contains("^(n)"),
+            "Should keep superscript: {}",
+            output
+        );
     }
 
     #[test]
@@ -600,7 +641,11 @@ Linear & 1.21 & 0.88 & 0.60 \\
         let input = r"\text{abc}";
         let output = latex_math_to_typst(input);
         println!("text in math output: {}", output);
-        assert!(output.contains("\"abc\""), "Should emit math text: {}", output);
+        assert!(
+            output.contains("\"abc\""),
+            "Should emit math text: {}",
+            output
+        );
     }
 
     #[test]
@@ -713,13 +758,21 @@ See Section~\ref{sec:intro}. Eq.~\eqref{eq:one}.
 \end{document}";
         let output = latex_to_typst(input);
         println!("ref/eqref output:\n{}", output);
-        assert!(output.contains("<sec-intro>"), "Missing section label: {}", output);
+        assert!(
+            output.contains("<sec-intro>"),
+            "Missing section label: {}",
+            output
+        );
         assert!(
             output.contains("@sec-intro"),
             "Missing resolved section ref: {}",
             output
         );
-        assert!(output.contains("<eq-one>"), "Missing equation label: {}", output);
+        assert!(
+            output.contains("<eq-one>"),
+            "Missing equation label: {}",
+            output
+        );
         assert!(output.contains("(@eq-one)"), "Missing eqref: {}", output);
         assert!(
             !output.contains("__TYLAX_REF__") && !output.contains("__TYLAX_EQREF__"),

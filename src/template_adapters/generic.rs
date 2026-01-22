@@ -1,6 +1,6 @@
-use typst_syntax::{parse, SyntaxKind};
 use tylax_latex_backend::{render_document, LatexRenderOptions};
 use tylax_typst_frontend::typst_to_ir;
+use typst_syntax::{parse, SyntaxKind};
 
 use crate::preamble_hints::{
     equation_numbering_enabled, extract_preamble_hints, is_two_column, parse_length_to_pt,
@@ -47,16 +47,24 @@ pub fn maybe_convert_template_with(input: &str) -> Option<String> {
     let author = take_meta(&mut meta, &["author", "authors", "name", "by"]);
     let date = take_meta(&mut meta, &["date", "year"]);
     let abstract_text = take_meta(&mut meta, &["abstract", "summary"]);
-    let keywords = take_meta(&mut meta, &["keywords", "keyword", "key-words", "index-terms"]);
+    let keywords = take_meta(
+        &mut meta,
+        &["keywords", "keyword", "key-words", "index-terms"],
+    );
 
     let doc = typst_to_ir(input);
     let hints = extract_preamble_hints(input);
-    let base_font_size_pt =
-        hints.text_size.as_deref().and_then(|size| parse_length_to_pt(size, "10pt"));
-    let cite_command = hints
-        .cite_command
-        .clone()
-        .or_else(|| if hints.uses_natbib { Some("citep".to_string()) } else { None });
+    let base_font_size_pt = hints
+        .text_size
+        .as_deref()
+        .and_then(|size| parse_length_to_pt(size, "10pt"));
+    let cite_command = hints.cite_command.clone().or_else(|| {
+        if hints.uses_natbib {
+            Some("citep".to_string())
+        } else {
+            None
+        }
+    });
     let body = render_document(
         &doc,
         LatexRenderOptions {

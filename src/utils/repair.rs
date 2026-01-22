@@ -7,7 +7,9 @@ use serde::Serialize;
 
 use crate::utils::latex_analysis::{metrics_source as latex_metrics_source, LatexMetrics};
 use crate::utils::loss::{LossReport, LOSS_MARKER_PREFIX};
-use crate::utils::typst_analysis::{lint_source as lint_typst_source, metrics_source as typst_metrics_source, TypstMetrics};
+use crate::utils::typst_analysis::{
+    lint_source as lint_typst_source, metrics_source as typst_metrics_source, TypstMetrics,
+};
 
 #[derive(Debug, Clone)]
 pub struct AiRepairConfig {

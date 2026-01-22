@@ -1,6 +1,6 @@
-use typst_syntax::{parse, SyntaxKind, SyntaxNode};
 use tylax_latex_backend::{render_document, LatexRenderOptions};
 use tylax_typst_frontend::typst_to_ir;
+use typst_syntax::{parse, SyntaxKind, SyntaxNode};
 
 use crate::preamble_hints::{
     equation_number_within, equation_numbering_enabled, extract_preamble_hints, is_two_column,
@@ -29,15 +29,20 @@ pub fn maybe_convert_ieee(input: &str) -> Option<String> {
     let show = find_ieee_show_rule(&root)?;
     let meta = extract_metadata(&show);
     let hints = extract_preamble_hints(input);
-    let base_font_size_pt =
-        hints.text_size.as_deref().and_then(|size| parse_length_to_pt(size, "10pt"));
+    let base_font_size_pt = hints
+        .text_size
+        .as_deref()
+        .and_then(|size| parse_length_to_pt(size, "10pt"));
 
     // Convert body using IR pipeline (show/let/set are ignored by preprocessor).
     let doc = typst_to_ir(input);
-    let cite_command = hints
-        .cite_command
-        .clone()
-        .or_else(|| if hints.uses_natbib { Some("citep".to_string()) } else { None });
+    let cite_command = hints.cite_command.clone().or_else(|| {
+        if hints.uses_natbib {
+            Some("citep".to_string())
+        } else {
+            None
+        }
+    });
     let body = render_document(
         &doc,
         LatexRenderOptions {
@@ -146,7 +151,10 @@ fn extract_metadata(show_rule: &SyntaxNode) -> IeeeMetadata {
         authors: Vec::new(),
     };
 
-    let Some(func) = show_rule.children().find(|c| c.kind() == SyntaxKind::FuncCall) else {
+    let Some(func) = show_rule
+        .children()
+        .find(|c| c.kind() == SyntaxKind::FuncCall)
+    else {
         return meta;
     };
     let Some(args) = func.children().find(|c| c.kind() == SyntaxKind::Args) else {

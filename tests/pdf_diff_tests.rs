@@ -26,7 +26,10 @@ fn pdf_diff_templates() {
         ("paper", PathBuf::from("../public/templates/paper.typ")),
         ("report", PathBuf::from("../public/templates/report.typ")),
         ("thesis", PathBuf::from("../public/templates/thesis.typ")),
-        ("lab-report", PathBuf::from("../public/templates/lab-report.typ")),
+        (
+            "lab-report",
+            PathBuf::from("../public/templates/lab-report.typ"),
+        ),
     ];
 
     let thresholds = load_thresholds(Path::new("tests/pdf_diff_thresholds.txt"));
@@ -86,12 +89,12 @@ fn pdf_diff_templates() {
         );
 
         let mut max_rmse = 0.0;
-        for (idx, (typst_png, latex_png)) in
-            typst_pages.iter().zip(latex_pages.iter()).enumerate()
+        for (idx, (typst_png, latex_png)) in typst_pages.iter().zip(latex_pages.iter()).enumerate()
         {
             let diff_path = output_dir.join(format!("diff-{}.png", idx + 1));
-            let rmse = compare_images(typst_png, latex_png, &diff_path)
-                .unwrap_or_else(|err| panic!("compare failed for {} page {}: {}", name, idx + 1, err));
+            let rmse = compare_images(typst_png, latex_png, &diff_path).unwrap_or_else(|err| {
+                panic!("compare failed for {} page {}: {}", name, idx + 1, err)
+            });
             if rmse > max_rmse {
                 max_rmse = rmse;
             }

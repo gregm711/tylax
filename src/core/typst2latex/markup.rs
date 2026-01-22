@@ -118,7 +118,10 @@ fn is_bibliography_heading(text: &str) -> bool {
         .map(|ch| if ch.is_alphanumeric() { ch } else { ' ' })
         .collect::<String>();
     let cleaned = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
-    matches!(cleaned.as_str(), "references" | "bibliography" | "works cited")
+    matches!(
+        cleaned.as_str(),
+        "references" | "bibliography" | "works cited"
+    )
 }
 
 fn is_bibliography_func_call(node: &SyntaxNode) -> bool {

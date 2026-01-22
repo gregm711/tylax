@@ -101,7 +101,11 @@ fn lint_node(node: &SyntaxNode, issues: &mut Vec<TypstIssue>) {
         SyntaxKind::FuncCall => {
             if let Some(name) = func_call_name(node) {
                 if name == "place" {
-                    push_issue(issues, "error", "place(...) is not allowed; use align/block/box");
+                    push_issue(
+                        issues,
+                        "error",
+                        "place(...) is not allowed; use align/block/box",
+                    );
                 }
                 if name.starts_with("calc.") || name == "calc" {
                     push_issue(issues, "error", "calc.* is not allowed");

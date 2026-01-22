@@ -1,15 +1,15 @@
-use typst_syntax::parse;
 use tylax_latex_backend::{render_document, LatexRenderOptions};
 use tylax_typst_frontend::typst_to_ir;
+use typst_syntax::parse;
 
 use crate::preamble_hints::{
     equation_number_within, equation_numbering_enabled, extract_preamble_hints, parse_length_to_pt,
     render_amsthm_definitions,
 };
 use crate::template_adapters::common::{
-    escape_latex, extract_named_args, extract_option_bool, extract_string_like,
-    extract_year_from_name, find_show_rule_with_prefix, resolve_ident, extract_array_elements,
-    extract_array_strings,
+    escape_latex, extract_array_elements, extract_array_strings, extract_named_args,
+    extract_option_bool, extract_string_like, extract_year_from_name, find_show_rule_with_prefix,
+    resolve_ident,
 };
 
 #[derive(Debug, Clone)]
@@ -54,9 +54,14 @@ pub fn maybe_convert_iclr(input: &str) -> Option<String> {
     let style_pkg = format!("iclr{}_conference", year);
 
     let hints = extract_preamble_hints(input);
-    let base_font_size_pt =
-        hints.text_size.as_deref().and_then(|size| parse_length_to_pt(size, "10pt"));
-    let cite_command = hints.cite_command.clone().or_else(|| Some("citep".to_string()));
+    let base_font_size_pt = hints
+        .text_size
+        .as_deref()
+        .and_then(|size| parse_length_to_pt(size, "10pt"));
+    let cite_command = hints
+        .cite_command
+        .clone()
+        .or_else(|| Some("citep".to_string()));
 
     let doc = typst_to_ir(input);
     let body = render_document(

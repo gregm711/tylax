@@ -11,21 +11,25 @@ use std::fmt::Write;
 use std::time::Instant;
 
 use crate::data::constants::{AcronymDef, GlossaryDef};
+use crate::data::colors::sanitize_color_expression;
 use crate::data::maps::TEX_COMMAND_SPEC;
-use crate::features::templates::{generate_title_block, generate_typst_preamble, parse_document_class, DocumentClass};
+use crate::features::templates::{
+    generate_title_block, generate_typst_preamble, parse_document_class, DocumentClass,
+};
 use crate::utils::loss::{LossKind, LossRecord, LossReport};
 use fxhash::FxHashMap;
 use lazy_static::lazy_static;
 
-use super::engine::{ArgumentErrorType, EngineWarning};
 use super::engine::lexer::{detokenize, tokenize};
 use super::engine::primitives::{parse_definitions, DefinitionKind};
+use super::engine::{ArgumentErrorType, EngineWarning};
 use super::{ConversionResult, ConversionWarning, WarningKind};
 
 use super::utils::{
-    clean_whitespace, convert_caption_text, extract_arg_content, extract_arg_content_with_braces,
-    extract_curly_inner_content, protect_zero_arg_commands, replace_verb_commands,
-    attach_orphan_labels, resolve_reference_markers, restore_protected_commands,
+    attach_orphan_labels, clean_whitespace, convert_caption_text, escape_typst_string,
+    extract_arg_content, extract_arg_content_with_braces, extract_curly_inner_content,
+    protect_zero_arg_commands, replace_verb_commands, resolve_reference_markers,
+    restore_protected_commands,
 };
 
 struct ElementProfileGuard {
@@ -255,6 +259,73 @@ pub struct PendingHeading {
     pub implicit_open: bool,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct PageMargin {
+    pub all: Option<String>,
+    pub left: Option<String>,
+    pub right: Option<String>,
+    pub top: Option<String>,
+    pub bottom: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct HeaderConfig {
+    pub enabled: bool,
+    pub left: Option<String>,
+    pub center: Option<String>,
+    pub right: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct HeadingStyleDef {
+    pub size: Option<String>,
+    pub bold: bool,
+    pub italic: bool,
+}
+
+impl PageMargin {
+    pub fn to_typst(&self) -> Option<String> {
+        if self.all.is_none()
+            && self.left.is_none()
+            && self.right.is_none()
+            && self.top.is_none()
+            && self.bottom.is_none()
+        {
+            return None;
+        }
+        if self.left.is_none()
+            && self.right.is_none()
+            && self.top.is_none()
+            && self.bottom.is_none()
+            && self.all.is_some()
+        {
+            return self.all.clone();
+        }
+        let left = self.left.as_ref().or(self.all.as_ref());
+        let right = self.right.as_ref().or(self.all.as_ref());
+        let top = self.top.as_ref().or(self.all.as_ref());
+        let bottom = self.bottom.as_ref().or(self.all.as_ref());
+        let mut parts = Vec::new();
+        if let Some(v) = left {
+            parts.push(format!("left: {}", v));
+        }
+        if let Some(v) = right {
+            parts.push(format!("right: {}", v));
+        }
+        if let Some(v) = top {
+            parts.push(format!("top: {}", v));
+        }
+        if let Some(v) = bottom {
+            parts.push(format!("bottom: {}", v));
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(format!("({})", parts.join(", ")))
+        }
+    }
+}
+
 /// Conversion state maintained during AST traversal
 #[derive(Debug, Default)]
 pub struct ConversionState {
@@ -315,6 +386,22 @@ pub struct ConversionState {
     pub custom_theorems: HashMap<String, String>,
     /// Color definitions collected from preamble (name -> Typst color expression)
     pub color_defs: Vec<(String, String)>,
+    /// Page margin overrides collected from preamble
+    pub page_margin: PageMargin,
+    /// Optional paper override from geometry or similar
+    pub page_paper: Option<String>,
+    /// Paragraph spacing collected from preamble
+    pub par_skip: Option<String>,
+    pub par_indent: Option<String>,
+    pub line_spacing: Option<String>,
+    /// Link color from hyperref/hypersetup
+    pub link_color: Option<String>,
+    /// Page numbering style (Typst numbering pattern)
+    pub page_numbering: Option<String>,
+    /// Header configuration from fancyhdr-like commands
+    pub header: HeaderConfig,
+    /// Heading style overrides from titlesec
+    pub heading_styles: HashMap<u8, HeadingStyleDef>,
     /// Profiling flags and counters (debug)
     pub profile_enabled: bool,
     pub profile_nodes: usize,
@@ -328,6 +415,9 @@ pub struct ConversionState {
 pub enum TemplateKind {
     Ieee,
     Acm,
+    Lncs,
+    Elsevier,
+    Springer,
     Cvpr,
     Iclr,
     Icml,
@@ -780,12 +870,15 @@ impl LatexConverter {
         // Preprocess: protect zero-argument commands that MiTeX would otherwise lose
         let protected_input = protect_zero_arg_commands(&verb_expanded);
 
+        self.capture_preamble_hints(&protected_input);
+
         self.seed_macros_from_input(&protected_input);
 
         // Optionally expand macros using the token-based engine
         let mut expanded_input = self.preprocess_expansion(&protected_input, false);
         // Strip bibliography commands that are not meaningful in Typst output.
-        expanded_input = super::utils::strip_command_with_braced_arg(&expanded_input, "bibliographystyle");
+        expanded_input =
+            super::utils::strip_command_with_braced_arg(&expanded_input, "bibliographystyle");
         expanded_input = super::utils::strip_sectioning_stars(&expanded_input);
         expanded_input = super::utils::strip_env_stars(&expanded_input);
         expanded_input = super::utils::normalize_spacing_primitives(&expanded_input);
@@ -797,8 +890,7 @@ impl LatexConverter {
         }
         mark_timing("macro expand+normalize", &mut last_mark, timing_enabled);
 
-        let has_bib_files =
-            !super::utils::collect_bibliography_entries(&expanded_input).is_empty();
+        let has_bib_files = !super::utils::collect_bibliography_entries(&expanded_input).is_empty();
         let has_thebibliography = super::utils::contains_thebibliography_env(&expanded_input);
         self.state.citation_mode = if has_bib_files {
             CitationMode::Typst
@@ -837,6 +929,9 @@ impl LatexConverter {
         let mut template_kind = match class_lower.as_str() {
             "ieeetran" => Some(TemplateKind::Ieee),
             "acmart" => Some(TemplateKind::Acm),
+            "llncs" => Some(TemplateKind::Lncs),
+            "elsarticle" => Some(TemplateKind::Elsevier),
+            "svjour" | "svjour3" | "svproc" => Some(TemplateKind::Springer),
             "mitthesis" => Some(TemplateKind::MitThesis),
             "ucbthesis" => Some(TemplateKind::UcbThesis),
             "dissertate" => Some(TemplateKind::Dissertate),
@@ -913,14 +1008,20 @@ impl LatexConverter {
     }
 
     /// Convert a complete LaTeX document and return a loss report
-    pub fn convert_document_with_report(&mut self, input: &str) -> crate::utils::loss::ConversionReport {
+    pub fn convert_document_with_report(
+        &mut self,
+        input: &str,
+    ) -> crate::utils::loss::ConversionReport {
         let content = self.convert_document(input);
         let report = self.take_loss_report();
         crate::utils::loss::ConversionReport::new(content, report)
     }
 
     /// Convert math-only LaTeX and return a loss report
-    pub fn convert_math_with_report(&mut self, input: &str) -> crate::utils::loss::ConversionReport {
+    pub fn convert_math_with_report(
+        &mut self,
+        input: &str,
+    ) -> crate::utils::loss::ConversionReport {
         let content = self.convert_math(input);
         let report = self.take_loss_report();
         crate::utils::loss::ConversionReport::new(content, report)
@@ -1075,7 +1176,11 @@ impl LatexConverter {
                 {
                     return;
                 }
-                if trimmed == "}" || trimmed == "document" || trimmed == "\\begin" || trimmed == "\\end" {
+                if trimmed == "}"
+                    || trimmed == "document"
+                    || trimmed == "\\begin"
+                    || trimmed == "\\end"
+                {
                     return;
                 }
                 self.state.warnings.push(format!("Parse error: {}", text));
@@ -1163,16 +1268,16 @@ impl LatexConverter {
             TokenWord => {
                 if let SyntaxElement::Token(t) = elem {
                     let text = t.text();
-                if matches!(self.state.mode, ConversionMode::Math) {
-                    for c in text.chars() {
-                        output.push(c);
-                        output.push(' ');
+                    if matches!(self.state.mode, ConversionMode::Math) {
+                        for c in text.chars() {
+                            output.push(c);
+                            output.push(' ');
+                        }
+                    } else {
+                        super::utils::escape_typst_text_into(text, output);
                     }
-                } else {
-                    super::utils::escape_typst_text_into(text, output);
                 }
             }
-        }
 
             // Whitespace
             TokenWhiteSpace => {
@@ -1280,9 +1385,8 @@ impl LatexConverter {
             }
 
             // Ignore these
-            TokenLBrace | TokenRBrace | TokenBeginMath | TokenEndMath
-            | TokenComment | ItemBlockComment | ClauseCommandName | ItemBegin | ItemEnd
-            | ItemBracket => {}
+            TokenLBrace | TokenRBrace | TokenBeginMath | TokenEndMath | TokenComment
+            | ItemBlockComment | ClauseCommandName | ItemBegin | ItemEnd | ItemBracket => {}
 
             // Command symbol
             TokenCommandSym => {
@@ -1462,6 +1566,26 @@ impl LatexConverter {
     pub fn extract_author_arg(&mut self, cmd: &CmdItem) -> Option<String> {
         self.get_required_arg_with_braces(cmd, 0)
             .map(|raw| super::utils::convert_author_text(&raw).trim().to_string())
+    }
+
+    fn capture_preamble_hints(&mut self, input: &str) {
+        let preamble = input
+            .split("\\begin{document}")
+            .next()
+            .unwrap_or(input);
+        capture_geometry_hints(&mut self.state, preamble);
+        capture_length_hints(&mut self.state, preamble);
+        capture_fancyhdr_hints(&mut self.state, preamble);
+        capture_titleformat_hints(&mut self.state, preamble);
+        capture_pagenumbering_hints(&mut self.state, preamble);
+        capture_hypersetup_hints(&mut self.state, preamble);
+        if preamble.contains("\\doublespacing") {
+            self.state.line_spacing = Some("1.4em".to_string());
+        } else if preamble.contains("\\onehalfspacing") {
+            self.state.line_spacing = Some("0.8em".to_string());
+        } else if preamble.contains("\\singlespacing") {
+            self.state.line_spacing = None;
+        }
     }
 
     /// Extract inner content of a curly/bracket node, skipping its braces
@@ -1668,7 +1792,12 @@ impl LatexConverter {
                     search = total_end;
                     continue;
                 }
-                result = format!("{}{}{}", &result[..start], replacement, &result[total_end..]);
+                result = format!(
+                    "{}{}{}",
+                    &result[..start],
+                    replacement,
+                    &result[total_end..]
+                );
                 search = start + replacement.len();
             } else {
                 break;
@@ -1708,7 +1837,12 @@ impl LatexConverter {
                     search = total_end;
                     continue;
                 }
-                result = format!("{}{}{}", &result[..start], replacement, &result[total_end..]);
+                result = format!(
+                    "{}{}{}",
+                    &result[..start],
+                    replacement,
+                    &result[total_end..]
+                );
                 search = start + replacement.len();
             } else {
                 break;
@@ -1871,16 +2005,108 @@ impl LatexConverter {
             doc.push_str(")\n\n");
         }
 
-        let doc_class = self
-            .state
-            .document_class_info
-            .clone()
-            .unwrap_or_default();
+        let doc_class = self.state.document_class_info.clone().unwrap_or_default();
         doc.push_str(&generate_typst_preamble(&doc_class));
         if !self.state.color_defs.is_empty() {
             for (name, value) in &self.state.color_defs {
                 let _ = writeln!(doc, "#let {} = {}", name, value);
             }
+            doc.push('\n');
+        }
+        if let Some(color) = self.state.link_color.as_deref() {
+            let _ = writeln!(doc, "#show link: set text(fill: {})", color);
+        }
+
+        if let Some(paper) = self.state.page_paper.as_deref() {
+            let _ = writeln!(doc, "#set page(paper: \"{}\")", paper);
+        }
+        if let Some(margin) = self.state.page_margin.to_typst() {
+            let _ = writeln!(doc, "#set page(margin: {})", margin);
+        }
+        let mut par_args = Vec::new();
+        if let Some(spacing) = self.state.par_skip.as_deref() {
+            par_args.push(format!("spacing: {}", spacing));
+        }
+        if let Some(indent) = self.state.par_indent.as_deref() {
+            par_args.push(format!("first-line-indent: {}", indent));
+        }
+        if let Some(leading) = self.state.line_spacing.as_deref() {
+            par_args.push(format!("leading: {}", leading));
+        }
+        if !par_args.is_empty() {
+            let _ = writeln!(doc, "#set par({})", par_args.join(", "));
+        }
+        if self.state.header.enabled {
+            let left = self.state.header.left.as_deref().unwrap_or("").trim();
+            let center = self.state.header.center.as_deref().unwrap_or("").trim();
+            let right = self.state.header.right.as_deref().unwrap_or("").trim();
+            if !left.is_empty() || !center.is_empty() || !right.is_empty() {
+                doc.push_str("#set page(header: context {\n");
+                doc.push_str("  if here().page() == 1 { return }\n");
+                doc.push_str("  stack(spacing: 2pt,\n");
+                if !center.is_empty() {
+                    doc.push_str("    grid(columns: (1fr, 1fr, 1fr), align: (left, center, right),\n");
+                    let _ = writeln!(
+                        doc,
+                        "      text(\"{}\"), text(\"{}\"), text(\"{}\"),\n    ),",
+                        escape_typst_string(left),
+                        escape_typst_string(center),
+                        escape_typst_string(right)
+                    );
+                } else {
+                    doc.push_str("    grid(columns: (1fr, 1fr), align: (left, right),\n");
+                    let _ = writeln!(
+                        doc,
+                        "      text(\"{}\"), text(\"{}\"),\n    ),",
+                        escape_typst_string(left),
+                        escape_typst_string(right)
+                    );
+                }
+                doc.push_str("    line(length: 100%, stroke: (thickness: 0.5pt)),\n");
+                doc.push_str("  )\n");
+                doc.push_str("})\n");
+            }
+        }
+        if !doc_class.is_presentation() {
+            let numbering = self
+                .state
+                .page_numbering
+                .clone()
+                .or_else(|| if self.state.header.enabled { Some("1".to_string()) } else { None });
+            if let Some(numbering) = numbering {
+                let _ = writeln!(doc, "#set page(numbering: \"{}\")", numbering);
+                doc.push_str(
+                    "#set page(footer: context { align(center, counter(page).display()) })\n",
+                );
+            }
+        }
+        if !self.state.heading_styles.is_empty() {
+            let mut levels: Vec<_> = self.state.heading_styles.keys().copied().collect();
+            levels.sort_unstable();
+            for level in levels {
+                if let Some(style) = self.state.heading_styles.get(&level) {
+                    let mut args = Vec::new();
+                    if let Some(size) = style.size.as_deref() {
+                        args.push(format!("size: {}", size));
+                    }
+                    if style.bold {
+                        args.push("weight: \"bold\"".to_string());
+                    }
+                    if style.italic {
+                        args.push("style: \"italic\"".to_string());
+                    }
+                    if !args.is_empty() {
+                        let _ = writeln!(
+                            doc,
+                            "#show heading.where(level: {}): set text({})",
+                            level,
+                            args.join(", ")
+                        );
+                    }
+                }
+            }
+        }
+        if doc.ends_with('\n') {
             doc.push('\n');
         }
 
@@ -1889,6 +2115,34 @@ impl LatexConverter {
                 doc.push_str(&self.render_ieee_show_rule(
                     self.state.title.as_deref(),
                     self.state.author.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                    &self.state.keywords,
+                ));
+            }
+            Some(TemplateKind::Acm) => {
+                doc.push_str(&self.render_acm_show_rule(
+                    self.state.title.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                    &self.state.keywords,
+                ));
+            }
+            Some(TemplateKind::Lncs) => {
+                doc.push_str(&self.render_lncs_show_rule(
+                    self.state.title.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                    &self.state.keywords,
+                ));
+            }
+            Some(TemplateKind::Elsevier) => {
+                doc.push_str(&self.render_elsevier_show_rule(
+                    self.state.title.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                    &self.state.keywords,
+                ));
+            }
+            Some(TemplateKind::Springer) => {
+                doc.push_str(&self.render_springer_show_rule(
+                    self.state.title.as_deref(),
                     self.state.abstract_text.as_deref(),
                     &self.state.keywords,
                 ));
@@ -2136,6 +2390,377 @@ impl LatexConverter {
                 out.push('"');
             }
             out.push_str("),\n");
+        }
+        out.push_str(")\n\n");
+        out
+    }
+
+    fn collect_author_blocks(&self) -> Vec<AuthorBlock> {
+        if !self.state.author_blocks.is_empty() {
+            return self.state.author_blocks.clone();
+        }
+        let Some(author) = self.state.author.as_deref() else {
+            return Vec::new();
+        };
+        Self::split_authors(author)
+            .into_iter()
+            .map(|name| AuthorBlock {
+                name: Some(name),
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    fn collect_affiliation_lines(&self, block: &AuthorBlock) -> Vec<String> {
+        let mut lines = Vec::new();
+        for line in &block.lines {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                lines.push(trimmed.to_string());
+            }
+        }
+        if !block.affiliation_keys.is_empty() {
+            for key in &block.affiliation_keys {
+                if let Some(text) = self.state.affiliation_map.get(key) {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        lines.push(trimmed.to_string());
+                    }
+                }
+            }
+        }
+        lines
+    }
+
+    fn render_acm_show_rule(
+        &self,
+        title: Option<&str>,
+        _abstract_text: Option<&str>,
+        keywords: &[String],
+    ) -> String {
+        let mut out = String::new();
+        out.push_str("#show: acmart.with(\n");
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+
+        let blocks = self.collect_author_blocks();
+        if !blocks.is_empty() {
+            out.push_str("  authors: (\n");
+            for block in blocks {
+                let name = block.name.as_deref().unwrap_or("").trim();
+                if name.is_empty() {
+                    continue;
+                }
+                out.push_str("    (\n");
+                let escaped_name = super::utils::escape_typst_text(name);
+                let _ = writeln!(out, "      name: [{}],", escaped_name);
+                if let Some(email) = block.email.as_deref() {
+                    if !email.trim().is_empty() {
+                        let escaped = super::utils::escape_typst_text(email.trim());
+                        let _ = writeln!(out, "      email: [{}],", escaped);
+                    }
+                }
+                let aff_lines = self.collect_affiliation_lines(&block);
+                for (idx, line) in aff_lines.iter().enumerate() {
+                    let escaped = super::utils::escape_typst_text(line);
+                    let _ = writeln!(out, "      aff{}: [{}],", idx + 1, escaped);
+                }
+                out.push_str("    ),\n");
+            }
+            out.push_str("  ),\n");
+        }
+
+        if !keywords.is_empty() {
+            out.push_str("  keywords: (");
+            let mut first = true;
+            for kw in keywords {
+                let kw = kw.trim();
+                if kw.is_empty() {
+                    continue;
+                }
+                if !first {
+                    out.push_str(", ");
+                }
+                first = false;
+                let escaped = super::utils::escape_typst_string(kw);
+                out.push('"');
+                out.push_str(&escaped);
+                out.push('"');
+            }
+            out.push_str("),\n");
+        }
+
+        out.push_str(")\n\n");
+        out
+    }
+
+    fn render_lncs_show_rule(
+        &self,
+        title: Option<&str>,
+        abstract_text: Option<&str>,
+        keywords: &[String],
+    ) -> String {
+        let mut out = String::new();
+
+        let blocks = self.collect_author_blocks();
+        let mut institute_defs: Vec<(String, String, Option<String>, Option<String>)> = Vec::new();
+        let mut institute_keys: HashMap<String, String> = HashMap::new();
+        let mut authors_out = Vec::new();
+
+        for block in blocks {
+            let name = block.name.as_deref().unwrap_or("").trim();
+            if name.is_empty() {
+                continue;
+            }
+            let mut insts = Vec::new();
+            let aff_lines = self.collect_affiliation_lines(&block);
+            if !aff_lines.is_empty() {
+                let inst_name = aff_lines[0].clone();
+                let addr = if aff_lines.len() > 1 {
+                    Some(aff_lines[1..].join(", "))
+                } else {
+                    None
+                };
+                let email = block
+                    .email
+                    .as_deref()
+                    .map(str::to_string)
+                    .filter(|e| !e.trim().is_empty());
+                let key = format!(
+                    "{}|{}|{}",
+                    inst_name,
+                    addr.clone().unwrap_or_default(),
+                    email.clone().unwrap_or_default()
+                );
+                let var = if let Some(existing) = institute_keys.get(&key) {
+                    existing.clone()
+                } else {
+                    let var = format!("inst_{}", institute_defs.len() + 1);
+                    institute_defs.push((var.clone(), inst_name, addr, email));
+                    institute_keys.insert(key, var.clone());
+                    var
+                };
+                insts.push(var);
+            }
+
+            let escaped_name = super::utils::escape_typst_string(name);
+            if insts.is_empty() {
+                authors_out.push(format!("author(\"{}\")", escaped_name));
+            } else {
+                let inst_list = insts.join(", ");
+                authors_out.push(format!(
+                    "author(\"{}\", insts: ({}))",
+                    escaped_name, inst_list
+                ));
+            }
+        }
+
+        for (var, name, addr, email) in &institute_defs {
+            let escaped_name = super::utils::escape_typst_string(name);
+            out.push_str(&format!("#let {} = institute(\"{}\"", var, escaped_name));
+            if let Some(addr) = addr {
+                let escaped = super::utils::escape_typst_string(addr);
+                out.push_str(&format!(", addr: \"{}\"", escaped));
+            }
+            if let Some(email) = email {
+                let escaped = super::utils::escape_typst_string(email);
+                out.push_str(&format!(", email: \"{}\"", escaped));
+            }
+            out.push_str(")\n");
+        }
+        if !institute_defs.is_empty() {
+            out.push('\n');
+        }
+
+        out.push_str("#show: lncs.with(\n");
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        if !authors_out.is_empty() {
+            out.push_str("  authors: (\n");
+            for author in authors_out {
+                let _ = writeln!(out, "    {},", author);
+            }
+            out.push_str("  ),\n");
+        }
+        if let Some(abs) = abstract_text {
+            let _ = writeln!(out, "  abstract: [{}],", abs.trim());
+        }
+        if !keywords.is_empty() {
+            out.push_str("  keywords: (");
+            let mut first = true;
+            for kw in keywords {
+                let kw = kw.trim();
+                if kw.is_empty() {
+                    continue;
+                }
+                if !first {
+                    out.push_str(", ");
+                }
+                first = false;
+                let escaped = super::utils::escape_typst_string(kw);
+                out.push('"');
+                out.push_str(&escaped);
+                out.push('"');
+            }
+            out.push_str("),\n");
+        }
+        out.push_str(")\n\n");
+        out
+    }
+
+    fn render_elsevier_show_rule(
+        &self,
+        title: Option<&str>,
+        abstract_text: Option<&str>,
+        keywords: &[String],
+    ) -> String {
+        let mut out = String::new();
+        let blocks = self.collect_author_blocks();
+        let affiliation_key = |idx: usize| -> String {
+            if idx < 26 {
+                let c = (b'a' + idx as u8) as char;
+                c.to_string()
+            } else {
+                format!("aff{}", idx + 1)
+            }
+        };
+
+        let mut institutions: Vec<(String, String)> = Vec::new();
+        let mut institution_keys: HashMap<String, String> = HashMap::new();
+        let mut authors_out = Vec::new();
+
+        for block in blocks {
+            let name = block.name.as_deref().unwrap_or("").trim();
+            if name.is_empty() {
+                continue;
+            }
+            let mut fields = Vec::new();
+            let escaped_name = super::utils::escape_typst_text(name);
+            fields.push(format!("name: [{}]", escaped_name));
+
+            let aff_lines = self.collect_affiliation_lines(&block);
+            if !aff_lines.is_empty() {
+                let aff_text = aff_lines.join(", ");
+                let key = if let Some(existing) = institution_keys.get(&aff_text) {
+                    existing.clone()
+                } else {
+                    let next_key = affiliation_key(institutions.len());
+                    institutions.push((next_key.clone(), aff_text.clone()));
+                    institution_keys.insert(aff_text, next_key.clone());
+                    next_key
+                };
+                let inst_list = format!("\"{}\"", key);
+                fields.push(format!("institutions: ({})", inst_list));
+            }
+
+            if let Some(email) = block.email.as_deref() {
+                if !email.trim().is_empty() {
+                    let escaped = super::utils::escape_typst_string(email.trim());
+                    fields.push(format!("email: \"{}\"", escaped));
+                }
+            }
+
+            authors_out.push(format!("({})", fields.join(", ")));
+        }
+
+        out.push_str("#show: elsevier-replica.with(\n");
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        if !authors_out.is_empty() {
+            out.push_str("  authors: (\n");
+            for author in authors_out {
+                let _ = writeln!(out, "    {},", author);
+            }
+            out.push_str("  ),\n");
+        }
+        if !institutions.is_empty() {
+            out.push_str("  institutions: (\n");
+            for (key, value) in institutions {
+                let escaped = super::utils::escape_typst_text(&value);
+                let _ = writeln!(out, "    \"{}\": [{}],", key, escaped);
+            }
+            out.push_str("  ),\n");
+        }
+        if let Some(abs) = abstract_text {
+            let _ = writeln!(out, "  abstract: [{}],", abs.trim());
+        }
+        if !keywords.is_empty() {
+            out.push_str("  keywords: (");
+            let mut first = true;
+            for kw in keywords {
+                let kw = kw.trim();
+                if kw.is_empty() {
+                    continue;
+                }
+                if !first {
+                    out.push_str(", ");
+                }
+                first = false;
+                let escaped = super::utils::escape_typst_string(kw);
+                out.push('"');
+                out.push_str(&escaped);
+                out.push('"');
+            }
+            out.push_str("),\n");
+        }
+        out.push_str(")\n\n");
+        out
+    }
+
+    fn render_springer_show_rule(
+        &self,
+        title: Option<&str>,
+        abstract_text: Option<&str>,
+        _keywords: &[String],
+    ) -> String {
+        let mut out = String::new();
+        let blocks = self.collect_author_blocks();
+
+        out.push_str("#show: template.with(\n");
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        if !blocks.is_empty() {
+            out.push_str("  authors: (\n");
+            for block in blocks {
+                let name = block.name.as_deref().unwrap_or("").trim();
+                if name.is_empty() {
+                    continue;
+                }
+                let mut fields = Vec::new();
+                let escaped_name = super::utils::escape_typst_string(name);
+                fields.push(format!("name: \"{}\"", escaped_name));
+
+                let aff_lines = self.collect_affiliation_lines(&block);
+                if !aff_lines.is_empty() {
+                    let inst = aff_lines[0].clone();
+                    let escaped = super::utils::escape_typst_string(&inst);
+                    fields.push(format!("institute: \"{}\"", escaped));
+                    if aff_lines.len() > 1 {
+                        let addr = aff_lines[1..].join(", ");
+                        let escaped = super::utils::escape_typst_string(&addr);
+                        fields.push(format!("address: \"{}\"", escaped));
+                    }
+                }
+                if let Some(email) = block.email.as_deref() {
+                    if !email.trim().is_empty() {
+                        let escaped = super::utils::escape_typst_string(email.trim());
+                        fields.push(format!("email: \"{}\"", escaped));
+                    }
+                }
+                let _ = writeln!(out, "    ({}),", fields.join(", "));
+            }
+            out.push_str("  ),\n");
+        }
+        if let Some(abs) = abstract_text {
+            let _ = writeln!(out, "  abstract: [{}],", abs.trim());
         }
         out.push_str(")\n\n");
         out
@@ -2495,6 +3120,9 @@ fn detect_template_from_packages(input: &str) -> Option<TemplateKind> {
         if name.starts_with("cvpr") {
             return Some(TemplateKind::Cvpr);
         }
+        if name.starts_with("llncs") {
+            return Some(TemplateKind::Lncs);
+        }
         if name.starts_with("iclr") {
             return Some(TemplateKind::Iclr);
         }
@@ -2509,6 +3137,12 @@ fn detect_template_from_packages(input: &str) -> Option<TemplateKind> {
         }
         if name.starts_with("tmlr") {
             return Some(TemplateKind::Tmlr);
+        }
+        if name.starts_with("elsarticle") {
+            return Some(TemplateKind::Elsevier);
+        }
+        if name.starts_with("svjour") || name.starts_with("svproc") {
+            return Some(TemplateKind::Springer);
         }
         if name.starts_with("suthesis") {
             return Some(TemplateKind::StanfordThesis);
@@ -2608,10 +3242,7 @@ fn is_benign_let_target(target: &str) -> bool {
     if target.contains('@') {
         return true;
     }
-    matches!(
-        target,
-        "relax" | "mbox" | "allowbreak" | "makeindex"
-    )
+    matches!(target, "relax" | "mbox" | "allowbreak" | "makeindex")
 }
 
 fn is_benign_unsupported_primitive(name: &str) -> bool {
@@ -2632,4 +3263,382 @@ fn is_benign_unsupported_primitive(name: &str) -> bool {
             | "divide"
             | "the"
     )
+}
+
+fn capture_geometry_hints(state: &mut ConversionState, input: &str) {
+    let mut pos = 0usize;
+    while let Some(idx) = input[pos..].find("\\usepackage") {
+        let start = pos + idx + "\\usepackage".len();
+        let (opt, after_opt) = extract_bracket_arg_at(input, start);
+        let (pkgs, next) = if let Some(pos) = after_opt {
+            extract_braced_arg_at(input, pos)
+        } else {
+            (None, None)
+        };
+        if let Some(pkgs) = pkgs {
+            if pkgs.split(',').any(|p| p.trim() == "geometry") {
+                if let Some(opts) = opt.as_deref() {
+                    apply_geometry_options_state(state, opts);
+                }
+            }
+        }
+        pos = next.unwrap_or(start + 1);
+    }
+
+    let mut pos = 0usize;
+    while let Some(idx) = input[pos..].find("\\geometry") {
+        let start = pos + idx + "\\geometry".len();
+        let (arg, next) = extract_braced_arg_at(input, start);
+        if let Some(opts) = arg {
+            apply_geometry_options_state(state, &opts);
+        }
+        pos = next.unwrap_or(start + 1);
+    }
+}
+
+fn capture_length_hints(state: &mut ConversionState, input: &str) {
+    let mut pos = 0usize;
+    while let Some(idx) = input[pos..].find("\\setlength") {
+        let start = pos + idx + "\\setlength".len();
+        let (arg1, next) = extract_braced_arg_at(input, start);
+        let (arg2, next2) = if let Some(next) = next {
+            extract_braced_arg_at(input, next)
+        } else {
+            (None, None)
+        };
+        if let (Some(target), Some(value)) = (arg1, arg2) {
+            apply_length_setting_state(state, &target, &value);
+        }
+        pos = next2.unwrap_or(start + 1);
+    }
+}
+
+pub(crate) fn capture_fancyhdr_hints(state: &mut ConversionState, input: &str) {
+    let mut pos = 0usize;
+    while let Some(idx) = input[pos..].find("\\pagestyle") {
+        let start = pos + idx + "\\pagestyle".len();
+        let (arg, next) = extract_braced_arg_at(input, start);
+        if let Some(style) = arg {
+            if style.trim() == "fancy" {
+                state.header.enabled = true;
+            }
+        }
+        pos = next.unwrap_or(start + 1);
+    }
+
+    let mut pos = 0usize;
+    while let Some(idx) = input[pos..].find("\\fancyhead") {
+        let mut cursor = pos + idx + "\\fancyhead".len();
+        let bytes = input.as_bytes();
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        let mut opt = String::new();
+        if cursor < bytes.len() && bytes[cursor] == b'[' {
+            if let (Some(content), Some(next)) = extract_bracket_arg_at(input, cursor) {
+                opt = content;
+                cursor = next;
+            }
+        }
+        let (arg, next) = extract_braced_arg_at(input, cursor);
+        if let Some(content) = arg {
+            apply_fancy_head_state(state, opt.as_str(), &content);
+        }
+        pos = next.unwrap_or(cursor + 1);
+    }
+
+    if let Some(idx) = input.find("\\fancyhead[L]") {
+        let start = idx + "\\fancyhead[L]".len();
+        let (arg, _) = extract_braced_arg_at(input, start);
+        if let Some(content) = arg {
+            apply_fancy_head_state(state, "L", &content);
+        }
+    }
+    if let Some(idx) = input.find("\\fancyhead[C]") {
+        let start = idx + "\\fancyhead[C]".len();
+        let (arg, _) = extract_braced_arg_at(input, start);
+        if let Some(content) = arg {
+            apply_fancy_head_state(state, "C", &content);
+        }
+    }
+    if let Some(idx) = input.find("\\fancyhead[R]") {
+        let start = idx + "\\fancyhead[R]".len();
+        let (arg, _) = extract_braced_arg_at(input, start);
+        if let Some(content) = arg {
+            apply_fancy_head_state(state, "R", &content);
+        }
+    }
+}
+
+fn capture_titleformat_hints(state: &mut ConversionState, input: &str) {
+    let mut pos = 0usize;
+    while let Some(idx) = input[pos..].find("\\titleformat") {
+        let start = pos + idx + "\\titleformat".len();
+        let (arg1, next1) = extract_braced_arg_at(input, start);
+        let (arg2, next2) = if let Some(next) = next1 {
+            extract_braced_arg_at(input, next)
+        } else {
+            (None, None)
+        };
+        if let (Some(target), Some(format)) = (arg1, arg2) {
+            let level = match target.trim().trim_start_matches('\\') {
+                "section" => Some(1),
+                "subsection" => Some(2),
+                "subsubsection" => Some(3),
+                "paragraph" => Some(4),
+                "subparagraph" => Some(5),
+                _ => None,
+            };
+            if let Some(level) = level {
+                let style = parse_heading_style_from_format(&format);
+                state.heading_styles.insert(level, style);
+            }
+        }
+        pos = next2.unwrap_or(start + 1);
+    }
+}
+
+fn capture_pagenumbering_hints(state: &mut ConversionState, input: &str) {
+    let mut pos = 0usize;
+    while let Some(idx) = input[pos..].find("\\pagenumbering") {
+        let start = pos + idx + "\\pagenumbering".len();
+        let (arg, next) = extract_braced_arg_at(input, start);
+        if let Some(style) = arg {
+            state.page_numbering = map_pagenumbering_style(&style);
+        }
+        pos = next.unwrap_or(start + 1);
+    }
+}
+
+fn extract_braced_arg_at(input: &str, start: usize) -> (Option<String>, Option<usize>) {
+    let bytes = input.as_bytes();
+    let mut i = start;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return (None, None);
+    }
+    if bytes[i] != b'{' {
+        if let Some(pos) = input[i..].find('{') {
+            i += pos;
+        } else {
+            return (None, None);
+        }
+    }
+    let mut depth = 0i32;
+    let mut j = i;
+    while j < bytes.len() {
+        match bytes[j] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let content = input[i + 1..j].to_string();
+                    return (Some(content), Some(j + 1));
+                }
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    (None, None)
+}
+
+fn extract_bracket_arg_at(input: &str, start: usize) -> (Option<String>, Option<usize>) {
+    let bytes = input.as_bytes();
+    let mut i = start;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return (None, None);
+    }
+    if bytes[i] != b'[' {
+        return (None, Some(i));
+    }
+    let mut depth = 0i32;
+    let mut j = i;
+    while j < bytes.len() {
+        match bytes[j] {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    let content = input[i + 1..j].to_string();
+                    return (Some(content), Some(j + 1));
+                }
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    (None, None)
+}
+
+fn apply_geometry_options_state(state: &mut ConversionState, options: &str) {
+    for raw in options.split(',') {
+        let opt = raw.trim();
+        if opt.is_empty() {
+            continue;
+        }
+        if let Some((key, value)) = opt.split_once('=') {
+            let key = key.trim();
+            let value = value.trim();
+            match key {
+                "margin" => state.page_margin.all = Some(value.to_string()),
+                "left" => state.page_margin.left = Some(value.to_string()),
+                "right" => state.page_margin.right = Some(value.to_string()),
+                "top" => state.page_margin.top = Some(value.to_string()),
+                "bottom" => state.page_margin.bottom = Some(value.to_string()),
+                "hmargin" => {
+                    state.page_margin.left = Some(value.to_string());
+                    state.page_margin.right = Some(value.to_string());
+                }
+                "vmargin" => {
+                    state.page_margin.top = Some(value.to_string());
+                    state.page_margin.bottom = Some(value.to_string());
+                }
+                "paper" => {
+                    state.page_paper = Some(value.to_string());
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if opt.ends_with("paper") && opt.len() > "paper".len() {
+            let paper = opt.trim_end_matches("paper");
+            if !paper.is_empty() {
+                state.page_paper = Some(paper.to_string());
+            }
+        }
+    }
+}
+
+fn apply_length_setting_state(state: &mut ConversionState, target: &str, value: &str) {
+    let mut name = target.trim().trim_start_matches('\\').to_string();
+    name.retain(|c| c.is_ascii_alphabetic());
+    let val = value.trim().trim_matches(|c| c == '{' || c == '}');
+    if name.contains("parskip") {
+        state.par_skip = Some(val.to_string());
+    } else if name.contains("parindent") {
+        state.par_indent = Some(val.to_string());
+    }
+}
+
+fn apply_fancy_head_state(state: &mut ConversionState, opt: &str, content: &str) {
+    let text = super::utils::convert_caption_text(content);
+    if opt.trim().is_empty() {
+        state.header.left = None;
+        state.header.center = None;
+        state.header.right = None;
+        return;
+    }
+    let key = opt.trim().to_uppercase();
+    if key.contains('L') {
+        state.header.left = Some(text.trim().to_string());
+    }
+    if key.contains('C') {
+        state.header.center = Some(text.trim().to_string());
+    }
+    if key.contains('R') {
+        state.header.right = Some(text.trim().to_string());
+    }
+}
+
+fn parse_heading_style_from_format(format: &str) -> HeadingStyleDef {
+    let mut style = HeadingStyleDef::default();
+    let fmt = format.replace('{', " ").replace('}', " ");
+    let sizes = [
+        ("\\Huge", "2em"),
+        ("\\huge", "1.8em"),
+        ("\\LARGE", "1.6em"),
+        ("\\Large", "1.4em"),
+        ("\\large", "1.2em"),
+        ("\\normalsize", "1em"),
+        ("\\small", "0.9em"),
+        ("\\footnotesize", "0.8em"),
+        ("\\scriptsize", "0.7em"),
+        ("\\tiny", "0.6em"),
+    ];
+    for (latex, size) in sizes {
+        if fmt.contains(latex) {
+            style.size = Some(size.to_string());
+            break;
+        }
+    }
+    if fmt.contains("\\bfseries") || fmt.contains("\\textbf") || fmt.contains("\\bf") {
+        style.bold = true;
+    }
+    if fmt.contains("\\itshape")
+        || fmt.contains("\\textit")
+        || fmt.contains("\\emph")
+        || fmt.contains("\\it")
+    {
+        style.italic = true;
+    }
+    style
+}
+
+fn map_pagenumbering_style(style: &str) -> Option<String> {
+    match style.trim() {
+        "arabic" => Some("1".to_string()),
+        "roman" => Some("i".to_string()),
+        "Roman" => Some("I".to_string()),
+        "alph" => Some("a".to_string()),
+        "Alph" => Some("A".to_string()),
+        "gobble" => None,
+        _ => Some("1".to_string()),
+    }
+}
+
+fn capture_hypersetup_hints(state: &mut ConversionState, input: &str) {
+    let mut pos = 0usize;
+    while let Some(idx) = input[pos..].find("\\hypersetup") {
+        let start = pos + idx + "\\hypersetup".len();
+        let after = &input[start..];
+        let brace_pos = after.find('{');
+        let Some(brace_rel) = brace_pos else {
+            pos = start;
+            continue;
+        };
+        let mut depth = 0i32;
+        let mut content = String::new();
+        let mut started = false;
+        for ch in after[brace_rel..].chars() {
+            if ch == '{' {
+                depth += 1;
+                if depth == 1 {
+                    started = true;
+                    continue;
+                }
+            } else if ch == '}' {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            if started {
+                content.push(ch);
+            }
+        }
+
+        for part in content.split(',') {
+            let trimmed = part.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Some((key, value)) = trimmed.split_once('=') {
+                let key = key.trim().to_lowercase();
+                let value = value.trim();
+                if key == "urlcolor" || key == "linkcolor" {
+                    if !value.is_empty() {
+                        state.link_color = Some(sanitize_color_expression(value));
+                    }
+                }
+            }
+        }
+
+        pos = start + brace_rel + content.len();
+    }
 }

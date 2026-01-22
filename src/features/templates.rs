@@ -140,7 +140,7 @@ lazy_static! {
             name: "ACM",
             columns: 2,
             paper: "us-letter",
-            typst_template: None,
+            typst_template: Some("@preview/clean-acmart:0.0.1"),
             font_family: Some("Linux Libertine"),
             font_size: 10.0,
             abstract_style: AbstractStyle::Bold,
@@ -151,7 +151,7 @@ lazy_static! {
             name: "LNCS",
             columns: 1,
             paper: "a4",
-            typst_template: None,
+            typst_template: Some("@preview/fine-lncs:0.3.0"),
             font_family: Some("Times New Roman"),
             font_size: 10.0,
             abstract_style: AbstractStyle::Italic,
@@ -162,11 +162,44 @@ lazy_static! {
             name: "Elsevier",
             columns: 1,
             paper: "a4",
-            typst_template: None,
+            typst_template: Some("@preview/elsevier-replica:0.1.0"),
             font_family: Some("Times New Roman"),
             font_size: 12.0,
             abstract_style: AbstractStyle::Bold,
             bib_style: Some("elsevier-harvard"),
+        });
+
+        m.insert("svjour3", AcademicTemplate {
+            name: "Springer",
+            columns: 1,
+            paper: "a4",
+            typst_template: Some("@preview/springer-spaniel:0.1.0"),
+            font_family: Some("Times New Roman"),
+            font_size: 9.0,
+            abstract_style: AbstractStyle::Bold,
+            bib_style: Some("springer-mathphys-brackets"),
+        });
+
+        m.insert("svjour", AcademicTemplate {
+            name: "Springer",
+            columns: 1,
+            paper: "a4",
+            typst_template: Some("@preview/springer-spaniel:0.1.0"),
+            font_family: Some("Times New Roman"),
+            font_size: 9.0,
+            abstract_style: AbstractStyle::Bold,
+            bib_style: Some("springer-mathphys-brackets"),
+        });
+
+        m.insert("svproc", AcademicTemplate {
+            name: "Springer",
+            columns: 1,
+            paper: "a4",
+            typst_template: Some("@preview/springer-spaniel:0.1.0"),
+            font_family: Some("Times New Roman"),
+            font_size: 9.0,
+            abstract_style: AbstractStyle::Bold,
+            bib_style: Some("springer-mathphys-brackets"),
         });
 
         m.insert("amsart", AcademicTemplate {
@@ -509,19 +542,109 @@ fn generate_academic_preamble(
     output.push('\n');
 }
 
-fn render_author_content(text: &str) -> String {
-    let parts: Vec<&str> = text.split(r"\\").map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-    if parts.len() <= 1 {
-        return text.trim().to_string();
-    }
-    let mut out = String::new();
-    for (idx, part) in parts.iter().enumerate() {
-        if idx > 0 {
-            out.push_str(" #linebreak() ");
+fn split_linebreaks(text: &str) -> Vec<(String, Option<String>)> {
+    let mut lines: Vec<(String, Option<String>)> = Vec::new();
+    let mut buffer = String::new();
+    let mut chars = text.chars().peekable();
+
+    let flush = |lines: &mut Vec<(String, Option<String>)>, buffer: &mut String| {
+        let part = buffer.trim();
+        if !part.is_empty() {
+            lines.push((part.to_string(), None));
         }
-        out.push_str(part);
+        buffer.clear();
+    };
+
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            let mut is_linebreak = false;
+            let mut spacing: Option<String> = None;
+            if chars.peek() == Some(&'\\') {
+                chars.next();
+                is_linebreak = true;
+            } else if matches!(chars.peek(), Some(next) if next.is_whitespace()) {
+                chars.next();
+                is_linebreak = true;
+            } else if matches!(chars.peek(), Some(next) if next.is_ascii_digit()) {
+                is_linebreak = true;
+            }
+
+            if is_linebreak {
+                if chars.peek() == Some(&'[') {
+                    chars.next();
+                    let mut content = String::new();
+                    while let Some(next) = chars.next() {
+                        if next == ']' {
+                            break;
+                        }
+                        content.push(next);
+                    }
+                    let trimmed = content.trim();
+                    if !trimmed.is_empty() {
+                        spacing = Some(trimmed.to_string());
+                    }
+                } else if matches!(chars.peek(), Some(next) if next.is_ascii_digit()) {
+                    let mut content = String::new();
+                    while let Some(&next) = chars.peek() {
+                        if next.is_ascii_whitespace() || next == '\\' || next == ',' {
+                            break;
+                        }
+                        content.push(next);
+                        chars.next();
+                    }
+                    let trimmed = content.trim();
+                    if !trimmed.is_empty() {
+                        spacing = Some(trimmed.to_string());
+                    }
+                }
+
+                let part = buffer.trim();
+                if !part.is_empty() {
+                    lines.push((part.to_string(), spacing));
+                } else if let Some(space) = spacing {
+                    lines.push((String::new(), Some(space)));
+                }
+                buffer.clear();
+                continue;
+            }
+        }
+        buffer.push(ch);
+    }
+
+    flush(&mut lines, &mut buffer);
+    lines
+}
+
+fn render_linebreaks(text: &str) -> String {
+    let mut out = String::new();
+    let lines = split_linebreaks(text);
+    if lines.is_empty() {
+        return out;
+    }
+    for (idx, (line, spacing)) in lines.iter().enumerate() {
+        if idx > 0 {
+            out.push(' ');
+        }
+        out.push_str(line);
+        if idx + 1 < lines.len() {
+            out.push(' ');
+            out.push_str("#linebreak()");
+            if let Some(space) = spacing.as_deref() {
+                out.push(' ');
+                out.push_str(&format!("#v({})", space));
+            }
+        }
     }
     out
+}
+
+fn render_author_content(text: &str) -> String {
+    let rendered = render_linebreaks(text);
+    if rendered.is_empty() {
+        text.trim().to_string()
+    } else {
+        rendered
+    }
 }
 
 /// Generate title block from metadata
@@ -538,7 +661,30 @@ pub fn generate_title_block(
         output.push_str("#align(center)[\n");
 
         if let Some(t) = title {
-            let _ = writeln!(output, "  #text(size: 20pt, weight: \"bold\")[{}]", t);
+            let lines = split_linebreaks(t.trim());
+            let has_strong = lines.iter().any(|(line, _)| line.contains("#strong["));
+            if lines.len() <= 1 {
+                let rendered = render_linebreaks(t.trim());
+                if has_strong {
+                    let _ = writeln!(output, "  #text(size: 20pt)[{}]", rendered);
+                } else {
+                    let _ = writeln!(output, "  #text(size: 20pt, weight: \"bold\")[{}]", rendered);
+                }
+            } else {
+                for (idx, (line, spacing)) in lines.iter().enumerate() {
+                    if has_strong {
+                        let _ = writeln!(output, "  #text(size: 20pt)[{}]", line);
+                    } else {
+                        let _ = writeln!(output, "  #text(size: 20pt, weight: \"bold\")[{}]", line);
+                    }
+                    if idx + 1 < lines.len() {
+                        output.push_str("  #linebreak()\n");
+                        if let Some(space) = spacing.as_deref() {
+                            let _ = writeln!(output, "  #v({})", space);
+                        }
+                    }
+                }
+            }
             output.push_str("  #v(1em)\n");
         }
 
@@ -547,8 +693,21 @@ pub fn generate_title_block(
             let normalized = a.replace(r"\And", r"\and").replace(r"\AND", r"\and");
             let authors: Vec<&str> = normalized.split(r"\and").collect();
             if authors.len() == 1 {
-                let content = render_author_content(a.trim());
-                let _ = writeln!(output, "  #text(size: 12pt)[{}]", content);
+                let lines = split_linebreaks(a.trim());
+                if lines.len() <= 1 {
+                    let content = render_author_content(a.trim());
+                    let _ = writeln!(output, "  #text(size: 12pt)[{}]", content);
+                } else {
+                    for (idx, (line, spacing)) in lines.iter().enumerate() {
+                        let _ = writeln!(output, "  #text(size: 12pt)[{}]", line);
+                        if idx + 1 < lines.len() {
+                            output.push_str("  #linebreak()\n");
+                            if let Some(space) = spacing.as_deref() {
+                                let _ = writeln!(output, "  #v({})", space);
+                            }
+                        }
+                    }
+                }
             } else {
                 output.push_str("  #stack(dir: ltr, spacing: 2em,\n");
                 for auth in authors {
@@ -557,7 +716,7 @@ pub fn generate_title_block(
                 }
                 output.push_str("  )\n");
             }
-            output.push_str("  #v(0.5em)\n");
+            output.push_str("  #v(1em)\n");
         }
 
         if let Some(d) = date {

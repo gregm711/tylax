@@ -45,7 +45,12 @@ pub fn metrics_source(source: &str, loss_marker_prefix: &str) -> LatexMetrics {
     metrics.headings = count_any(source, &["\\section{", "\\subsection{", "\\subsubsection{"]);
     metrics.equations = count_any(
         source,
-        &["\\begin{equation}", "\\begin{align}", "\\begin{eqnarray}", "\\["] ,
+        &[
+            "\\begin{equation}",
+            "\\begin{align}",
+            "\\begin{eqnarray}",
+            "\\[",
+        ],
     );
     metrics.figures = count_any(source, &["\\begin{figure}"]);
     metrics.tables = count_any(source, &["\\begin{table}"]);

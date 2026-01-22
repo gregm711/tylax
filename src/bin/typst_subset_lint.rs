@@ -15,7 +15,9 @@ struct Issue {
 
 fn main() {
     let mut args: Vec<String> = env::args().skip(1).collect();
-    let warn_only = if let Some(pos) = args.iter().position(|a| a == "--warn" || a == "--warn-only")
+    let warn_only = if let Some(pos) = args
+        .iter()
+        .position(|a| a == "--warn" || a == "--warn-only")
     {
         args.remove(pos);
         true
@@ -74,7 +76,12 @@ fn main() {
 
     for issue in &issues {
         if issue.line == 0 {
-            println!("{}: {}: {}", issue.file.display(), issue.kind, issue.message);
+            println!(
+                "{}: {}: {}",
+                issue.file.display(),
+                issue.kind,
+                issue.message
+            );
         } else {
             println!(
                 "{}:{}:{}: {}: {}",

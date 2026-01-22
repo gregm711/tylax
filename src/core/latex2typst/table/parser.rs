@@ -183,7 +183,8 @@ impl TableGridParser {
         if !self.default_alignments.is_empty() {
             let mut aligns = self.default_alignments.clone();
             if aligns.len() < effective_cols {
-                aligns.extend(std::iter::repeat(CellAlign::Auto).take(effective_cols - aligns.len()));
+                aligns
+                    .extend(std::iter::repeat(CellAlign::Auto).take(effective_cols - aligns.len()));
             }
             let aligns: Vec<&str> = aligns.iter().map(|a| a.to_typst()).collect();
             let _ = writeln!(output, "    align: ({}),", aligns.join(", "));

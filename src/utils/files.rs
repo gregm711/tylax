@@ -304,7 +304,11 @@ pub fn find_latex_includes(content: &str) -> Vec<(usize, usize, IncludeCommand)>
         }
     }
 
-    fn find_cmd_imports(content: &str, cmd: &str, includes: &mut Vec<(usize, usize, IncludeCommand)>) {
+    fn find_cmd_imports(
+        content: &str,
+        cmd: &str,
+        includes: &mut Vec<(usize, usize, IncludeCommand)>,
+    ) {
         let mut search_start = 0;
         while let Some(pos) = content[search_start..].find(cmd) {
             let abs_pos = search_start + pos;

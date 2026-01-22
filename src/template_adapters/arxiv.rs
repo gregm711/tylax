@@ -13,12 +13,17 @@ pub fn maybe_convert_arxiv(input: &str) -> Option<String> {
 
     let doc = typst_to_ir(input);
     let hints = extract_preamble_hints(input);
-    let base_font_size_pt =
-        hints.text_size.as_deref().and_then(|size| parse_length_to_pt(size, "10pt"));
-    let cite_command = hints
-        .cite_command
-        .clone()
-        .or_else(|| if hints.uses_natbib { Some("citep".to_string()) } else { None });
+    let base_font_size_pt = hints
+        .text_size
+        .as_deref()
+        .and_then(|size| parse_length_to_pt(size, "10pt"));
+    let cite_command = hints.cite_command.clone().or_else(|| {
+        if hints.uses_natbib {
+            Some("citep".to_string())
+        } else {
+            None
+        }
+    });
     let body = render_document(
         &doc,
         LatexRenderOptions {

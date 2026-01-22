@@ -4,23 +4,23 @@ use tylax_ir::Document;
 use tylax_latex_backend::{render_document, LatexRenderOptions};
 use tylax_typst_frontend::typst_to_ir;
 
-use crate::template_adapters::ams::maybe_convert_ams;
-use crate::template_adapters::arxiv::maybe_convert_arxiv;
-use crate::template_adapters::book::maybe_convert_book;
-use crate::template_adapters::cvpr::maybe_convert_cvpr;
-use crate::template_adapters::ieee::maybe_convert_ieee;
-use crate::template_adapters::iclr::maybe_convert_iclr;
-use crate::template_adapters::icml::maybe_convert_icml;
-use crate::template_adapters::jmlr::maybe_convert_jmlr;
-use crate::template_adapters::letter::maybe_convert_letter;
-use crate::template_adapters::generic::maybe_convert_template_with;
-use crate::template_adapters::neurips::maybe_convert_neurips;
-use crate::template_adapters::newsletter::maybe_convert_newsletter;
-use crate::template_adapters::tmlr::maybe_convert_tmlr;
 use crate::preamble_hints::{
     equation_numbering_enabled, extract_preamble_hints, is_two_column, parse_length_to_pt,
     render_article_preamble,
 };
+use crate::template_adapters::ams::maybe_convert_ams;
+use crate::template_adapters::arxiv::maybe_convert_arxiv;
+use crate::template_adapters::book::maybe_convert_book;
+use crate::template_adapters::cvpr::maybe_convert_cvpr;
+use crate::template_adapters::generic::maybe_convert_template_with;
+use crate::template_adapters::iclr::maybe_convert_iclr;
+use crate::template_adapters::icml::maybe_convert_icml;
+use crate::template_adapters::ieee::maybe_convert_ieee;
+use crate::template_adapters::jmlr::maybe_convert_jmlr;
+use crate::template_adapters::letter::maybe_convert_letter;
+use crate::template_adapters::neurips::maybe_convert_neurips;
+use crate::template_adapters::newsletter::maybe_convert_newsletter;
+use crate::template_adapters::tmlr::maybe_convert_tmlr;
 use crate::utils::loss::{ConversionReport, LossRecord, LossReport, LOSS_MARKER_PREFIX};
 
 fn build_loss_report(doc: &Document) -> LossReport {
@@ -109,14 +109,19 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
     let doc: Document = typst_to_ir(input);
     if full_document {
         let hints = extract_preamble_hints(input);
-        let base_font_size_pt =
-            hints.text_size.as_deref().and_then(|size| parse_length_to_pt(size, "10pt"));
+        let base_font_size_pt = hints
+            .text_size
+            .as_deref()
+            .and_then(|size| parse_length_to_pt(size, "10pt"));
         let preamble = render_article_preamble(&hints);
         let number_equations = equation_numbering_enabled(&hints);
-        let cite_command = hints
-            .cite_command
-            .clone()
-            .or_else(|| if hints.uses_natbib { Some("citep".to_string()) } else { None });
+        let cite_command = hints.cite_command.clone().or_else(|| {
+            if hints.uses_natbib {
+                Some("citep".to_string())
+            } else {
+                None
+            }
+        });
         let body = render_document(
             &doc,
             LatexRenderOptions {
@@ -145,12 +150,17 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
         return out;
     }
     let hints = extract_preamble_hints(input);
-    let base_font_size_pt =
-        hints.text_size.as_deref().and_then(|size| parse_length_to_pt(size, "10pt"));
-    let cite_command = hints
-        .cite_command
-        .clone()
-        .or_else(|| if hints.uses_natbib { Some("citep".to_string()) } else { None });
+    let base_font_size_pt = hints
+        .text_size
+        .as_deref()
+        .and_then(|size| parse_length_to_pt(size, "10pt"));
+    let cite_command = hints.cite_command.clone().or_else(|| {
+        if hints.uses_natbib {
+            Some("citep".to_string())
+        } else {
+            None
+        }
+    });
     render_document(
         &doc,
         LatexRenderOptions {

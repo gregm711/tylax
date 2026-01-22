@@ -68,8 +68,8 @@ pub mod wasm;
 
 /// IR-based pipeline (new architecture)
 pub mod ir_pipeline;
-mod template_adapters;
 mod preamble_hints;
+mod template_adapters;
 
 // Re-export core conversion functions
 pub use core::typst2latex;
@@ -82,11 +82,10 @@ pub use core::typst2latex::{
 pub use core::latex2typst::{
     convert_document_with_ast, convert_document_with_ast_options, convert_math_with_ast,
     convert_math_with_ast_options, convert_with_ast, convert_with_ast_options,
-    latex_math_to_typst_with_report, latex_to_typst_with_report,
     latex_math_to_typst_with_diagnostics, latex_math_to_typst_with_eval,
-    latex_to_typst_with_diagnostics, latex_to_typst_with_eval, ConversionMode,
-    ConversionResult as L2TConversionResult, ConversionState, EnvironmentContext, L2TOptions,
-    LatexConverter, WarningKind,
+    latex_math_to_typst_with_report, latex_to_typst_with_diagnostics, latex_to_typst_with_eval,
+    latex_to_typst_with_report, ConversionMode, ConversionResult as L2TConversionResult,
+    ConversionState, EnvironmentContext, L2TOptions, LatexConverter, WarningKind,
 };
 
 // Re-export data modules

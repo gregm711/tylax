@@ -66,11 +66,7 @@ pub fn convert_curly(conv: &mut LatexConverter, elem: SyntaxElement, output: &mu
     if matches!(conv.state.mode, ConversionMode::Text) {
         let raw = node.text().to_string();
         let inner = raw.trim().trim_start_matches('{').trim_end_matches('}');
-        if !inner.is_empty()
-            && inner
-                .chars()
-                .all(|c| c == '$' || c.is_whitespace())
-        {
+        if !inner.is_empty() && inner.chars().all(|c| c == '$' || c.is_whitespace()) {
             return;
         }
     }

@@ -43,7 +43,6 @@ struct Args {
     allow_no_gain: bool,
 }
 
-
 fn main() -> io::Result<()> {
     let args = Args::parse();
 

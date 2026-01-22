@@ -35,15 +35,19 @@ impl Dimension {
 
         // Check for relative dimensions first
         if let Some(rest) = s.strip_suffix("\\textwidth") {
-            let num = rest.trim().parse::<f64>().ok()?;
+            let num = parse_relative_value(rest)?;
             return Some(Dimension::TextWidth(num));
         }
         if let Some(rest) = s.strip_suffix("\\linewidth") {
-            let num = rest.trim().parse::<f64>().ok()?;
+            let num = parse_relative_value(rest)?;
+            return Some(Dimension::LineWidth(num));
+        }
+        if let Some(rest) = s.strip_suffix("\\columnwidth") {
+            let num = parse_relative_value(rest)?;
             return Some(Dimension::LineWidth(num));
         }
         if let Some(rest) = s.strip_suffix("\\textheight") {
-            let num = rest.trim().parse::<f64>().ok()?;
+            let num = parse_relative_value(rest)?;
             return Some(Dimension::TextHeight(num));
         }
 
@@ -140,6 +144,15 @@ fn format_num(v: f64) -> String {
     s.to_string()
 }
 
+fn parse_relative_value(raw: &str) -> Option<f64> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        Some(1.0)
+    } else {
+        trimmed.parse::<f64>().ok()
+    }
+}
+
 /// Image attributes parsed from LaTeX options
 #[derive(Debug, Clone, Default)]
 pub struct ImageAttributes {
@@ -147,10 +160,11 @@ pub struct ImageAttributes {
     pub height: Option<Dimension>,
     pub scale: Option<f64>,
     pub angle: Option<f64>,
-    pub trim: Option<(f64, f64, f64, f64)>, // left, bottom, right, top
+    pub trim: Option<(Dimension, Dimension, Dimension, Dimension)>, // left, bottom, right, top
     pub clip: bool,
     pub alt: Option<String>,
     pub keepaspectratio: bool,
+    pub page: Option<u32>,
     /// Other key-value pairs
     pub other: HashMap<String, String>,
 }
@@ -176,22 +190,24 @@ impl ImageAttributes {
                     "scale" => attrs.scale = value.parse().ok(),
                     "angle" => attrs.angle = value.parse().ok(),
                     "alt" => attrs.alt = Some(value.to_string()),
+                    "page" => attrs.page = value.parse().ok(),
                     "keepaspectratio" => {
                         attrs.keepaspectratio = value == "true" || value.is_empty()
                     }
                     "clip" => attrs.clip = value == "true" || value.is_empty(),
                     "trim" => {
                         // Parse "left bottom right top"
-                        let parts: Vec<f64> = value
+                        let parts: Vec<Dimension> = value
                             .split_whitespace()
-                            .filter_map(|s| {
-                                // Remove unit suffix for parsing
-                                let s = s.trim_end_matches(|c: char| c.is_alphabetic());
-                                s.parse().ok()
-                            })
+                            .filter_map(Dimension::parse)
                             .collect();
                         if parts.len() == 4 {
-                            attrs.trim = Some((parts[0], parts[1], parts[2], parts[3]));
+                            attrs.trim = Some((
+                                parts[0].clone(),
+                                parts[1].clone(),
+                                parts[2].clone(),
+                                parts[3].clone(),
+                            ));
                         }
                     }
                     _ => {
@@ -226,6 +242,9 @@ impl ImageAttributes {
         if let Some(alt) = &self.alt {
             args.push(format!("alt: \"{}\"", escape_typst_string(alt)));
         }
+        if let Some(page) = self.page {
+            args.push(format!("page: {}", page));
+        }
 
         // Handle fit based on keepaspectratio
         if self.width.is_some() && self.height.is_some() && !self.keepaspectratio {
@@ -257,14 +276,17 @@ impl ImageAttributes {
         if self.clip {
             opts.push("clip".to_string());
         }
-        if let Some((l, b, r, t)) = self.trim {
+        if let Some((l, b, r, t)) = &self.trim {
             opts.push(format!(
                 "trim={} {} {} {}",
-                format_num(l),
-                format_num(b),
-                format_num(r),
-                format_num(t)
+                l.to_latex(),
+                b.to_latex(),
+                r.to_latex(),
+                t.to_latex()
             ));
+        }
+        if let Some(page) = self.page {
+            opts.push(format!("page={}", page));
         }
 
         opts.join(", ")
@@ -385,19 +407,8 @@ impl Figure {
         result.push_str("#figure(\n");
 
         // Image
-        let args = self.image_attrs.to_typst_args();
-        if args.is_empty() {
-            result.push_str(&format!(
-                "  image(\"{}\"),\n",
-                escape_typst_string(&self.image_path)
-            ));
-        } else {
-            result.push_str(&format!(
-                "  image(\"{}\", {}),\n",
-                escape_typst_string(&self.image_path),
-                args
-            ));
-        }
+        let expr = render_image_expr(&self.image_path, &self.image_attrs);
+        result.push_str(&format!("  {},\n", expr));
 
         // Caption
         if let Some(ref caption) = self.caption {
@@ -555,6 +566,11 @@ pub fn parse_typst_image(content: &str) -> Option<(String, ImageAttributes)> {
                         attrs.alt = Some(alt);
                     }
                 }
+                "page" => {
+                    if let Ok(page) = value.parse::<u32>() {
+                        attrs.page = Some(page);
+                    }
+                }
                 "fit" => {
                     if value.contains("stretch") {
                         attrs.keepaspectratio = false;
@@ -702,16 +718,8 @@ pub fn convert_includegraphics_to_typst(latex: &str) -> Option<String> {
     // Parse path {path}
     let path = extract_braced(rest)?;
 
-    let args = attrs.to_typst_args();
-    if args.is_empty() {
-        Some(format!("#image(\"{}\")", escape_typst_string(&path)))
-    } else {
-        Some(format!(
-            "#image(\"{}\", {})",
-            escape_typst_string(&path),
-            args
-        ))
-    }
+    let expr = render_image_expr(&path, &attrs);
+    Some(format!("#{}", expr))
 }
 
 /// Convert Typst #image to LaTeX \includegraphics
@@ -724,6 +732,63 @@ pub fn convert_image_to_latex(typst: &str) -> Option<String> {
     } else {
         Some(format!("\\includegraphics[{}]{{{}}}", opts, path))
     }
+}
+
+/// Render a Typst image expression (code mode, no leading `#`).
+pub fn render_image_expr(path: &str, attrs: &ImageAttributes) -> String {
+    let trimmed = path.trim();
+
+    if trimmed.is_empty()
+        || trimmed.contains('\\')
+        || trimmed.contains('{')
+        || trimmed.contains('}')
+    {
+        return "box(stroke: 0.5pt, inset: 6pt)[Missing image]".to_string();
+    }
+
+    let is_eps = trimmed
+        .rsplit('.')
+        .next()
+        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "eps" | "epsi" | "ps"))
+        .unwrap_or(false);
+
+    if is_eps {
+        return format!(
+            "box(stroke: 0.5pt, inset: 6pt)[Image omitted (unsupported EPS): {}]",
+            trimmed
+        );
+    }
+
+    let args = attrs.to_typst_args();
+    let mut expr = if args.is_empty() {
+        format!("image(\"{}\")", escape_typst_string(trimmed))
+    } else {
+        format!("image(\"{}\", {})", escape_typst_string(trimmed), args)
+    };
+
+    if let Some((left, bottom, right, top)) = &attrs.trim {
+        let inset = format!(
+            "(left: -{}, right: -{}, top: -{}, bottom: -{})",
+            left.to_typst(),
+            right.to_typst(),
+            top.to_typst(),
+            bottom.to_typst()
+        );
+        expr = format!("box(clip: true, inset: {})[{}]", inset, expr);
+    } else if attrs.clip {
+        expr = format!("box(clip: true)[{}]", expr);
+    }
+
+    if let Some(scale) = attrs.scale {
+        let scale_val = format_num(scale);
+        expr = format!("scale(x: {0}, y: {0}, {1})", scale_val, expr);
+    }
+    if let Some(angle) = attrs.angle {
+        let angle_val = format_num(angle);
+        expr = format!("rotate({}deg, {})", angle_val, expr);
+    }
+
+    expr
 }
 
 #[cfg(test)]
@@ -741,6 +806,14 @@ mod tests {
             Dimension::parse("0.5\\textwidth"),
             Some(Dimension::TextWidth(0.5))
         );
+        assert_eq!(
+            Dimension::parse("\\textwidth"),
+            Some(Dimension::TextWidth(1.0))
+        );
+        assert_eq!(
+            Dimension::parse("\\columnwidth"),
+            Some(Dimension::LineWidth(1.0))
+        );
     }
 
     #[test]
@@ -752,9 +825,12 @@ mod tests {
 
     #[test]
     fn test_image_attributes_parse() {
-        let attrs = ImageAttributes::parse("width=0.5\\textwidth, height=3cm");
+        let attrs =
+            ImageAttributes::parse("width=0.5\\textwidth, height=3cm, trim=1cm 2cm 3cm 4cm, clip");
         assert_eq!(attrs.width, Some(Dimension::TextWidth(0.5)));
         assert_eq!(attrs.height, Some(Dimension::Centimeter(3.0)));
+        assert!(attrs.clip);
+        assert!(attrs.trim.is_some());
     }
 
     #[test]
@@ -802,6 +878,14 @@ mod tests {
         let typst = convert_includegraphics_to_typst(latex).unwrap();
         assert!(typst.contains("#image(\"image.png\""));
         assert!(typst.contains("width: 50%"));
+    }
+
+    #[test]
+    fn test_convert_includegraphics_trim_clip() {
+        let latex = r"\includegraphics[width=\textwidth, trim=1cm 2cm 3cm 4cm, clip]{image.png}";
+        let typst = convert_includegraphics_to_typst(latex).unwrap();
+        assert!(typst.contains("box(clip: true"));
+        assert!(typst.contains("inset: (left: -1cm, right: -3cm, top: -4cm, bottom: -2cm)"));
     }
 
     #[test]

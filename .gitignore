@@ -27,3 +27,13 @@ __pycache__/
 *.swp
 *.swo
 *.log
+
+# Local conversion fixtures
+Empora_Purchase_Contract.zip
+OCR & GEPA.zip
+
+# Large local artifacts (keep out of git)
+*.pdf
+/arxiv-corpus*
+/typst-corpus*
+/latex-corpus/

@@ -1,6 +1,6 @@
-use typst_syntax::parse;
 use tylax_latex_backend::{render_document, LatexRenderOptions};
 use tylax_typst_frontend::typst_to_ir;
+use typst_syntax::parse;
 
 use crate::preamble_hints::{
     equation_number_within, equation_numbering_enabled, extract_preamble_hints, parse_length_to_pt,
@@ -36,9 +36,14 @@ pub fn maybe_convert_tmlr(input: &str) -> Option<String> {
         .and_then(|node| extract_string_like(node, &lets));
 
     let hints = extract_preamble_hints(input);
-    let base_font_size_pt =
-        hints.text_size.as_deref().and_then(|size| parse_length_to_pt(size, "10pt"));
-    let cite_command = hints.cite_command.clone().or_else(|| Some("citep".to_string()));
+    let base_font_size_pt = hints
+        .text_size
+        .as_deref()
+        .and_then(|size| parse_length_to_pt(size, "10pt"));
+    let cite_command = hints
+        .cite_command
+        .clone()
+        .or_else(|| Some("citep".to_string()));
 
     let doc = typst_to_ir(input);
     let body = render_document(
@@ -66,10 +71,7 @@ pub fn maybe_convert_tmlr(input: &str) -> Option<String> {
         None => "\\usepackage[preprint]{tmlr}".to_string(),
         Some(false) => "\\usepackage{tmlr}".to_string(),
     };
-    out.push_str(&format!(
-        "\\IfFileExists{{tmlr.sty}}{{{}}}{{}}\n",
-        pkg_line
-    ));
+    out.push_str(&format!("\\IfFileExists{{tmlr.sty}}{{{}}}{{}}\n", pkg_line));
     out.push_str("\\usepackage{amsmath,amssymb}\n");
     out.push_str("\\usepackage{graphicx}\n");
     out.push_str("\\usepackage{booktabs}\n");

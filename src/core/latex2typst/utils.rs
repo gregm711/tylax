@@ -2,8 +2,8 @@
 //!
 //! This module contains pure utility functions that don't depend on converter state.
 
-use mitex_parser::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 use crate::data::symbols::GREEK_LETTERS;
+use mitex_parser::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
@@ -87,7 +87,8 @@ pub fn collect_bibliography_entries(input: &str) -> Vec<String> {
                 ("\\bibdata", i + "\\bibdata".len())
             };
             // Avoid \bibliographystyle
-            if cmd == "\\bibliography" && after < bytes.len() && bytes[after].is_ascii_alphabetic() {
+            if cmd == "\\bibliography" && after < bytes.len() && bytes[after].is_ascii_alphabetic()
+            {
                 i += 1;
                 continue;
             }
@@ -413,7 +414,10 @@ fn normalize_bibtex_string_entry(
     if !key.is_empty() && !normalized.is_empty() {
         string_map.insert(key.to_lowercase(), normalized.clone());
     }
-    format!("@{}{}{} = {{{}}}{}", entry_type, open, key, normalized, close)
+    format!(
+        "@{}{}{} = {{{}}}{}",
+        entry_type, open, key, normalized, close
+    )
 }
 
 fn normalize_bibtex_regular_entry(
@@ -447,8 +451,7 @@ fn normalize_bibtex_regular_entry(
         }
         let field_start = idx;
         while idx < bytes.len()
-            && (bytes[idx].is_ascii_alphanumeric()
-                || matches!(bytes[idx], b'_' | b'-' | b':'))
+            && (bytes[idx].is_ascii_alphanumeric() || matches!(bytes[idx], b'_' | b'-' | b':'))
         {
             idx += 1;
         }
@@ -1233,7 +1236,10 @@ fn find_trailing_op_call(s: &str) -> Option<usize> {
     }
 
     let func_start = func.len() - 2;
-    let before = func[..func_start].chars().rev().find(|c| !c.is_whitespace());
+    let before = func[..func_start]
+        .chars()
+        .rev()
+        .find(|c| !c.is_whitespace());
     if let Some(ch) = before {
         if ch.is_ascii_alphanumeric() || ch == '_' {
             return None;
@@ -1302,7 +1308,9 @@ pub fn format_chemical_formula_math(raw: &str) -> String {
 /// Sanitize mhchem-style content for safe insertion into text() in math mode.
 /// Drops LaTeX command markers and math delimiters to avoid invalid Typst syntax.
 pub fn sanitize_ce_text_for_math(raw: &str) -> String {
-    fn consume_braced_content(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
+    fn consume_braced_content(
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    ) -> Option<String> {
         while matches!(chars.peek(), Some(' ')) {
             chars.next();
         }
@@ -1554,7 +1562,8 @@ fn sanitize_bibtex_keys(input: &str) -> String {
                     j += 1;
                 }
                 let key_start = j;
-                while j < bytes.len() && bytes[j] != b',' && bytes[j] != b'\n' && bytes[j] != b'\r' {
+                while j < bytes.len() && bytes[j] != b',' && bytes[j] != b'\n' && bytes[j] != b'\r'
+                {
                     j += 1;
                 }
                 let key_raw = input[key_start..j].trim();
@@ -1670,7 +1679,10 @@ pub fn strip_label_from_text(raw: &str) -> (String, Option<String>) {
     }
     let cleaned = String::from_utf8(out).unwrap_or_else(|_| raw.to_string());
     let cleaned = cleaned.trim().to_string();
-    let cleaned_label = label.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let cleaned_label = label
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     (cleaned, cleaned_label)
 }
 
@@ -1701,7 +1713,11 @@ pub fn escape_at_in_words(input: &str) -> String {
             }
             let candidate: String = chars[i + 1..j].iter().collect();
 
-            if !prev_is_escape && !prev_is_cite && !candidate.is_empty() && !labels.contains(&candidate) {
+            if !prev_is_escape
+                && !prev_is_cite
+                && !candidate.is_empty()
+                && !labels.contains(&candidate)
+            {
                 out.push('\\');
                 out.push('@');
                 i += 1;
@@ -2282,7 +2298,8 @@ fn expand_latex_inputs_inner(
                     if let Ok(content) = std::fs::read_to_string(&full_path) {
                         seen.insert(full_path.clone());
                         let next_base = full_path.parent().unwrap_or(base_dir);
-                        let expanded = expand_latex_inputs_inner(&content, next_base, depth + 1, seen);
+                        let expanded =
+                            expand_latex_inputs_inner(&content, next_base, depth + 1, seen);
                         out.extend_from_slice(expanded.as_bytes());
                         if end_idx > 0 {
                             i = end_idx;
@@ -2598,6 +2615,35 @@ pub fn extract_curly_inner_content(node: &SyntaxNode) -> String {
 /// Convert caption/title/author text that may contain inline math and formatting commands
 /// Handles LaTeX math mode ($...$) and text formatting commands
 pub fn convert_caption_text(text: &str) -> String {
+    fn read_braced(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
+        while let Some(&' ') = chars.peek() {
+            chars.next();
+        }
+        if chars.peek() != Some(&'{') {
+            return None;
+        }
+        chars.next(); // consume '{'
+        let mut depth = 1i32;
+        let mut content = String::new();
+        for ch in chars.by_ref() {
+            match ch {
+                '{' => {
+                    depth += 1;
+                    content.push(ch);
+                }
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    content.push(ch);
+                }
+                _ => content.push(ch),
+            }
+        }
+        Some(content)
+    }
+
     let mut result = String::new();
     let mut chars = text.chars().peekable();
 
@@ -2631,8 +2677,14 @@ pub fn convert_caption_text(text: &str) -> String {
             // Check for citation-like commands that may take optional arguments
             let is_cite = matches!(
                 cmd.as_str(),
-                "cite" | "citep" | "citet" | "citealt" | "citeauthor" | "autocite"
-                    | "parencite" | "textcite"
+                "cite"
+                    | "citep"
+                    | "citet"
+                    | "citealt"
+                    | "citeauthor"
+                    | "autocite"
+                    | "parencite"
+                    | "textcite"
             );
 
             // Capture optional argument for citations (e.g., \cite[p.~47]{key})
@@ -2666,7 +2718,9 @@ pub fn convert_caption_text(text: &str) -> String {
             }
 
             // Check if this command takes a braced argument
-            let has_arg = is_cite || crate::data::symbols::is_caption_text_command(&cmd);
+            let has_arg = is_cite
+                || crate::data::symbols::is_caption_text_command(&cmd)
+                || matches!(cmd.as_str(), "href" | "url");
 
             // Extract argument content if present
             let arg_content = if has_arg {
@@ -2703,6 +2757,27 @@ pub fn convert_caption_text(text: &str) -> String {
 
             // Convert common text-mode commands
             match cmd.as_str() {
+                "href" => {
+                    let target = arg_content.unwrap_or_default();
+                    let label = read_braced(&mut chars).unwrap_or_default();
+                    let escaped = escape_typst_text(&target);
+                    if !escaped.is_empty() {
+                        let rendered = if label.is_empty() {
+                            escaped.clone()
+                        } else {
+                            convert_caption_text(&label)
+                        };
+                        result.push_str(&format!("#link(\"{}\")[{}]", escaped, rendered));
+                    } else if !label.is_empty() {
+                        result.push_str(&convert_caption_text(&label));
+                    }
+                }
+                "url" => {
+                    if let Some(content) = arg_content {
+                        let escaped = escape_typst_text(&content);
+                        result.push_str(&format!("#link(\"{0}\")[{0}]", escaped));
+                    }
+                }
                 "textbf" | "bf" => {
                     result.push_str("#strong[");
                     if let Some(content) = arg_content {
@@ -2913,6 +2988,35 @@ pub fn convert_author_text(text: &str) -> String {
                             '\\' => {
                                 chars.next();
                                 result.push_str("\\\\");
+                                if chars.peek() == Some(&'[') {
+                                    chars.next();
+                                    let mut content = String::new();
+                                    while let Some(next) = chars.next() {
+                                        if next == ']' {
+                                            break;
+                                        }
+                                        content.push(next);
+                                    }
+                                    if !content.trim().is_empty() {
+                                        result.push('[');
+                                        result.push_str(content.trim());
+                                        result.push(']');
+                                    }
+                                } else if matches!(chars.peek(), Some(c) if c.is_ascii_digit()) {
+                                    let mut content = String::new();
+                                    while let Some(&c) = chars.peek() {
+                                        if c.is_ascii_whitespace() || c == '\\' || c == ',' {
+                                            break;
+                                        }
+                                        content.push(c);
+                                        chars.next();
+                                    }
+                                    if !content.trim().is_empty() {
+                                        result.push('[');
+                                        result.push_str(content.trim());
+                                        result.push(']');
+                                    }
+                                }
                             }
                             '&' => {
                                 chars.next();
@@ -2948,10 +3052,62 @@ pub fn convert_author_text(text: &str) -> String {
                 "thanks" | "footnote" | "footnotemark" | "footnotetext" => {
                     let _ = read_braced(&mut chars);
                 }
-                "texttt" | "textbf" | "textit" | "emph" | "textsc" | "underline" | "textrm"
-                | "text" | "mbox" | "hbox" | "textsf" => {
+                "textbf" | "bf" => {
+                    result.push_str("#strong[");
                     if let Some(content) = read_braced(&mut chars) {
                         result.push_str(&convert_author_text(&content));
+                    }
+                    result.push(']');
+                }
+                "textit" | "it" | "emph" | "itshape" => {
+                    result.push_str("#emph[");
+                    if let Some(content) = read_braced(&mut chars) {
+                        result.push_str(&convert_author_text(&content));
+                    }
+                    result.push(']');
+                }
+                "texttt" => {
+                    result.push('`');
+                    if let Some(content) = read_braced(&mut chars) {
+                        result.push_str(&content);
+                    }
+                    result.push('`');
+                }
+                "textsc" => {
+                    result.push_str("#smallcaps[");
+                    if let Some(content) = read_braced(&mut chars) {
+                        result.push_str(&convert_author_text(&content));
+                    }
+                    result.push(']');
+                }
+                "underline" => {
+                    result.push_str("#underline[");
+                    if let Some(content) = read_braced(&mut chars) {
+                        result.push_str(&convert_author_text(&content));
+                    }
+                    result.push(']');
+                }
+                "textrm" | "text" | "mbox" | "hbox" | "textsf" => {
+                    if let Some(content) = read_braced(&mut chars) {
+                        result.push_str(&convert_author_text(&content));
+                    }
+                }
+                "url" => {
+                    if let Some(content) = read_braced(&mut chars) {
+                        let escaped = escape_typst_text(&content);
+                        result.push_str(&format!("#link(\"{0}\")[{0}]", escaped));
+                    }
+                }
+                "href" => {
+                    let target = read_braced(&mut chars).unwrap_or_default();
+                    if let Some(content) = read_braced(&mut chars) {
+                        let escaped = escape_typst_text(&target);
+                        let label = convert_author_text(&content);
+                        if !escaped.is_empty() {
+                            result.push_str(&format!("#link(\"{}\")[{}]", escaped, label));
+                        } else {
+                            result.push_str(&label);
+                        }
                     }
                 }
                 "LaTeX" => result.push_str("LaTeX"),
@@ -2998,6 +3154,16 @@ mod tests {
         assert!(!out.contains('%'));
         assert!(out.contains("\\\\"));
         assert!(out.contains("\\and"));
+    }
+
+    #[test]
+    fn author_text_preserves_formatting() {
+        let input = "\\textbf{Greg} (\\texttt{a@b})\\\\[4pt]\\textit{Team}";
+        let out = convert_author_text(input);
+        assert!(out.contains("#strong[Greg]"));
+        assert!(out.contains("`a@b`"));
+        assert!(out.contains("\\\\[4pt]"));
+        assert!(out.contains("#emph[Team]"));
     }
 
     #[test]
