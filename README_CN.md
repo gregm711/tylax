@@ -4,8 +4,8 @@
 
 [![Crates.io](https://img.shields.io/crates/v/tylax.svg)](https://crates.io/crates/tylax)
 [![Documentation](https://docs.rs/tylax/badge.svg)](https://docs.rs/tylax)
-[![License](https://img.shields.io/github/license/scipenai/tylax)](LICENSE)
-[![CI](https://github.com/scipenai/tylax/actions/workflows/ci.yml/badge.svg)](https://github.com/scipenai/tylax/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/gregm711/tylax)](LICENSE)
+[![CI](https://github.com/gregm711/tylax/actions/workflows/ci.yml/badge.svg)](https://github.com/gregm711/tylax/actions/workflows/ci.yml)
 
 > **双向、基于 AST 的 LaTeX ↔ Typst 转换器**
 

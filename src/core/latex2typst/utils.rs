@@ -1607,6 +1607,104 @@ pub fn escape_typst_text(text: &str) -> String {
     out
 }
 
+/// Unescape common LaTeX escaped characters inside monospace/raw contexts like \texttt{...}.
+/// We keep unknown commands intact to avoid losing intentional literals.
+pub fn unescape_latex_monospace(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+
+        let Some(&next) = chars.peek() else {
+            out.push('\\');
+            break;
+        };
+
+        match next {
+            '{' | '}' | '%' | '#' | '&' | '_' | '$' | '@' => {
+                out.push(next);
+                chars.next();
+            }
+            '~' => {
+                chars.next();
+                // Consume optional empty braces: \~{} -> ~
+                if chars.peek() == Some(&'{') {
+                    chars.next();
+                    if chars.peek() == Some(&'}') {
+                        chars.next();
+                    }
+                }
+                out.push('~');
+            }
+            '^' => {
+                chars.next();
+                // Consume optional empty braces: \^{} -> ^
+                if chars.peek() == Some(&'{') {
+                    chars.next();
+                    if chars.peek() == Some(&'}') {
+                        chars.next();
+                    }
+                }
+                out.push('^');
+            }
+            _ if next.is_ascii_alphabetic() => {
+                let mut cmd = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_ascii_alphabetic() {
+                        cmd.push(c);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                match cmd.as_str() {
+                    "textbackslash" => {
+                        // Optional empty braces: \textbackslash{}
+                        if chars.peek() == Some(&'{') {
+                            chars.next();
+                            if chars.peek() == Some(&'}') {
+                                chars.next();
+                            }
+                        }
+                        out.push('\\');
+                    }
+                    "textasciitilde" => {
+                        if chars.peek() == Some(&'{') {
+                            chars.next();
+                            if chars.peek() == Some(&'}') {
+                                chars.next();
+                            }
+                        }
+                        out.push('~');
+                    }
+                    "textasciicircum" => {
+                        if chars.peek() == Some(&'{') {
+                            chars.next();
+                            if chars.peek() == Some(&'}') {
+                                chars.next();
+                            }
+                        }
+                        out.push('^');
+                    }
+                    _ => {
+                        out.push('\\');
+                        out.push_str(&cmd);
+                    }
+                }
+            }
+            _ => {
+                out.push('\\');
+                out.push(next);
+                chars.next();
+            }
+        }
+    }
+    out
+}
+
 /// Escape plain text for Typst markup into an existing buffer.
 pub fn escape_typst_text_into(text: &str, out: &mut String) {
     if !text
@@ -2797,14 +2895,16 @@ pub fn convert_caption_text(text: &str) -> String {
                 "texttt" => {
                     result.push('`');
                     if let Some(content) = arg_content {
-                        result.push_str(&content); // Don't recurse for monospace
+                        let cleaned = unescape_latex_monospace(&content);
+                        result.push_str(&cleaned); // Don't recurse for monospace
                     }
                     result.push('`');
                 }
                 "code" => {
                     result.push('`');
                     if let Some(content) = arg_content {
-                        result.push_str(&content); // Don't recurse for monospace
+                        let cleaned = unescape_latex_monospace(&content);
+                        result.push_str(&cleaned); // Don't recurse for monospace
                     }
                     result.push('`');
                 }
@@ -3164,6 +3264,13 @@ mod tests {
         assert!(out.contains("`a@b`"));
         assert!(out.contains("\\\\[4pt]"));
         assert!(out.contains("#emph[Team]"));
+    }
+
+    #[test]
+    fn author_text_unescapes_texttt_specials() {
+        let input = "\\textbf{Greg} (\\texttt{a\\@b\\_c})";
+        let out = convert_author_text(input);
+        assert!(out.contains("`a@b_c`"));
     }
 
     #[test]

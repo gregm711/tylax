@@ -747,7 +747,8 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 write_math_text(conv, &cmd, output);
             } else {
                 let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
-                write_inline_raw(output, content.trim(), None);
+                let cleaned = super::utils::unescape_latex_monospace(content.trim());
+                write_inline_raw(output, cleaned.trim(), None);
             }
         }
         "cramped" => {
@@ -776,7 +777,8 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 write_math_text(conv, &cmd, output);
             } else {
                 let content = conv.get_required_arg(&cmd, 0).unwrap_or_default();
-                write_inline_raw(output, content.trim(), None);
+                let cleaned = super::utils::unescape_latex_monospace(content.trim());
+                write_inline_raw(output, cleaned.trim(), None);
             }
         }
         "pkg" => {
