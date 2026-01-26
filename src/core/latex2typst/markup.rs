@@ -237,9 +237,95 @@ fn write_math_text(conv: &mut LatexConverter, cmd: &CmdItem, output: &mut String
     let raw = conv
         .get_required_arg_with_braces(cmd, 0)
         .unwrap_or_default();
-    let text = convert_caption_text(&raw);
-    let escaped = escape_typst_string(text.trim());
-    let _ = write!(output, "text(\"{}\")", escaped);
+
+    // Check if content contains embedded math ($...$)
+    if raw.contains('$') {
+        write_math_text_with_embedded_math(conv, &raw, output);
+    } else {
+        let text = convert_caption_text(&raw);
+        let escaped = escape_typst_string(text.trim());
+        let _ = write!(output, "\"{}\"", escaped);
+    }
+}
+
+/// Handle \text{} content that contains embedded math like $x$ or $y$
+/// Splits into text and math segments and outputs them properly for Typst math mode
+fn write_math_text_with_embedded_math(
+    conv: &mut LatexConverter,
+    raw: &str,
+    output: &mut String,
+) {
+    let mut segments: Vec<String> = Vec::new();
+    let mut current_text = String::new();
+    let mut chars = raw.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '$' {
+            // Flush accumulated text
+            if !current_text.is_empty() {
+                let text = convert_caption_text(&current_text);
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    let escaped = escape_typst_string(trimmed);
+                    segments.push(format!("\"{}\"", escaped));
+                }
+                current_text.clear();
+            }
+
+            // Collect math content until closing $
+            let mut math_content = String::new();
+            while let Some(&next_ch) = chars.peek() {
+                if next_ch == '$' {
+                    chars.next(); // consume closing $
+                    break;
+                }
+                math_content.push(chars.next().unwrap());
+            }
+
+            // Convert the math content
+            if !math_content.is_empty() {
+                // Simple variable names can be output directly
+                // More complex math would need full conversion
+                let math_trimmed = math_content.trim();
+                if math_trimmed.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    // Simple identifier - output as-is
+                    segments.push(math_trimmed.to_string());
+                } else {
+                    // Complex math - try to convert it
+                    let converted = conv.convert_inline_math(&math_content);
+                    // Strip the surrounding $ if present
+                    let cleaned = converted.trim().trim_matches('$').trim();
+                    if !cleaned.is_empty() {
+                        segments.push(cleaned.to_string());
+                    }
+                }
+            }
+        } else {
+            current_text.push(ch);
+        }
+    }
+
+    // Flush any remaining text
+    if !current_text.is_empty() {
+        let text = convert_caption_text(&current_text);
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            let escaped = escape_typst_string(trimmed);
+            segments.push(format!("\"{}\"", escaped));
+        }
+    }
+
+    // Join segments with spaces (Typst math juxtaposition)
+    if segments.is_empty() {
+        output.push_str("\"\"");
+    } else if segments.len() == 1 {
+        output.push_str(&segments[0]);
+    } else {
+        // Wrap multiple segments in parentheses for clarity
+        output.push('(');
+        output.push_str(&segments.join(" "));
+        output.push(')');
+    }
 }
 
 fn write_inline_raw(output: &mut String, content: &str, lang: Option<&str>) {
@@ -321,6 +407,24 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         return;
     }
 
+    if base_name == "coloremojicode" {
+        let raw = conv
+            .get_required_arg_with_braces(&cmd, 0)
+            .or_else(|| extract_first_braced_arg(&cmd.syntax().text().to_string()))
+            .unwrap_or_default();
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            output.push_str("emoji-");
+            output.push_str(trimmed);
+        }
+        return;
+    }
+
+    if base_name == "thispagestyle" || base_name == "pagestyle" {
+        let _ = conv.get_required_arg_with_braces(&cmd, 0);
+        return;
+    }
+
     // Handle preamble commands
     if conv.state.in_preamble {
         match base_name {
@@ -381,6 +485,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 }
                 return;
             }
+            "setstretch" => {
+                if let Some(value) = conv.get_required_arg(&cmd, 0) {
+                    apply_line_spread(conv, &value);
+                }
+                return;
+            }
             "pagestyle" => {
                 if let Some(style) = conv.get_required_arg(&cmd, 0) {
                     if style.trim() == "fancy" {
@@ -426,6 +536,11 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 return;
             }
             "author" => {
+                if let Some(raw) = conv.get_required_arg_with_braces(&cmd, 0) {
+                    if raw.contains("\\IEEEauthorblock") {
+                        conv.capture_ieee_author_blocks(&raw);
+                    }
+                }
                 let author = conv.extract_author_arg(&cmd).unwrap_or_default();
                 if conv.state.template_kind == Some(super::context::TemplateKind::Acm) {
                     conv.push_author_block(author);
@@ -1019,12 +1134,15 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 .get_required_arg_with_braces(&cmd, 0)
                 .or_else(|| conv.get_required_arg(&cmd, 0));
             if let Some(raw) = raw {
-                let mut text = super::utils::convert_caption_text(&raw);
-                if conv.state.mode == ConversionMode::Math {
-                    text = super::utils::strip_unescaped_dollars(&text);
+                if conv.state.mode == ConversionMode::Math && raw.contains('$') {
+                    // Handle embedded math like \text{judgment $x$ is better than $y$}
+                    write_math_text_with_embedded_math(conv, &raw, output);
+                    output.push(' ');
+                } else {
+                    let text = super::utils::convert_caption_text(&raw);
+                    let escaped = super::utils::escape_typst_string(text.trim());
+                    let _ = write!(output, "\"{}\" ", escaped);
                 }
-                let escaped = super::utils::escape_typst_string(text.trim());
-                let _ = write!(output, "\"{}\" ", escaped);
             }
         }
 
@@ -1526,7 +1644,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             if attach_label_to_heading(output, &clean_label) {
                 return;
             }
-            let _ = write!(output, "<{}>", clean_label);
+            // Check if output ends with something that can't take a label (e.g., #set)
+            // In that case, wrap the label in empty content to make it valid
+            let trimmed = output.trim_end();
+            if trimmed.ends_with(')') && (trimmed.contains("#set ") || trimmed.contains("#counter(")) {
+                let _ = write!(output, "[] <{}>", clean_label);
+            } else {
+                let _ = write!(output, "<{}>", clean_label);
+            }
         }
         "namedlabel" => {
             let label = conv.get_required_arg(&cmd, 0).unwrap_or_default();
@@ -1716,13 +1841,35 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "footfullcite" | "cites" | "Cites" | "textcites" | "Textcites"
         | "parencites" | "Parencites" | "autocites" | "Autocites"
         | "shortcite" | "shortciteN" | "shortciteNP" | "citeN" | "citeNP" => {
-            let keys = conv.get_required_arg(&cmd, 0).unwrap_or_default();
-            let opt = conv.get_optional_arg(&cmd, 0);
+            let mut keys = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            if keys.trim().is_empty() {
+                if let Some(fallback) =
+                    extract_first_braced_arg(&cmd.syntax().text().to_string())
+                {
+                    keys = fallback;
+                }
+            }
+            let opt_pre = conv.get_optional_arg(&cmd, 0);
+            let opt_post = conv.get_optional_arg(&cmd, 1);
             let mut cleaned_keys: Vec<String> = Vec::new();
             for key in keys.split(',') {
                 let clean = sanitize_citation_key(key.trim());
                 if !clean.is_empty() {
                     cleaned_keys.push(clean);
+                }
+            }
+            let pre_note = opt_pre
+                .map(|note| note.trim().to_string())
+                .filter(|note| !note.is_empty());
+            let post_note = opt_post
+                .map(|note| note.trim().to_string())
+                .filter(|note| !note.is_empty());
+            if let Some(note) = pre_note {
+                let mut escaped = escape_typst_text(&note);
+                escaped = escaped.replace('[', "\\[").replace(']', "\\]");
+                if !escaped.is_empty() {
+                    output.push_str(&escaped);
+                    output.push(' ');
                 }
             }
             if !cleaned_keys.is_empty() {
@@ -1739,16 +1886,20 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 }
                 output.push(']');
             }
-            if let Some(note) = opt {
-                let trimmed = note.trim();
-                if !trimmed.is_empty() {
-                    let _ = write!(output, " [{}]", trimmed);
+            if let Some(note) = post_note {
+                let mut escaped = escape_typst_text(&note);
+                escaped = escaped.replace('[', "\\[").replace(']', "\\]");
+                if !escaped.is_empty() {
+                    let _ = write!(output, " [{}]", escaped);
                 }
             }
         }
         "citeauthor" | "citeauthor*" => {
             let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let clean = sanitize_citation_key(key.trim());
+            if clean.is_empty() {
+                return;
+            }
             if matches!(conv.state.citation_mode, CitationMode::Typst) {
                 let _ = write!(output, "#cite(<{}>, form: \"author\")", clean);
             } else {
@@ -1758,6 +1909,21 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "citeyear" | "citeyear*" | "citeyearpar" => {
             let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let clean = sanitize_citation_key(key.trim());
+            if clean.is_empty() {
+                return;
+            }
+            if matches!(conv.state.citation_mode, CitationMode::Typst) {
+                let _ = write!(output, "#cite(<{}>, form: \"year\")", clean);
+            } else {
+                output.push_str(&escape_typst_text(&clean));
+            }
+        }
+        "yrcite" => {
+            let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let clean = sanitize_citation_key(key.trim());
+            if clean.is_empty() {
+                return;
+            }
             if matches!(conv.state.citation_mode, CitationMode::Typst) {
                 let _ = write!(output, "#cite(<{}>, form: \"year\")", clean);
             } else {
@@ -1767,6 +1933,9 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "citetitle" | "citetitle*" => {
             let key = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             let clean = sanitize_citation_key(key.trim());
+            if clean.is_empty() {
+                return;
+            }
             if matches!(conv.state.citation_mode, CitationMode::Typst) {
                 let _ = write!(output, "#cite(<{}>, form: \"title\")", clean);
             } else {
@@ -1791,6 +1960,17 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 .convert_required_arg(&cmd, 1)
                 .unwrap_or_else(|| escape_typst_text(&url));
             let _ = write!(output, "#link(\"{}\")[{}]", url, text);
+        }
+        "link" => {
+            let label = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
+            let url = conv.get_required_arg(&cmd, 1).unwrap_or_default();
+            if url.trim().is_empty() {
+                output.push_str(&label);
+            } else if label.trim().is_empty() {
+                let _ = write!(output, "#link(\"{}\")[{}]", url, escape_typst_text(&url));
+            } else {
+                let _ = write!(output, "#link(\"{}\")[{}]", url, label);
+            }
         }
         "hyperref" => {
             if let Some(label) = conv.get_optional_arg(&cmd, 0) {
@@ -2020,7 +2200,26 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
 
         // Page/section helpers
         "clearpage" | "cleardoublepage" | "cleartooddpage" | "myclearpage" | "blankpage" => {
-            output.push_str("#pagebreak()");
+            let is_two_column = conv
+                .state
+                .document_class_info
+                .as_ref()
+                .map(|info| info.columns > 1)
+                .unwrap_or(false)
+                || matches!(
+                    conv.state.template_kind,
+                    Some(
+                        super::context::TemplateKind::Cvpr
+                            | super::context::TemplateKind::Iclr
+                            | super::context::TemplateKind::Icml
+                            | super::context::TemplateKind::Neurips
+                    )
+                );
+            if is_two_column {
+                output.push_str("#colbreak()");
+            } else {
+                output.push_str("#pagebreak()");
+            }
         }
         "mypagestyle" | "mylisthead" => {
             // Consume args, ignore styling
@@ -2083,7 +2282,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             // Ignore pagination and TOC wiring.
         }
         "thepage" => {
-            output.push_str("#counter(page).display()");
+            output.push_str("#context counter(page).display()");
         }
         "endfirsthead" | "endfoot" | "endlastfoot" => {
             // longtable control commands; ignore.
@@ -3031,8 +3230,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
         }
         "mathtt" => {
-            if let Some(content) = conv.convert_required_arg(&cmd, 0) {
-                let _ = write!(output, "mono({}) ", content);
+            // \mathtt{} in math mode is typically for code/identifiers that should stay together
+            // Get raw text and output as mono("...") string, not as separated math variables
+            if let Some(raw) = conv.get_required_arg(&cmd, 0) {
+                let text = convert_caption_text(raw.trim());
+                let escaped = escape_typst_string(&text);
+                let _ = write!(output, "mono(\"{}\") ", escaped);
             }
         }
         "abs" => {
@@ -3273,13 +3476,13 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
 
         // Spacing commands
-        "hspace" | "hspace*" => {
+        "hspace" | "hspace*" | "hskip" => {
             let dim = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             if !dim.trim().is_empty() {
                 let _ = write!(output, "#h({})", convert_dimension(&dim));
             }
         }
-        "vspace" | "vspace*" => {
+        "vspace" | "vspace*" | "vskip" => {
             let dim = conv.get_required_arg(&cmd, 0).unwrap_or_default();
             if !dim.trim().is_empty() {
                 let _ = write!(output, "#v({})", convert_dimension(&dim));
@@ -3326,9 +3529,13 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
 
         // Special characters
-        "LaTeX" => output.push_str("LaTeX"),
+        "LaTeX" | "latex" => output.push_str("LaTeX"),
         "TeX" => output.push_str("TeX"),
         "today" => output.push_str("#datetime.today().display()"),
+        "eg" => output.push_str("e.g."),
+        "ie" => output.push_str("i.e."),
+        "etal" => output.push_str("et al."),
+        "vs" => output.push_str("vs."),
         "ldots" | "dots" | "cdots" => output.push_str("..."),
         "copyright" => output.push('©'),
         "trademark" | "texttrademark" => output.push('™'),
@@ -3339,9 +3546,10 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "P" => output.push('¶'),
         "pounds" | "textsterling" => output.push('£'),
         "euro" => output.push('€'),
-        "textbackslash" => output.push('\\'),
+        "textbackslash" | "backslash" => output.push('\\'),
         "textasciitilde" => output.push('~'),
         "textasciicircum" => output.push('^'),
+        "nobreakspace" => output.push('~'),
         "textasciigrave" => {
             if matches!(conv.state.mode, ConversionMode::Math) {
                 output.push('`');
@@ -3670,6 +3878,11 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 _ => 2,
             };
             let content = conv.convert_required_arg(&cmd, content_idx).unwrap_or_default();
+            let _ = write!(output, "___TYPST_CELL___:table.cell(rowspan: {})[{}]", nrows, content);
+        }
+        "multirowcell" => {
+            let nrows = conv.get_required_arg(&cmd, 0).unwrap_or("1".to_string());
+            let content = conv.convert_required_arg(&cmd, 1).unwrap_or_default();
             let _ = write!(output, "___TYPST_CELL___:table.cell(rowspan: {})[{}]", nrows, content);
         }
 
@@ -4035,7 +4248,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
 
         // Relations
         "approx" => output.push_str("approx "),
-        "sim" => output.push_str("tilde "),
+        "sim" => output.push_str("tilde.op "),
         "simeq" => output.push_str("tilde.eq "),
         "cong" => output.push_str("tilde.equiv "),
         "equiv" => output.push_str("equiv "),
@@ -4392,8 +4605,27 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
 
         // Page breaks
-        "newpage" => {
-            output.push_str("\n#pagebreak()\n");
+        "newpage" | "pagebreak" => {
+            let is_two_column = conv
+                .state
+                .document_class_info
+                .as_ref()
+                .map(|info| info.columns > 1)
+                .unwrap_or(false)
+                || matches!(
+                    conv.state.template_kind,
+                    Some(
+                        super::context::TemplateKind::Cvpr
+                            | super::context::TemplateKind::Iclr
+                            | super::context::TemplateKind::Icml
+                            | super::context::TemplateKind::Neurips
+                    )
+                );
+            if is_two_column {
+                output.push_str("\n#colbreak()\n");
+            } else {
+                output.push_str("\n#pagebreak()\n");
+            }
         }
 
         // Appendix
@@ -4408,6 +4640,22 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             let tex = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
             if !tex.trim().is_empty() {
                 output.push_str(tex.trim());
+                output.push(' ');
+            }
+        }
+        "linkbutton" => {
+            let url = conv.get_required_arg(&cmd, 0).unwrap_or_default();
+            let label = conv.get_required_arg(&cmd, 2).unwrap_or_default();
+            let label = if label.trim().is_empty() {
+                url.clone()
+            } else {
+                super::utils::convert_caption_text(&label)
+            };
+            if !url.trim().is_empty() {
+                let escaped = super::utils::escape_typst_text(url.trim());
+                let _ = write!(output, "#link(\"{}\")[{}] ", escaped, label.trim());
+            } else if !label.trim().is_empty() {
+                output.push_str(label.trim());
                 output.push(' ');
             }
         }
@@ -4444,7 +4692,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
 
         // Ignored commands - alignment and layout
         "centering" | "raggedright" | "raggedleft" | "noindent" | "indent"
-        | "pagebreak" | "nopagebreak" | "enlargethispage"
+        | "nopagebreak" | "enlargethispage"
         | "null" | "relax" | "ignorespaces" | "obeylines" | "obeyspaces" | "frenchspacing"
         | "nonfrenchspacing" | "normalfont" | "rmfamily" | "sffamily" | "ttfamily" | "bfseries"
         | "mdseries" | "itshape" | "scshape" | "upshape" | "slshape" | "normalsize" | "tiny"
@@ -4484,7 +4732,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "suppressfloats" | "FloatBarrier" | "clearfloats"
         // Spacing (excluding already handled: smallskip, medskip, bigskip)
         | "vfill" | "hfill" | "hfil" | "vfil" | "break" | "allowbreak" | "nobreak"
-        | "goodbreak" | "penalty" | "hskip" | "kern" | "hss" | "looseness" | "xspace"
+        | "goodbreak" | "penalty" | "kern" | "hss" | "looseness" | "xspace"
         | "interlinepenalty" | "midsloppy" | "raggedbottom" | "doublespace"
         // Margin and page setup
         | "marginpar" | "marginparpush" | "reversemarginpar" | "normalmarginpar"
@@ -4502,8 +4750,9 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "@ifstar" | "@startsection" | "z@" | "elvbf" | "gaussianlbmain"
         // Math style switches
         | "displaystyle" | "textstyle" | "scriptstyle" | "scriptscriptstyle"
-        | "vskip" | "abovedisplayskip" | "belowdisplayskip"
+        | "abovedisplayskip" | "belowdisplayskip"
         | "linewidth" | "noalign" | "arraybackslash" | "graphicspath"
+        | "arrayrulewidth" | "extrarowheight" | "rowcolor" | "rowcolors"
         | "itemsep" | "addtocounter" | "addlinespace" | "cdashline" | "compactitem"
         | "onecolumn" | "pacs" | "orcid" | "let" | "@dashdrawstore" | "adl@draw"
         | "adl@drawiv" | "parskip" | "tabcolsep" | "restylealgo" | "setcopyright"
@@ -4516,10 +4765,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "the" | "ttfamilyError" | "mathindent" | "mskip" | "ifx" | "alph" | "monthyear"
         | "." | "r" | "PackageError" | "object" | "leftmargin" | "parsep"
         | "begingroup" | "endgroup" | "gdef" | "@thefnmark"
+        | "bgroup" | "egroup" | "endinput" | "futurelet"
+        | "@let@token" | "@onedot" | "@arstdepth" | "@otarlinesep" | "@unrecurse"
         | "eads" | "submitto" | "numparts" | "endnumparts" | "thetable"
         | "beginsupplement" | "ack" | "corref" | "mailsa" | "toctitle" | "tocauthor"
         | "IEEEbiographynophoto" | "adjustlimits"
-        | "extracolsep" | "EndOfBibitem" | "bibitem" | "endhead"
+        | "extracolsep" | "EndOfBibitem" | "bibitem" | "bibentry" | "endhead"
         | "mciteBstWouldAddEndPuncttrue" | "mciteSetBstMidEndSepPunct"
         | "mcitedefaultmidpunct" | "mcitedefaultendpunct" | "mcitedefaultseppunct"
         | "mciteundefinedmacro" | "mcitethebibliography"
@@ -4578,7 +4829,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         | "mdtheorem" | "AddToShipoutPictureBG" | "AtNextBibliography" | "arial"
         | "chaptertitlename" | "linespread" | "mdfdefinestyle" | "noappendicestocpagenum"
         | "place" | "thechapter" | "thesection" | "thesubsection" | "uselogo"
-        | "declaretypist" | "@dtm@day" | "@dtm@month" | "@dtm@year" => {
+        | "declaretypist" | "@dtm@day" | "@dtm@month" | "@dtm@year"
+        | "certificatewidth" | "hboxto" | "vrulewidth"
+        | "ifdefined" | "ifvmode" | "if" | "aaaianonymous" | "ECCVyear" | "ECCVyearSubmission"
+        | "mathsfit" | "emrequire" | "emet" | "eme" | "par@fig" | "links"
+        | "advance" | "ifnum" | "iftoggle" | "contents" | "references" | "postfacesection"
+        | "degreeC" | "@twosidetrue" | "@ifnextchar" | "@height" | "@skip@bove"
+        | "@yhline" | "@zhline" | "csnamecrcr" | "extrarulesep"
+        | "epigraphhead" | "nobibliography" | "normallinespacing" => {
             // Ignore these
         }
 
@@ -4630,15 +4888,71 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                         return;
                     }
                 }
-                if let Some(rest) = base_name.strip_prefix("par") {
+                if let Some(rest) = base_name.strip_prefix("and") {
                     if !rest.is_empty() && rest.chars().next().unwrap_or('a').is_ascii_uppercase()
                     {
-                        output.push_str("\n\n");
-                        output.push_str(rest);
+                        super::utils::escape_typst_text_into(rest, output);
                         output.push(' ');
                         return;
                     }
                 }
+                if let Some(rest) = base_name.strip_prefix("normalsize") {
+                    if !rest.is_empty() && rest.chars().next().unwrap_or('a').is_ascii_uppercase()
+                    {
+                        super::utils::escape_typst_text_into(rest, output);
+                        output.push(' ');
+                        return;
+                    }
+                }
+                if let Some(rest) = base_name.strip_prefix("it") {
+                    let first = rest.chars().next().unwrap_or('a');
+                    if rest.len() == 1 || first.is_ascii_uppercase() {
+                        output.push_str("#emph[");
+                        super::utils::escape_typst_text_into(rest, output);
+                        output.push_str("] ");
+                        return;
+                    }
+                }
+                if let Some(rest) = base_name.strip_prefix("tt") {
+                    let first = rest.chars().next().unwrap_or('a');
+                    if rest.len() <= 2 || first.is_ascii_uppercase() {
+                        output.push('`');
+                        super::utils::escape_typst_text_into(rest, output);
+                        output.push('`');
+                        output.push(' ');
+                        return;
+                    }
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("par") {
+                if !rest.is_empty() && rest.chars().next().unwrap_or('a').is_ascii_uppercase() {
+                    output.push_str("\n\n");
+                    output.push_str(rest);
+                    output.push(' ');
+                    return;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("or") {
+                if !rest.is_empty() && rest.chars().next().unwrap_or('a').is_ascii_uppercase() {
+                    output.push_str(rest);
+                    output.push(' ');
+                    return;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("normalsize") {
+                if !rest.is_empty() && rest.chars().next().unwrap_or('a').is_ascii_uppercase() {
+                    super::utils::escape_typst_text_into(rest, output);
+                    output.push(' ');
+                    return;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("textbackslash") {
+                output.push('\\');
+                if !rest.is_empty() {
+                    super::utils::escape_typst_text_into(rest, output);
+                }
+                output.push(' ');
+                return;
             }
             let lookup = format!("\\{}", base_name);
             if let Some(val) = crate::siunitx::SI_UNITS.get(lookup.as_str()) {
@@ -4802,6 +5116,12 @@ fn try_expand_shorthand_command(
                     return true;
                 }
             }
+            if let Some(rest) = base_name.strip_prefix("bf") {
+                if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphabetic()) {
+                    let _ = write!(output, "bold({}) ", rest);
+                    return true;
+                }
+            }
             if let Some(rest) = base_name.strip_prefix("mathcal") {
                 if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
                     let _ = write!(output, "cal({}) ", rest);
@@ -4851,6 +5171,12 @@ fn try_expand_shorthand_command(
                 }
             }
             if let Some(rest) = base_name.strip_prefix("bar") {
+                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    let _ = write!(output, "overline({}) ", rest);
+                    return true;
+                }
+            }
+            if let Some(rest) = base_name.strip_prefix("over") {
                 if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
                     let _ = write!(output, "overline({}) ", rest);
                     return true;
@@ -5256,6 +5582,32 @@ fn expand_user_macro(conv: &mut LatexConverter, cmd: &CmdItem, macro_def: &Macro
 fn convert_dimension(dim: &str) -> String {
     let dim = dim.trim();
 
+    // Handle LaTeX internal dimension macros
+    // \p@ = 1pt, \z@ = 0pt
+    // Strip trailing \par which can appear after \vskip
+    let dim = dim
+        .replace("\\p@", "pt")
+        .replace("\\z@", "0pt")
+        .replace("\\@plus", " ")
+        .replace("\\@minus", " ")
+        .replace("\\par", "");
+    let dim = dim.trim();
+
+    if let Some(rest) = dim.strip_prefix("\\stretch") {
+        let rest = rest.trim();
+        if let Some(arg) = rest.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+            let value = arg.trim();
+            if !value.is_empty() {
+                return format!("{}fr", value);
+            }
+        }
+        return "1fr".to_string();
+    }
+
+    if dim == "\\fill" || dim == "\\hfill" || dim == "\\vfill" {
+        return "1fr".to_string();
+    }
+
     // Handle \linewidth, \textwidth, etc.
     if dim.contains("\\linewidth") || dim.contains("\\textwidth") || dim.contains("\\columnwidth") {
         // Extract multiplier if present
@@ -5283,8 +5635,22 @@ fn convert_dimension(dim: &str) -> String {
     // Handle standard units
     let dim = dim
         .replace("\\fill", "1fr")
-        .replace("\\stretch", "1fr")
         .replace("\\hfill", "1fr");
+
+    if dim.ends_with("pc") {
+        let number = dim.trim_end_matches("pc").trim();
+        if let Ok(value) = number.parse::<f32>() {
+            let pts = value * 12.0;
+            let mut out = format!("{:.4}", pts);
+            while out.contains('.') && out.ends_with('0') {
+                out.pop();
+            }
+            if out.ends_with('.') {
+                out.pop();
+            }
+            return format!("{out}pt");
+        }
+    }
 
     // Already has a unit
     if dim.ends_with("pt")
@@ -5446,12 +5812,19 @@ fn convert_section(conv: &mut LatexConverter, cmd: &CmdItem, level: u8, output: 
         .filter(|t| !t.is_empty());
 
     if let Some(title) = title {
+        // Normalize title: collapse internal newlines to single spaces
+        // This ensures labels can attach to the heading line
+        let normalized_title = title
+            .lines()
+            .map(|l| l.trim())
+            .collect::<Vec<_>>()
+            .join(" ");
         output.push('\n');
         for _ in 0..=level {
             output.push('=');
         }
         output.push(' ');
-        output.push_str(&title);
+        output.push_str(&normalized_title);
         output.push('\n');
     } else {
         let raw = cmd.syntax().text().to_string();
@@ -5597,10 +5970,11 @@ fn apply_length_setting(conv: &mut LatexConverter, target: &str, value: &str) {
     let mut name = target.trim().trim_start_matches('\\').to_string();
     name.retain(|c| c.is_ascii_alphabetic());
     let val = value.trim().trim_matches(|c| c == '{' || c == '}');
+    let converted = convert_dimension(val);
     if name.contains("parskip") {
-        conv.state.par_skip = Some(val.to_string());
+        conv.state.par_skip = Some(converted);
     } else if name.contains("parindent") {
-        conv.state.par_indent = Some(val.to_string());
+        conv.state.par_indent = Some(converted);
     }
 }
 

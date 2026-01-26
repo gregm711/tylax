@@ -60,6 +60,7 @@ pub fn render_document(doc: &Document, options: LatexRenderOptions) -> String {
         out.push_str("\\usepackage{amsmath,amssymb}\n");
         out.push_str("\\usepackage{graphicx}\n");
         out.push_str("\\usepackage{hyperref}\n");
+        out.push_str("\\hypersetup{hidelinks}\n");
         out.push_str("\\usepackage[table]{xcolor}\n");
         out.push_str("\\usepackage{booktabs}\n");
         out.push_str("\\usepackage{enumitem}\n");
@@ -1070,6 +1071,28 @@ fn convert_math_content(input: &str) -> String {
                 continue;
             }
         }
+        // Handle quoted strings like "softmax" → \text{softmax}
+        if input[i..].starts_with('"') {
+            if let Some(end_quote) = input[i + 1..].find('"') {
+                let text_content = &input[i + 1..i + 1 + end_quote];
+                out.push_str(&format!("\\text{{{}}}", text_content));
+                i = i + 1 + end_quote + 1;
+                continue;
+            }
+        }
+        // Handle Typst subscript/superscript with parentheses: _(x) → _{x}, ^(x) → ^{x}
+        if input[i..].starts_with("_(") || input[i..].starts_with("^(") {
+            let op = &input[i..i + 1]; // "_" or "^"
+            if let Some((content, end_idx)) = extract_paren_content(input, i + 1) {
+                let converted_content = convert_math_content(&content);
+                out.push_str(op);
+                out.push('{');
+                out.push_str(&converted_content);
+                out.push('}');
+                i = end_idx;
+                continue;
+            }
+        }
         if let Some((latex, len)) = match_sequence_at(input, i) {
             out.push_str(latex);
             i += len;
@@ -1086,10 +1109,53 @@ fn convert_math_content(input: &str) -> String {
             continue;
         }
         let ch = input[i..].chars().next().unwrap();
-        out.push(ch);
+        // Escape special LaTeX characters in math mode
+        match ch {
+            '%' => out.push_str("\\%"),
+            _ => out.push(ch),
+        }
         i += ch.len_utf8();
     }
-    out
+    // Post-process: join spaced letters like "m a x" → "max"
+    // This handles Typst's letter-spacing in math mode for multi-letter identifiers
+    join_spaced_letters(&out)
+}
+
+/// Join specific spaced letter patterns that are known math identifiers
+/// Only joins patterns that match known words to avoid breaking valid spacing
+fn join_spaced_letters(input: &str) -> String {
+    // Known multi-letter identifiers that get spaced in Typst math mode
+    const KNOWN_WORDS: &[(&str, &str)] = &[
+        ("m a x", "max"),
+        ("m i n", "min"),
+        ("l e n", "len"),
+        ("l o g", "log"),
+        ("e x p", "exp"),
+        ("s i n", "sin"),
+        ("c o s", "cos"),
+        ("t a n", "tan"),
+        ("l i m", "lim"),
+        ("s u p", "sup"),
+        ("i n f", "inf"),
+        ("d e t", "det"),
+        ("d i m", "dim"),
+        ("k e r", "ker"),
+        ("g c d", "gcd"),
+        ("l c m", "lcm"),
+        ("a r g", "arg"),
+        ("d e g", "deg"),
+        ("h o m", "hom"),
+        ("m o d", "mod"),
+        ("s e c", "sec"),
+        ("c s c", "csc"),
+        ("c o t", "cot"),
+    ];
+
+    let mut result = input.to_string();
+    for (spaced, joined) in KNOWN_WORDS {
+        result = result.replace(spaced, joined);
+    }
+    result
 }
 
 fn convert_math_content_inline(input: &str) -> String {
@@ -1124,9 +1190,14 @@ fn match_call_at(input: &str, idx: usize, name: &str) -> Option<usize> {
         return None;
     }
     if idx > 0 {
-        if let Some(prev) = input[..idx].chars().rev().find(|c| !c.is_whitespace()) {
-            if prev == '\\' || prev.is_ascii_alphanumeric() || prev == '_' {
-                return None;
+        // Check the immediate previous character
+        if let Some(prev_char) = input[..idx].chars().last() {
+            // If there's whitespace immediately before, allow the match (tokens are separated)
+            if !prev_char.is_whitespace() {
+                // No whitespace, check if we're part of a larger identifier
+                if prev_char == '\\' || prev_char.is_ascii_alphanumeric() || prev_char == '_' {
+                    return None;
+                }
             }
         }
     }
@@ -1246,6 +1317,8 @@ fn split_top_level(input: &str, delim: char) -> Vec<String> {
 fn convert_cases(args: &str) -> String {
     let entries = split_top_level(args, ',');
     let mut rows = Vec::new();
+    let mut pending_expr: Option<String> = None;
+
     for entry in entries {
         let trimmed = entry.trim();
         if trimmed.is_empty() {
@@ -1254,15 +1327,42 @@ fn convert_cases(args: &str) -> String {
         if is_cases_named_arg(trimmed) {
             continue;
         }
-        let converted = convert_math_content(trimmed);
-        let (expr, cond) = split_case_condition(&converted);
-        let row = if let Some(cond) = cond {
-            format!("{} & {}", expr, cond)
+
+        // Check if this entry starts with & (condition part in Typst cases format)
+        if trimmed.starts_with('&') {
+            let cond_part = trimmed[1..].trim();
+            let converted_cond = convert_math_content(cond_part);
+            if let Some(expr) = pending_expr.take() {
+                // Pair with pending expression
+                rows.push(format!("{} & {}", expr, converted_cond));
+            } else {
+                // Standalone condition (shouldn't happen but handle it)
+                rows.push(format!("& {}", converted_cond));
+            }
         } else {
-            expr
-        };
-        rows.push(row);
+            // This is an expression
+            // First, flush any pending expression without condition
+            if let Some(expr) = pending_expr.take() {
+                rows.push(expr);
+            }
+            // Split BEFORE convert_math_content so we can find "if"/"else" patterns
+            let (expr_raw, cond_raw) = split_case_condition(trimmed);
+            let expr = convert_math_content(&expr_raw);
+            if let Some(cond) = cond_raw {
+                let converted_cond = convert_math_content(&cond);
+                rows.push(format!("{} & {}", expr, converted_cond));
+            } else {
+                // Store as pending, waiting for possible & condition
+                pending_expr = Some(expr);
+            }
+        }
     }
+
+    // Flush any remaining pending expression
+    if let Some(expr) = pending_expr {
+        rows.push(expr);
+    }
+
     let mut out = String::new();
     out.push_str("\\begin{cases}");
     if !rows.is_empty() {
@@ -1282,25 +1382,22 @@ fn is_cases_named_arg(entry: &str) -> bool {
 }
 
 fn split_case_condition(entry: &str) -> (String, Option<String>) {
+    // Look for "if" or "else" patterns to split expression from condition
+    // Returns (expression, optional_condition) with raw strings (not converted)
     if let Some(idx) = entry.find("\"if\"") {
         let left = entry[..idx].trim().to_string();
-        let right = entry[idx + 4..].trim();
-        let cond = if right.is_empty() {
-            "\\text{if}".to_string()
-        } else {
-            format!("\\text{{if}} {}", right)
-        };
-        return (left, Some(cond));
+        let right = entry[idx..].trim().to_string(); // Keep the whole condition part
+        return (left, Some(right));
     }
     if let Some(idx) = entry.find("\"else\"") {
         let left = entry[..idx].trim().to_string();
-        let right = entry[idx + 6..].trim();
-        let cond = if right.is_empty() {
-            "\\text{else}".to_string()
-        } else {
-            format!("\\text{{else}} {}", right)
-        };
-        return (left, Some(cond));
+        let right = entry[idx..].trim().to_string(); // Keep the whole condition part
+        return (left, Some(right));
+    }
+    if let Some(idx) = entry.find("\"otherwise\"") {
+        let left = entry[..idx].trim().to_string();
+        let right = entry[idx..].trim().to_string(); // Keep the whole condition part
+        return (left, Some(right));
     }
     (entry.trim().to_string(), None)
 }
@@ -1448,7 +1545,8 @@ fn convert_text_call(args: &str) -> String {
 fn convert_upright_call(args: &str) -> String {
     let arg = first_positional_arg(args).unwrap_or_default();
     let text = strip_quotes(&arg);
-    format!("\\mathrm{{{}}}", escape_latex(&text))
+    // Recursively convert content to handle nested calls like upright(bold(s))
+    format!("\\mathrm{{{}}}", convert_math_content(&text))
 }
 
 fn convert_font_command(cmd: &str, args: &str) -> String {
@@ -1601,6 +1699,9 @@ fn match_symbol_at(input: &str, idx: usize) -> Option<(&'static str, usize)> {
         ("iff", "\\iff"),
         ("approx", "\\approx"),
         ("sim", "\\sim"),
+        ("tilde.op", "\\sim"),
+        ("tilde.eq", "\\simeq"),
+        ("tilde.equiv", "\\cong"),
         ("integral", "\\int"),
         ("prod", "\\prod"),
         ("sum", "\\sum"),
@@ -2266,7 +2367,15 @@ fn render_table(table: &Table, options: Option<&LatexRenderOptions>) -> String {
         }
         let mut midrule_added = false;
         for (row, is_header) in rows {
-            out.push_str(&row);
+            // Wrap rows starting with [ in braces to prevent LaTeX from interpreting
+            // it as an optional argument to the preceding \\
+            if row.starts_with('[') {
+                out.push_str("{");
+                out.push_str(&row);
+                out.push_str("}");
+            } else {
+                out.push_str(&row);
+            }
             out.push_str(" \\\\\n");
             if grid_lines {
                 out.push_str("\\hline\n");

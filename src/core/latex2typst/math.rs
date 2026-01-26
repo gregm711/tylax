@@ -24,6 +24,7 @@ pub fn convert_formula(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             let cleaned = conv.cleanup_math_spacing(&math_content);
             let cleaned = super::utils::strip_unescaped_dollars(&cleaned);
             let mut cleaned = cleaned.trim().to_string();
+            cleaned = conv.fix_multiletter_before_attachment(&cleaned);
             if cleaned.starts_with('/') {
                 cleaned = format!("\"{}\"", cleaned.trim());
             }
@@ -37,9 +38,43 @@ pub fn convert_formula(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
 
             if is_inline {
-                output.push('$');
-                output.push_str(&cleaned);
-                output.push('$');
+                let trimmed = cleaned.trim();
+                let prev_non_space = output.chars().rev().find(|c| !c.is_whitespace());
+                let attachable = matches!(
+                    prev_non_space,
+                    Some(c) if c.is_ascii_alphanumeric() || c == ')' || c == ']' || c == '}'
+                );
+                let is_sub = trimmed.starts_with('_');
+                let is_sup = trimmed.starts_with('^');
+                if attachable && (is_sub || is_sup) {
+                    let mut inner = trimmed[1..].trim();
+                    if (inner.starts_with('(') && inner.ends_with(')'))
+                        || (inner.starts_with('{') && inner.ends_with('}'))
+                    {
+                        inner = &inner[1..inner.len() - 1];
+                    }
+                    let inner_trim = inner.trim();
+                    let content = if inner_trim.starts_with('"') && inner_trim.ends_with('"')
+                        && inner_trim.len() >= 2
+                    {
+                        &inner_trim[1..inner_trim.len() - 1]
+                    } else {
+                        inner_trim
+                    };
+                    if is_sub {
+                        output.push_str("#sub[");
+                        output.push_str(content);
+                        output.push(']');
+                    } else {
+                        output.push_str("#super[");
+                        output.push_str(content);
+                        output.push(']');
+                    }
+                } else {
+                    output.push('$');
+                    output.push_str(&cleaned);
+                    output.push('$');
+                }
             } else {
                 output.push_str("$ ");
                 output.push_str(&cleaned);
@@ -117,21 +152,10 @@ pub fn convert_curly(conv: &mut LatexConverter, elem: SyntaxElement, output: &mu
         return;
     }
 
-    // Check if it's empty
-    let mut has_content = false;
+    // Process children - empty groups don't need special handling as
+    // they're just used in LaTeX to terminate commands (e.g., \sim{})
     for child in node.children_with_tokens() {
-        match child.kind() {
-            SyntaxKind::TokenWhiteSpace
-            | SyntaxKind::TokenLineBreak
-            | SyntaxKind::TokenLBrace
-            | SyntaxKind::TokenRBrace => {}
-            _ => has_content = true,
-        }
         conv.visit_element(child, output);
-    }
-    // Add zero-width space for empty groups in math mode
-    if !has_content && matches!(conv.state.mode, ConversionMode::Math) {
-        output.push_str("zws ");
     }
 }
 

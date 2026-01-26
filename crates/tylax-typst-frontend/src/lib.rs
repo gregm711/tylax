@@ -167,7 +167,30 @@ fn collect_blocks(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Vec<Block> {
                 i += 1;
             }
             SyntaxKind::FuncCall => {
-                if let Some(page) = maybe_page_block(&child, losses) {
+                // Try math.equation FIRST before any other handlers
+                if let Some(mut block) = maybe_math_equation_block(&child, losses) {
+                    // Check for trailing label
+                    if let Block::MathBlock(ref mut math) = &mut block {
+                        if math.label.is_none() {
+                            let mut lookahead = i + 1;
+                            while lookahead < children.len()
+                                && matches!(children[lookahead].kind(), SyntaxKind::Space)
+                            {
+                                lookahead += 1;
+                            }
+                            if lookahead < children.len()
+                                && children[lookahead].kind() == SyntaxKind::Label
+                            {
+                                if let Some(lab) = extract_label_text(&children[lookahead]) {
+                                    math.label = Some(lab);
+                                    i = lookahead;
+                                }
+                            }
+                        }
+                    }
+                    flush_paragraph(&mut blocks, &mut current_inline);
+                    blocks.push(block);
+                } else if let Some(page) = maybe_page_block(&child, losses) {
                     flush_paragraph(&mut blocks, &mut current_inline);
                     if !blocks.is_empty() && !last_is_pagebreak(&blocks) {
                         blocks.push(Block::Paragraph(vec![Inline::RawLatex(
@@ -1015,6 +1038,90 @@ fn maybe_box_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Block> {
     Some(Block::Box(BoxBlock { blocks }))
 }
 
+/// Handle #math.equation(block: true)[$ ... $] as a block-level equation
+fn maybe_math_equation_block(node: &SyntaxNode, _losses: &mut Vec<Loss>) -> Option<Block> {
+    let func_name = get_func_call_name(node)?;
+    // Check for both "math.equation" and just "equation"
+    if func_name != "math.equation" && func_name != "equation" {
+        return None;
+    }
+
+    // Check if block: true is set (also accept any math.equation as block for now)
+    let mut is_block = true; // Default to true for all math.equation calls
+    if let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) {
+        for child in args.children() {
+            if child.kind() == SyntaxKind::Named {
+                let key = extract_named_key(&child).unwrap_or_default();
+                if key == "block" {
+                    if let Some(value) = extract_named_value_node(&child) {
+                        is_block = value.text().trim() != "false";
+                    }
+                }
+            }
+        }
+    }
+
+    if !is_block {
+        return None;
+    }
+
+    // Recursively find Math/Equation node in the AST and extract content
+    fn find_math_content(node: &SyntaxNode) -> Option<String> {
+        // Equation is the $ ... $ block
+        if node.kind() == SyntaxKind::Equation {
+            // Get full text and strip $ delimiters
+            let full_text = collect_all_text(node);
+            let trimmed = full_text.trim();
+            // Strip $ delimiters
+            if trimmed.starts_with('$') && trimmed.ends_with('$') && trimmed.len() > 2 {
+                return Some(trimmed[1..trimmed.len() - 1].trim().to_string());
+            }
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        for child in node.children() {
+            if let Some(c) = find_math_content(&child) {
+                return Some(c);
+            }
+        }
+        None
+    }
+
+    // Recursively collect ALL text from a node tree
+    fn collect_all_text(node: &SyntaxNode) -> String {
+        let mut result = String::new();
+        collect_text_recursive(node, &mut result);
+        result
+    }
+
+    fn collect_text_recursive(node: &SyntaxNode, out: &mut String) {
+        // For leaf nodes or nodes with direct text, use the text
+        let direct_text = node.text().to_string();
+        let has_children = node.children().next().is_some();
+
+        if !has_children {
+            out.push_str(&direct_text);
+        } else {
+            for child in node.children() {
+                collect_text_recursive(&child, out);
+            }
+        }
+    }
+
+    // Extract math content from the function call
+    let math_content = find_math_content(node)?;
+
+    if math_content.is_empty() {
+        return None;
+    }
+
+    Some(Block::MathBlock(MathBlock {
+        content: math_content,
+        label: None,
+    }))
+}
+
 fn maybe_columns_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Block> {
     let func_name = get_func_call_name(node)?;
     if func_name != "columns" {
@@ -1201,6 +1308,16 @@ fn parse_table_from_func_call(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Opti
                 });
             }
             SyntaxKind::FuncCall => {
+                // Skip table structural elements that aren't data cells
+                if let Some(func_name) = get_func_call_name(&child) {
+                    if matches!(
+                        func_name.as_str(),
+                        "table.hline" | "table.vline" | "table.footer"
+                    ) {
+                        // Skip layout directives - they don't contribute data cells
+                        continue;
+                    }
+                }
                 // If it's table.cell(...) just capture its content block as a cell.
                 if let Some(header_cells) = extract_table_header_cells(&child, losses) {
                     cells.extend(header_cells);
