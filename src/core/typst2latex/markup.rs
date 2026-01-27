@@ -702,7 +702,8 @@ pub fn convert_func_call_markup(node: &SyntaxNode, ctx: &mut ConvertContext) {
         return;
     }
 
-    let func_name = children[0].text().to_string();
+    // Get the full function name, handling FieldAccess like math.equation
+    let func_name = get_func_call_name(children[0]);
 
     // Check if this is a math function that needs $ wrapping
     if is_math_func_in_markup(&func_name) {
@@ -740,8 +741,13 @@ pub fn convert_func_call_markup(node: &SyntaxNode, ctx: &mut ConvertContext) {
             }
         }
     } else {
-        // Unknown function, try to output content
-        convert_func_args_text(&children, ctx);
+        // Check for module functions (math.equation, etc.) before falling through
+        if func_name.starts_with("math.") || func_name.starts_with("table.") {
+            handle_special_markup_func(&func_name, &children, ctx);
+        } else {
+            // Unknown function, try to output content
+            convert_func_args_text(&children, ctx);
+        }
     }
 
     ctx.last_token = TokenType::Command;
@@ -947,10 +953,124 @@ fn handle_special_markup_func(func_name: &str, children: &[&SyntaxNode], ctx: &m
             }
         }
 
+        // Math module functions
+        "math.equation" => {
+            // Display equation environment
+            convert_math_equation_to_latex(children, ctx, true);
+        }
+
+        "math.equation.inline" => {
+            // Inline equation
+            convert_math_equation_to_latex(children, ctx, false);
+        }
+
         _ => {
             // Fallback: just output content
             convert_func_args_text(children, ctx);
         }
+    }
+}
+
+/// Convert math.equation to LaTeX equation environment
+fn convert_math_equation_to_latex(children: &[&SyntaxNode], ctx: &mut ConvertContext, is_block: bool) {
+    // Extract content from the function arguments
+    let mut content_nodes = Vec::new();
+
+    if let Some(args) = children.get(1) {
+        for child in args.children() {
+            match child.kind() {
+                SyntaxKind::ContentBlock | SyntaxKind::Markup | SyntaxKind::Math => {
+                    content_nodes.push(child);
+                }
+                SyntaxKind::Named => {
+                    // Skip named arguments like block: true
+                }
+                SyntaxKind::Comma | SyntaxKind::LeftParen | SyntaxKind::RightParen => {
+                    // Skip syntax elements
+                }
+                _ => {
+                    // Include other content
+                    if child.kind() != SyntaxKind::Ident {
+                        content_nodes.push(child);
+                    }
+                }
+            }
+        }
+    }
+
+    // Helper to convert math content, recursively finding Math nodes
+    fn convert_equation_content(node: &SyntaxNode, ctx: &mut ConvertContext) {
+        match node.kind() {
+            SyntaxKind::Math => {
+                // For Math nodes, convert the inner content directly (skip $ delimiters)
+                for child in node.children() {
+                    if child.kind() != SyntaxKind::Dollar {
+                        convert_math_node(&child, ctx);
+                    }
+                }
+            }
+            SyntaxKind::ContentBlock | SyntaxKind::Markup | SyntaxKind::Code => {
+                // Recurse into content blocks to find Math nodes
+                for child in node.children() {
+                    if child.kind() != SyntaxKind::LeftBracket
+                        && child.kind() != SyntaxKind::RightBracket
+                        && child.kind() != SyntaxKind::LeftBrace
+                        && child.kind() != SyntaxKind::RightBrace
+                    {
+                        convert_equation_content(&child, ctx);
+                    }
+                }
+            }
+            SyntaxKind::Space | SyntaxKind::Parbreak | SyntaxKind::Linebreak => {
+                // Preserve whitespace
+                ctx.push(" ");
+            }
+            SyntaxKind::Dollar => {
+                // Skip dollar signs - we're already in math mode
+            }
+            SyntaxKind::Text => {
+                // Text content in equation context
+                let text = node.text();
+                // Skip dollar signs that might appear as text
+                let text_str = text.as_ref();
+                if text_str != "$" && !text_str.trim().is_empty() {
+                    // Also filter out any remaining $ characters
+                    let filtered: String = text_str.chars().filter(|c| *c != '$').collect();
+                    if !filtered.is_empty() {
+                        ctx.push(&filtered);
+                    }
+                }
+            }
+            _ => {
+                // For other node types, use the math converter if in math mode
+                if ctx.in_math {
+                    convert_math_node(node, ctx);
+                } else {
+                    convert_markup_node(node, ctx);
+                }
+            }
+        }
+    }
+
+    if is_block {
+        // Display equation
+        ctx.ensure_paragraph_break();
+        ctx.push("\\begin{align}\n");
+        ctx.in_math = true;
+        for node in &content_nodes {
+            convert_equation_content(node, ctx);
+        }
+        ctx.in_math = false;
+        ctx.push("\n\\end{align}");
+    } else {
+        // Inline equation
+        ctx.push("$");
+        ctx.in_math = true;
+        for node in &content_nodes {
+            convert_equation_content(node, ctx);
+        }
+        ctx.in_math = false;
+        ctx.push("$");
     }
 }
 

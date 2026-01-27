@@ -1457,11 +1457,19 @@ impl MiniEval {
         let target = access.target();
         let field = access.field().get().to_string();
 
-        // Check for calc.xxx pattern
+        // Check for module.xxx patterns (calc, math, etc.)
         if let ast::Expr::Ident(ident) = &target {
-            if ident.get().as_str() == "calc" {
-                let (pos_args, _) = self.eval_args(args)?;
-                return call_calc(&field, pos_args);
+            let module_name = ident.get().as_str();
+            match module_name {
+                "calc" => {
+                    let (pos_args, _) = self.eval_args(args)?;
+                    return call_calc(&field, pos_args);
+                }
+                "math" => {
+                    // math module functions like math.equation, math.vec, etc.
+                    return self.eval_math_module_call(&field, args);
+                }
+                _ => {}
             }
         }
 
@@ -1488,6 +1496,78 @@ impl MiniEval {
 
         // Regular method call
         call_method(&target_value, &field, pos_args)
+    }
+
+    /// Handle calls to the math module (math.equation, math.vec, etc.)
+    fn eval_math_module_call(&mut self, func_name: &str, args: ast::Args) -> EvalResult<Value> {
+        let (pos_args, named_args) = self.eval_args(args)?;
+
+        match func_name {
+            "equation" => {
+                // math.equation(block: true)[content] -> equation environment
+                // The content is in the trailing content block, passed as a positional arg
+                let is_block = named_args
+                    .get("block")
+                    .map(|v| v.as_bool().unwrap_or(false))
+                    .unwrap_or(false);
+
+                // Extract math content from the positional argument
+                // The content should be a Value::Content containing ContentNode::Math
+                let math_content = if let Some(Value::Content(nodes)) = pos_args.first() {
+                    // Find the first Math node and extract its content
+                    let mut content = String::new();
+                    for node in nodes {
+                        match node {
+                            ContentNode::Math {
+                                content: c,
+                                block: _,
+                            } => {
+                                // Use the inner math content
+                                content.push_str(c);
+                            }
+                            ContentNode::Text(t) => {
+                                // Text content - append as-is
+                                content.push_str(t);
+                            }
+                            ContentNode::Space => {
+                                content.push(' ');
+                            }
+                            _ => {
+                                // For other content, try to convert to string
+                                content.push_str(&node.to_typst());
+                            }
+                        }
+                    }
+                    content
+                } else {
+                    // Fallback: convert all args to string
+                    pos_args
+                        .iter()
+                        .map(|v| v.display())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+
+                // Create a proper Math content node
+                Ok(Value::Content(vec![ContentNode::Math {
+                    content: math_content,
+                    block: is_block,
+                }]))
+            }
+            // Other math module functions - pass through as unknown function calls
+            _ => Ok(Value::Content(vec![ContentNode::FuncCall {
+                name: format!("math.{}", func_name),
+                args: pos_args
+                    .into_iter()
+                    .map(super::value::Arg::Pos)
+                    .chain(
+                        named_args
+                            .into_iter()
+                            .map(|(k, v)| super::value::Arg::Named(k, v)),
+                    )
+                    .collect(),
+            }])),
+        }
     }
 
     /// Evaluate function arguments.
