@@ -532,8 +532,23 @@ fn builtin_counter(args: Vec<Value>) -> EvalResult<Value> {
     match args.as_slice() {
         [Value::Label(l)] => Ok(Value::Counter(Counter::Label(l.clone()))),
         [Value::Str(s)] => Ok(Value::Counter(Counter::Custom(s.clone()))),
+        // Handle element types like heading, figure, etc. passed to counter()
+        [Value::Func(closure)] => {
+            // Extract element name from closure (e.g., "<builtin:heading>" -> "heading")
+            if let Some(name) = &closure.name {
+                let elem_name = name
+                    .strip_prefix("<builtin:")
+                    .and_then(|s| s.strip_suffix(">"))
+                    .unwrap_or(name);
+                Ok(Value::Counter(Counter::Selector(elem_name.to_string())))
+            } else {
+                Err(EvalError::argument(
+                    "counter expects element type, label, or string key".to_string(),
+                ))
+            }
+        }
         _ => Err(EvalError::argument(
-            "counter expects label or string key".to_string(),
+            "counter expects element type, label, or string key".to_string(),
         )),
     }
 }
