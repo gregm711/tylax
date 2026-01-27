@@ -398,6 +398,9 @@ impl MiniEval {
             | ast::Expr::Float(_)
             | ast::Expr::Str(_) => self.eval_literal(expr),
 
+            // Numeric values with units (95%, 1em, 12pt, etc.)
+            ast::Expr::Numeric(num) => self.eval_numeric(num),
+
             // ================================================================
             // Identifiers
             // ================================================================
@@ -520,6 +523,28 @@ impl MiniEval {
             ast::Expr::Float(f) => Ok(Value::Float(f.get())),
             ast::Expr::Str(s) => Ok(Value::Str(s.get().to_string())),
             _ => unreachable!("eval_literal called with non-literal"),
+        }
+    }
+
+    /// Evaluate numeric values with units (percentages, lengths, angles, etc.).
+    fn eval_numeric(&self, num: ast::Numeric) -> EvalResult<Value> {
+        use super::value::{Length, LengthUnit};
+        use typst_syntax::ast::Unit;
+        let (value, unit) = num.get();
+        match unit {
+            // Percentage -> Ratio (95% -> 0.95)
+            Unit::Percent => Ok(Value::Ratio(value / 100.0)),
+            // Lengths -> Length value
+            Unit::Pt => Ok(Value::Length(Length::exact(value, LengthUnit::Pt))),
+            Unit::Mm => Ok(Value::Length(Length::exact(value, LengthUnit::Mm))),
+            Unit::Cm => Ok(Value::Length(Length::exact(value, LengthUnit::Cm))),
+            Unit::In => Ok(Value::Length(Length::exact(value, LengthUnit::In))),
+            Unit::Em => Ok(Value::Length(Length::exact(value, LengthUnit::Em))),
+            // Angles -> Angle value (store in radians)
+            Unit::Rad => Ok(Value::Angle(value)),
+            Unit::Deg => Ok(Value::Angle(value * std::f64::consts::PI / 180.0)),
+            // Fractions -> Fraction value
+            Unit::Fr => Ok(Value::Fraction(value)),
         }
     }
 
