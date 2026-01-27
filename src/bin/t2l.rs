@@ -648,6 +648,7 @@ fn is_macro_expansion_blacklisted_package(name: &str) -> bool {
         || lower.starts_with("icml")
         || lower.starts_with("mlsys")
         || lower.starts_with("neurips")
+        || lower.starts_with("nips") // older NeurIPS style files (nips_2018, etc.)
         || lower.starts_with("aaai")
         || lower.starts_with("cvpr")
         || lower.starts_with("jmlr")
