@@ -15,8 +15,8 @@ use super::library::{call_builtin, call_calc, call_method, BuiltinResult};
 use super::ops;
 use super::scope::Scopes;
 use super::value::{
-    Alignment, Arguments, Closure, ContentNode, Direction, EvalError, EvalErrorKind, EvalResult,
-    HorizAlign, Selector, ShowRule, SourceSpan, Value, VertAlign,
+    Alignment, Arguments, Closure, Color, ContentNode, Direction, EvalError, EvalErrorKind,
+    EvalResult, HorizAlign, Selector, ShowRule, SourceSpan, Value, VertAlign,
 };
 use super::vfs::{NoopVfs, VirtualFileSystem};
 
@@ -854,9 +854,51 @@ impl MiniEval {
             "ttb" => Ok(Value::Direction(Direction::Ttb)),
             "btt" => Ok(Value::Direction(Direction::Btt)),
 
+            // Built-in color names
+            "black" => Ok(Value::Color(Color::named("black"))),
+            "white" => Ok(Value::Color(Color::named("white"))),
+            "red" => Ok(Value::Color(Color::named("red"))),
+            "green" => Ok(Value::Color(Color::named("green"))),
+            "blue" => Ok(Value::Color(Color::named("blue"))),
+            "yellow" => Ok(Value::Color(Color::named("yellow"))),
+            "cyan" => Ok(Value::Color(Color::named("cyan"))),
+            "magenta" => Ok(Value::Color(Color::named("magenta"))),
+            "gray" => Ok(Value::Color(Color::named("gray"))),
+            "grey" => Ok(Value::Color(Color::named("gray"))),
+            "orange" => Ok(Value::Color(Color::named("orange"))),
+            "purple" => Ok(Value::Color(Color::named("purple"))),
+            "navy" => Ok(Value::Color(Color::named("navy"))),
+            "teal" => Ok(Value::Color(Color::named("teal"))),
+            "aqua" => Ok(Value::Color(Color::named("aqua"))),
+            "maroon" => Ok(Value::Color(Color::named("maroon"))),
+            "olive" => Ok(Value::Color(Color::named("olive"))),
+            "silver" => Ok(Value::Color(Color::named("silver"))),
+            "fuchsia" => Ok(Value::Color(Color::named("fuchsia"))),
+            "lime" => Ok(Value::Color(Color::named("lime"))),
+
             // Builtin functions - return as a function value
             _ if self.is_builtin_function(name) => {
                 Ok(Value::Func(Arc::new(self.create_builtin_wrapper(name))))
+            }
+
+            // Built-in element types (for show rules and selectors)
+            // Return as a Func so .where() method works
+            "heading" | "text" | "figure" | "table" | "raw" | "list" | "enum" | "terms"
+            | "quote" | "footnote" | "bibliography" | "outline" | "par" | "line" | "rect"
+            | "circle" | "ellipse" | "path" | "polygon" | "image" | "box" | "block" | "grid"
+            | "stack" | "columns" | "place" | "align" | "pad" | "move" | "scale" | "rotate"
+            | "hide" | "repeat" | "link" | "ref" | "cite" | "page" | "pagebreak" | "colbreak"
+            | "linebreak" | "parbreak" | "strong" | "emph" | "highlight" | "underline"
+            | "overline" | "strike" | "smallcaps" | "sub" | "super" | "math" | "equation" => {
+                // Return as a Func with the element name so .where() method works
+                Ok(Value::Func(Arc::new(Closure {
+                    name: Some(format!("<builtin:{}>", name)),
+                    params: Vec::new(),
+                    defaults: Vec::new(),
+                    sink: None,
+                    body_source: String::new(),
+                    captures: IndexMap::new(),
+                })))
             }
 
             // Unknown - error with span
@@ -1457,7 +1499,7 @@ impl MiniEval {
         let target = access.target();
         let field = access.field().get().to_string();
 
-        // Check for module.xxx patterns (calc, math, etc.)
+        // Check for module.xxx patterns (calc, math, table, etc.)
         if let ast::Expr::Ident(ident) = &target {
             let module_name = ident.get().as_str();
             match module_name {
@@ -1468,6 +1510,30 @@ impl MiniEval {
                 "math" => {
                     // math module functions like math.equation, math.vec, etc.
                     return self.eval_math_module_call(&field, args);
+                }
+                "table" | "heading" | "figure" | "text" | "page" | "par" | "list" | "enum"
+                | "grid" | "stack" | "box" | "block" | "rect" | "circle" | "ellipse" | "line"
+                | "path" | "polygon" | "image" | "raw" | "quote" | "link" | "ref" | "cite"
+                | "footnote" | "bibliography" | "outline" | "numbering" | "counter" | "state"
+                | "selector" | "locate" | "query" | "context" | "style" | "measure" | "layout"
+                | "align" | "place" | "move" | "scale" | "rotate" | "hide" | "repeat"
+                | "colbreak" | "pagebreak" | "linebreak" | "parbreak" | "metadata" | "terms"
+                | "strong" | "emph" | "highlight" | "underline" | "overline" | "strike"
+                | "smallcaps" | "sub" | "super" | "lorem" => {
+                    // Common Typst modules - pass through as FuncCall for markup converter
+                    let (pos_args, named_args) = self.eval_args(args)?;
+                    return Ok(Value::Content(vec![ContentNode::FuncCall {
+                        name: format!("{}.{}", module_name, field),
+                        args: pos_args
+                            .into_iter()
+                            .map(super::value::Arg::Pos)
+                            .chain(
+                                named_args
+                                    .into_iter()
+                                    .map(|(k, v)| super::value::Arg::Named(k, v)),
+                            )
+                            .collect(),
+                    }]));
                 }
                 _ => {}
             }
