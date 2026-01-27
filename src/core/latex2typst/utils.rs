@@ -3336,6 +3336,36 @@ pub fn convert_caption_text(text: &str) -> String {
                         }
                     }
                 }
+                // Reference commands: \ref{label} -> @label
+                "ref" | "autoref" | "cref" | "Cref" | "figref" | "tabref" | "secref" => {
+                    if let Some(content) = arg_content {
+                        let label = sanitize_label(content.trim());
+                        if !label.is_empty() {
+                            result.push_str("@");
+                            result.push_str(&label);
+                        }
+                    }
+                }
+                "eqref" => {
+                    if let Some(content) = arg_content {
+                        let label = sanitize_label(content.trim());
+                        if !label.is_empty() {
+                            result.push_str("(@");
+                            result.push_str(&label);
+                            result.push(')');
+                        }
+                    }
+                }
+                "pageref" => {
+                    if let Some(content) = arg_content {
+                        let label = sanitize_label(content.trim());
+                        if !label.is_empty() {
+                            // Typst doesn't have direct pageref, output as regular ref
+                            result.push_str("@");
+                            result.push_str(&label);
+                        }
+                    }
+                }
                 _ => {
                     // For unknown commands, skip the backslash (don't output raw LaTeX)
                     // If there's an argument, output its content

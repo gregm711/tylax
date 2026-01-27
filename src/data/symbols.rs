@@ -838,6 +838,16 @@ lazy_static! {
         s.insert("text");
         s.insert("mbox");
         s.insert("hbox");
+        // Reference commands
+        s.insert("ref");
+        s.insert("autoref");
+        s.insert("cref");
+        s.insert("Cref");
+        s.insert("eqref");
+        s.insert("pageref");
+        s.insert("figref");
+        s.insert("tabref");
+        s.insert("secref");
         s
     };
 }
