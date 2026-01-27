@@ -4720,12 +4720,38 @@ impl LatexConverter {
         content
     }
 
-    /// Visit environment content (excluding begin/end)
+    /// Visit environment content (excluding begin/end and optional arguments)
     pub fn visit_env_content(&mut self, node: &SyntaxNode, output: &mut String) {
+        let mut skip_bracket_content = false;
+        let mut after_begin = false;
+
         for child in node.children_with_tokens() {
             match child.kind() {
-                SyntaxKind::ItemBegin | SyntaxKind::ItemEnd => continue,
-                _ => self.visit_element(child, output),
+                SyntaxKind::ItemBegin => {
+                    after_begin = true;
+                    continue;
+                }
+                SyntaxKind::ItemEnd => continue,
+                // Skip optional [bracket] arguments immediately after \begin{env}
+                SyntaxKind::TokenLBracket if after_begin => {
+                    skip_bracket_content = true;
+                    continue;
+                }
+                SyntaxKind::TokenRBracket if skip_bracket_content => {
+                    skip_bracket_content = false;
+                    continue;
+                }
+                _ if skip_bracket_content => {
+                    // Skip content inside the optional bracket argument
+                    continue;
+                }
+                _ => {
+                    // Any non-bracket content ends the after_begin window
+                    if after_begin && child.kind() != SyntaxKind::TokenWhiteSpace {
+                        after_begin = false;
+                    }
+                    self.visit_element(child, output);
+                }
             }
         }
     }
