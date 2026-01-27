@@ -848,6 +848,10 @@ lazy_static! {
         s.insert("figref");
         s.insert("tabref");
         s.insert("secref");
+        // Color commands
+        s.insert("textcolor");
+        s.insert("color");
+        s.insert("colorbox");
         s
     };
 }

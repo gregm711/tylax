@@ -3366,6 +3366,31 @@ pub fn convert_caption_text(text: &str) -> String {
                         }
                     }
                 }
+                // Color commands: \textcolor{color}{text} -> #text(fill: color)[text]
+                "textcolor" | "color" => {
+                    // arg_content has the color, need to read the second argument
+                    let text_content = read_braced(&mut chars).unwrap_or_default();
+                    let color = arg_content.unwrap_or_default();
+                    if !text_content.is_empty() {
+                        result.push_str("#text(fill: ");
+                        result.push_str(color.trim());
+                        result.push_str(")[");
+                        result.push_str(&convert_caption_text(&text_content));
+                        result.push(']');
+                    }
+                }
+                "colorbox" => {
+                    // \colorbox{color}{text} -> #box(fill: color)[text]
+                    let text_content = read_braced(&mut chars).unwrap_or_default();
+                    let color = arg_content.unwrap_or_default();
+                    if !text_content.is_empty() {
+                        result.push_str("#box(fill: ");
+                        result.push_str(color.trim());
+                        result.push_str(")[");
+                        result.push_str(&convert_caption_text(&text_content));
+                        result.push(']');
+                    }
+                }
                 _ => {
                     // For unknown commands, skip the backslash (don't output raw LaTeX)
                     // If there's an argument, output its content
