@@ -655,6 +655,9 @@ fn is_macro_expansion_blacklisted_package(name: &str) -> bool {
         || lower.starts_with("tmlr")
         || lower.starts_with("rlj")
         || lower.starts_with("rlc")
+        || lower.starts_with("colm") // COLM conference
+        || lower == "natbib" // complex citation macros with many \expandafter
+        || lower == "fancyhdr" // header/footer macros
         || lower.starts_with("bxcoloremoji")
         || lower == "cjkutf8"
 }
