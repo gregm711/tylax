@@ -129,6 +129,7 @@ pub fn render_article_preamble(hints: &PreambleHints) -> String {
     out.push_str("\\usepackage{amsmath,amssymb}\n");
     out.push_str("\\usepackage{graphicx}\n");
     out.push_str("\\usepackage{hyperref}\n");
+    out.push_str("\\hypersetup{hidelinks}\n");
     out.push_str("\\usepackage[table]{xcolor}\n");
     out.push_str("\\usepackage{booktabs}\n");
     out.push_str("\\usepackage{enumitem}\n");

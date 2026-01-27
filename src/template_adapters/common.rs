@@ -181,6 +181,29 @@ fn extract_markup_text(node: &SyntaxNode) -> String {
                 out.push_str(child.text().trim_matches('"'));
             }
             SyntaxKind::Space => out.push(' '),
+            SyntaxKind::Shorthand => {
+                // Handle Typst shorthand like -- (en-dash), --- (em-dash), ... (ellipsis)
+                let text = child.text();
+                let text_str = text.as_str();
+                match text_str {
+                    "--" => out.push_str("--"),
+                    "---" => out.push_str("---"),
+                    "..." => out.push_str("..."),
+                    _ => out.push_str(text_str),
+                }
+            }
+            SyntaxKind::SmartQuote => {
+                // Handle smart quotes - preserve as ASCII quotes for LaTeX
+                let text = child.text();
+                let text_str = text.as_str();
+                if text_str.contains('\'') {
+                    out.push('\'');
+                } else if text_str.contains('"') {
+                    out.push('"');
+                } else {
+                    out.push_str(text_str);
+                }
+            }
             _ => out.push_str(&extract_markup_text(&child)),
         }
     }
@@ -490,4 +513,24 @@ fn parse_affl_lines(node: &SyntaxNode, lets: &HashMap<String, SyntaxNode>) -> Ve
             .map(|v| vec![v])
             .unwrap_or_default(),
     }
+}
+
+/// Extract bibliography path from a `bibliography("refs.bib")` function call node.
+pub fn extract_bibliography_path(node: &SyntaxNode) -> Option<String> {
+    // Handle bibliography("refs.bib") function call
+    if node.kind() == SyntaxKind::FuncCall {
+        if let Some(name) = func_call_name(node) {
+            if name == "bibliography" {
+                // Find the Args node and extract the first string argument
+                if let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) {
+                    for child in args.children() {
+                        if child.kind() == SyntaxKind::Str {
+                            return Some(child.text().trim_matches('"').to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }

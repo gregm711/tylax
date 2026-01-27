@@ -1075,7 +1075,9 @@ fn convert_math_content(input: &str) -> String {
         if input[i..].starts_with('"') {
             if let Some(end_quote) = input[i + 1..].find('"') {
                 let text_content = &input[i + 1..i + 1 + end_quote];
-                out.push_str(&format!("\\text{{{}}}", text_content));
+                // Unescape Typst string escapes (e.g., \@ → @, \_ → _)
+                let unescaped = unescape_typst_string(text_content);
+                out.push_str(&format!("\\text{{{}}}", unescaped));
                 i = i + 1 + end_quote + 1;
                 continue;
             }
@@ -1592,9 +1594,76 @@ fn is_named_arg_like(input: &str) -> bool {
 fn strip_quotes(input: &str) -> String {
     let trimmed = input.trim();
     if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
-        return trimmed[1..trimmed.len() - 1].to_string();
+        let inner = &trimmed[1..trimmed.len() - 1];
+        return unescape_typst_string(inner);
     }
     trimmed.to_string()
+}
+
+/// Unescape Typst string escape sequences back to their original characters.
+/// Handles: \@ → @, \_ → _, \# → #, \$ → $, \* → *, \` → `, \< → <, \> → >,
+///          \\ → \, \" → ", \n → newline, \t → tab
+fn unescape_typst_string(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.peek() {
+                Some('@') => {
+                    chars.next();
+                    out.push('@');
+                }
+                Some('_') => {
+                    chars.next();
+                    out.push('_');
+                }
+                Some('#') => {
+                    chars.next();
+                    out.push('#');
+                }
+                Some('$') => {
+                    chars.next();
+                    out.push('$');
+                }
+                Some('*') => {
+                    chars.next();
+                    out.push('*');
+                }
+                Some('`') => {
+                    chars.next();
+                    out.push('`');
+                }
+                Some('<') => {
+                    chars.next();
+                    out.push('<');
+                }
+                Some('>') => {
+                    chars.next();
+                    out.push('>');
+                }
+                Some('\\') => {
+                    chars.next();
+                    out.push('\\');
+                }
+                Some('"') => {
+                    chars.next();
+                    out.push('"');
+                }
+                Some('n') => {
+                    chars.next();
+                    out.push('\n');
+                }
+                Some('t') => {
+                    chars.next();
+                    out.push('\t');
+                }
+                _ => out.push(ch),
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn match_token_at(input: &str, idx: usize, token: &str) -> bool {

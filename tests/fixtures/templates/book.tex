@@ -1,30 +1,23 @@
-\documentclass[11pt,letterpaper]{article}
-\usepackage[top=1in,bottom=1in]{geometry}
-\usepackage{amsmath,amssymb}
+\documentclass{book}
 \usepackage{graphicx}
-\usepackage{hyperref}
-\usepackage[table]{xcolor}
-\usepackage{booktabs}
-\usepackage{enumitem}
-\usepackage{multirow}
-\usepackage{multicol}
-\usepackage{array}
-\usepackage{textcomp}
 \usepackage{float}
-\usepackage{titlesec}
-\titleformat{\section}{\bfseries\fontsize{14.0pt}{16.8pt}\selectfont}{\thesection}{1em}{}
-\titlespacing*{\section}{0pt}{1.5em}{0.5em}
-\titleformat{\subsection}{\bfseries\fontsize{12.0pt}{14.4pt}\selectfont}{\thesubsection}{1em}{}
-\titlespacing*{\subsection}{0pt}{1em}{0.3em}
-\usepackage{newcomputermodern}
-\usepackage{setspace}
-\setstretch{1.38}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{bm}
 \definecolor{accent}{HTML}{C9A227}
 \definecolor{primary}{HTML}{1E3A5F}
-\setlength{\parindent}{1.5em}
-\providecommand{\textsubscript}[1]{$_{\text{#1}}$}
 \begin{document}
-
+\frontmatter
+\title{The Art of Problem Solving}
+\author{Your Name}
+\maketitle
+\begin{center}
+\emph{To all creative thinkers everywhere.}
+\end{center}
+\begin{center}
+Publisher Name, City, Year
+\end{center}
+\mainmatter
 \par\vspace{3in}
 
 \begin{center}
@@ -42,137 +35,71 @@
 \par\vspace{2in}
 {\large Your Name}
 \par\vspace{3in}
-
 \par\vspace{0.5em}
 {\small Publisher Name \\ City, Year}
 \end{center}
 
 \newpage
 
-\par\vspace{\fill}
-
-Copyright © 2024 by Your Name
-
-All rights reserved. No part of this publication may be reproduced, distributed, or transmitted in any form or by any means, including photocopying, recording, or other electronic or mechanical methods, without the prior written permission of the publisher.
-
-First Edition: November 2024
-
-ISBN: 978-0-000-00000-0
-
-Published by Publisher Name \\ 123 Publishing Street \\ City, State 12345
-
-Printed in the United States of America
-
-10 9 8 7 6 5 4 3 2 1
-
-\newpage
-
-\par\vspace{1in}
+\par\vspace{2in}
 
 \begin{center}
-{\LARGE \textcolor{primary}{\textbf{Contents}}}
+To all creative thinkers everywhere.
 \end{center}
-
-\par\vspace{1em}
-
-\begingroup
-\setlength{\extrarowheight}{0.8em}
-\begin{tabular}{cc}
-\textbf{Preface} & vii \\
-\textbf{Acknowledgments} & ix \\
- &  \\
-\textbf{Chapter 1: The Nature of Problems} & 1 \\
-What Is a Problem? & 3 \\
-Types of Problems & 8 \\
-The Problem-Solving Mindset & 15 \\
- &  \\
-\textbf{Chapter 2: Tools for Thinking} & 23 \\
-Mental Models & 25 \\
-Frameworks and Heuristics & 34 \\
-When Tools Fail & 42 \\
- &  \\
-\textbf{Chapter 3: Practice and Mastery} & 51 \\
-Deliberate Practice & 53 \\
-Learning from Failure & 61 \\
-Building Expertise & 68 \\
- &  \\
-\textbf{Bibliography} & 75 \\
-\textbf{Index} & 79 \\
-\end{tabular}
-\endgroup
 
 \newpage
 
-\par\vspace{1in}
-
-\begin{center}
-{\LARGE \textcolor{primary}{\textbf{Preface}}}
-\end{center}
+{\LARGE \textbf{Contents}}
 
 \par\vspace{1em}
 
-This book began as a series of notes I kept while learning to solve problems—not just mathematical puzzles, but the everyday challenges that require clear thinking and creative approaches. Over the years, those notes grew into lectures, then workshops, and finally this volume.
-
-The goal of this book is not to provide answers, but to develop the capacity for finding them. Problem-solving is a skill, and like any skill, it can be learned and improved through practice and reflection.
-
-I have tried to keep the examples diverse, drawing from mathematics, science, business, and daily life. The principles, I believe, are universal. A good problem-solver in one domain tends to be a good problem-solver in others, not because the problems are the same, but because the habits of mind transfer.
-
-\par\vspace{1em}
-
-\begin{flushright}
-\textit{Your Name} \\ \textit{November 2024}
-\end{flushright}
+Chapter 1: Introduction 1 Chapter 2: Fundamentals 15 Chapter 3: Advanced Techniques 45
 
 \newpage
 
-\{ pagebreak(weak: true) v(2in) if number != none \{ text(size: 14pt, fill: primary, weight: "regular", tracking: 0.2em)[CHAPTER 1] v(0.5em) \} text(size: 28pt, weight: "bold", fill: primary)[The Nature of Problems] v(0.5em) line(length: 2in, stroke: 2pt + accent) v(1in) \}
+\section{Chapter 1: Introduction}
 
-\{ align(right)[
+Welcome to this comprehensive guide on problem solving. In this book, you will learn fundamental techniques and strategies for approaching complex problems.
 
+\subsection{Why Problem Solving Matters}
 
-\par\vspace{0.3em}
-—
+Problem solving is a critical skill in every domain. Whether you're a scientist, engineer, artist, or business professional, the ability to analyze and solve problems effectively can set you apart.
 
-] v(1.5em) \}
+\subsection{Overview of This Book}
 
-\{ set par(first-line-indent: 0em) grid( columns: (auto, 1fr), column-gutter: 8pt, text(size: 48pt, weight: "bold", fill: primary)[E], body ) \}
-
-What distinguishes an expert problem-solver from a novice is not necessarily intelligence or knowledge, though both help. It is a certain way of approaching difficulties: a willingness to sit with uncertainty, to explore multiple paths, and to recognize patterns that connect seemingly unrelated situations.
-
-\section{What Is a Problem?}
-
-At its most basic, a problem is a gap between where we are and where we want to be, combined with uncertainty about how to close that gap. If we knew exactly what to do, it wouldn't be a problem—it would be a task.
-
-This definition has several important implications. First, problems are subjective. What is a problem for one person may be routine for another. A chess grandmaster sees patterns that beginners cannot; what seems like an impossible position to the novice is merely "complicated" to the expert.
-
-\subsection{The Structure of Problems}
-
-Problems have structure, even when that structure is not immediately apparent. Understanding this structure is the first step toward solving them. Most problems contain:
+This book is organized into several chapters, each focusing on different aspects of problem solving:
 
 \begin{itemize}
-  \item \textbf{Initial state}: Where we are now
-  \item \textbf{Goal state}: Where we want to be
-  \item \textbf{Operators}: Actions we can take
-  \item \textbf{Constraints}: Limitations on what we can do
+  \item Chapter 1 introduces the fundamentals
+  \item Chapter 2 covers analytical techniques
+  \item Chapter 3 explores creative approaches
 \end{itemize}
 
-The art of problem-solving often lies in recognizing which of these elements can be changed. Sometimes the best solution involves redefining the goal. Other times, it means finding operators we didn't know existed.
+\newpage
 
-\section{The Problem-Solving Mindset}
+\section{Chapter 2: Fundamentals}
 
-Beyond techniques and frameworks, effective problem-solving requires a particular orientation toward difficulty. This mindset includes:
+This chapter covers the basic building blocks of effective problem solving.
 
-\textbf{Tolerance for ambiguity.} Real problems rarely come with clear instructions. The ability to function effectively while uncertain is perhaps the most valuable problem-solving skill.
+\subsection{Defining the Problem}
 
-\textbf{Comfort with failure.} Most approaches to most problems don't work. This is not a bug but a feature—it's how we learn what doesn't work and narrow in on what does.
+The first step in solving any problem is understanding exactly what you're trying to solve.
 
-\textbf{Persistent curiosity.} Good problem-solvers keep asking questions long after others have accepted the obvious answer. They probe assumptions and explore alternatives.
+\subsection{Breaking Down Complexity}
 
-In the chapters that follow, we will develop both the techniques and the mindset needed to tackle problems of increasing complexity. The journey begins with understanding what we're up against.
+Complex problems can often be decomposed into smaller, more manageable pieces.
 
-\par\vspace{\fill}
+\newpage
 
-\begin{center}
-{\footnotesize \textcolor[HTML]{999}{Made with TypeTeX · typetex.com}}
-\end{center}
+\section{Chapter 3: Advanced Techniques}
+
+Building on the fundamentals, this chapter introduces more sophisticated approaches.
+
+\subsection{Pattern Recognition}
+
+Experienced problem solvers often recognize patterns that others miss.
+
+\subsection{Creative Thinking}
+
+Sometimes the best solutions come from thinking outside conventional boundaries.
 \end{document}

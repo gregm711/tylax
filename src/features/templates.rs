@@ -647,6 +647,24 @@ fn render_author_content(text: &str) -> String {
     }
 }
 
+fn strip_outer_braces(text: &str) -> &str {
+    let trimmed = text.trim();
+    if trimmed.starts_with('{') && trimmed.ends_with('}') && trimmed.len() > 1 {
+        return trimmed[1..trimmed.len() - 1].trim();
+    }
+    trimmed
+}
+
+fn normalize_author_line(line: &str) -> String {
+    let mut cleaned = strip_outer_braces(line).to_string();
+    cleaned = cleaned.replace("\\@", "@");
+    let trimmed = cleaned.trim();
+    if trimmed.contains('@') && !trimmed.contains(' ') && trimmed.contains('.') {
+        return format!("#link(\"mailto:{0}\")[{0}]", trimmed);
+    }
+    trimmed.to_string()
+}
+
 /// Generate title block from metadata
 pub fn generate_title_block(
     title: Option<&str>,
@@ -699,7 +717,8 @@ pub fn generate_title_block(
                     let _ = writeln!(output, "  #text(size: 12pt)[{}]", content);
                 } else {
                     for (idx, (line, spacing)) in lines.iter().enumerate() {
-                        let _ = writeln!(output, "  #text(size: 12pt)[{}]", line);
+                        let rendered = normalize_author_line(line);
+                        let _ = writeln!(output, "  #text(size: 12pt)[{}]", rendered);
                         if idx + 1 < lines.len() {
                             output.push_str("  #linebreak()\n");
                             if let Some(space) = spacing.as_deref() {
@@ -711,8 +730,24 @@ pub fn generate_title_block(
             } else {
                 output.push_str("  #stack(dir: ltr, spacing: 2em,\n");
                 for auth in authors {
-                    let content = render_author_content(auth.trim());
-                    let _ = writeln!(output, "    text(size: 12pt)[{}],", content);
+                    let lines = split_linebreaks(auth.trim());
+                    if lines.len() <= 1 {
+                        let content = render_author_content(auth.trim());
+                        let _ = writeln!(output, "    text(size: 12pt)[{}],", content);
+                    } else {
+                        output.push_str("    block[\n");
+                        for (idx, (line, spacing)) in lines.iter().enumerate() {
+                            let rendered = normalize_author_line(line);
+                            let _ = writeln!(output, "      #text(size: 12pt)[{}]", rendered);
+                            if idx + 1 < lines.len() {
+                                output.push_str("      #linebreak()\n");
+                                if let Some(space) = spacing.as_deref() {
+                                    let _ = writeln!(output, "      #v({})", space);
+                                }
+                            }
+                        }
+                        output.push_str("    ],\n");
+                    }
                 }
                 output.push_str("  )\n");
             }

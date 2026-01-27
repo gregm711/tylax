@@ -55,7 +55,17 @@ pub fn maybe_convert_book(input: &str) -> Option<String> {
     out.push_str("\\documentclass{book}\n");
     out.push_str("\\usepackage{graphicx}\n");
     out.push_str("\\usepackage{float}\n");
+    out.push_str("\\usepackage{xcolor}\n");
     out.push_str("\\usepackage{hyperref}\n");
+    out.push_str("\\usepackage{bm}\n");
+    // Define custom colors from #let bindings
+    for (name, hex) in &hints.colors {
+        out.push_str(&format!(
+            "\\definecolor{{{}}}{{HTML}}{{{}}}\n",
+            name,
+            hex.trim_start_matches('#')
+        ));
+    }
     if hints.uses_amsthm {
         out.push_str("\\usepackage{amsthm}\n");
         out.push_str(&render_amsthm_definitions(&hints));

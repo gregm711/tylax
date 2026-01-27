@@ -95,6 +95,7 @@ pub fn maybe_convert_iclr(input: &str) -> Option<String> {
     out.push_str("\\usepackage{multirow}\n");
     out.push_str("\\usepackage[table]{xcolor}\n");
     out.push_str("\\usepackage{hyperref}\n");
+    out.push_str("\\hypersetup{hidelinks}\n");
     out.push_str("\\usepackage{url}\n");
     out.push_str("\\usepackage{natbib}\n");
     out.push_str("\\ifdefined\\tylaxNoStyle\n");

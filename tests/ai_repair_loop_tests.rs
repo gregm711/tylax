@@ -102,7 +102,8 @@ print("")
     let ai_cmd = format!("python3 {}", script_path.display());
     let output = run_repair(&input_path, &ai_cmd, true);
 
-    assert!(output.contains("== Intro"));
+    // \section in article class produces level 1 heading (=)
+    assert!(output.contains("= Intro"));
     assert!(output.contains("tylax:loss:"));
 }
 

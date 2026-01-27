@@ -632,6 +632,67 @@ pub fn strip_env_stars(input: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
+/// Normalize citation commands with two optional arguments into a single optional argument.
+/// This helps the parser handle natbib-style \citep[pre][post]{key} constructs.
+pub fn normalize_citation_optional_args(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            let mut j = i + 1;
+            while j < bytes.len() && (bytes[j].is_ascii_alphabetic() || bytes[j] == b'*') {
+                j += 1;
+            }
+            if j > i + 1 {
+                let name = &input[i + 1..j];
+                let is_cite = name.starts_with("cite") || name.ends_with("cite");
+                if is_cite {
+                    let mut k = j;
+                    while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                        k += 1;
+                    }
+                    if k < bytes.len() && bytes[k] == b'[' {
+                        if let Some((opt1, end1)) = extract_bracket_arg_at(input, k) {
+                            let mut k2 = end1;
+                            while k2 < bytes.len() && bytes[k2].is_ascii_whitespace() {
+                                k2 += 1;
+                            }
+                            if k2 < bytes.len() && bytes[k2] == b'[' {
+                                if let Some((opt2, end2)) = extract_bracket_arg_at(input, k2) {
+                                    out.extend_from_slice(&bytes[i..j]);
+                                    out.extend_from_slice(&bytes[j..k]);
+                                    let opt1 = opt1.trim();
+                                    let opt2 = opt2.trim();
+                                    let merged = if opt1.is_empty() && opt2.is_empty() {
+                                        String::new()
+                                    } else if opt1.is_empty() {
+                                        opt2.to_string()
+                                    } else if opt2.is_empty() {
+                                        opt1.to_string()
+                                    } else {
+                                        format!("{}; {}", opt1, opt2)
+                                    };
+                                    if !merged.is_empty() {
+                                        out.push(b'[');
+                                        out.extend_from_slice(merged.as_bytes());
+                                        out.push(b']');
+                                    }
+                                    i = end2;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
+}
+
 /// Normalize TeX spacing primitives like \hskip and \kern into \hspace{...}.
 pub fn normalize_spacing_primitives(input: &str) -> String {
     let bytes = input.as_bytes();
@@ -639,12 +700,16 @@ pub fn normalize_spacing_primitives(input: &str) -> String {
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'\\'
-            && (input[i..].starts_with("\\hskip") || input[i..].starts_with("\\kern"))
+            && (input[i..].starts_with("\\hskip")
+                || input[i..].starts_with("\\kern")
+                || input[i..].starts_with("\\vskip"))
         {
-            let cmd_len = if input[i..].starts_with("\\hskip") {
-                "\\hskip".len()
+            let (cmd_len, out_cmd) = if input[i..].starts_with("\\hskip") {
+                ("\\hskip".len(), b"\\hspace{")
+            } else if input[i..].starts_with("\\vskip") {
+                ("\\vskip".len(), b"\\vspace{")
             } else {
-                "\\kern".len()
+                ("\\kern".len(), b"\\hspace{")
             };
             let after = i + cmd_len;
             if after < bytes.len() && bytes[after].is_ascii_alphabetic() {
@@ -665,7 +730,7 @@ pub fn normalize_spacing_primitives(input: &str) -> String {
                 i = after;
                 continue;
             }
-            out.extend_from_slice(b"\\hspace{");
+            out.extend_from_slice(out_cmd);
             out.extend_from_slice(input[len_start..j].as_bytes());
             out.push(b'}');
 
@@ -707,6 +772,30 @@ pub fn normalize_spacing_primitives(input: &str) -> String {
         i += 1;
     }
     String::from_utf8(out).unwrap_or_else(|_| input.to_string())
+}
+
+fn extract_bracket_arg_at(input: &str, start: usize) -> Option<(String, usize)> {
+    let bytes = input.as_bytes();
+    if start >= bytes.len() || bytes[start] != b'[' {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut idx = start;
+    while idx < bytes.len() {
+        match bytes[idx] {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    let content = input[start + 1..idx].to_string();
+                    return Some((content, idx + 1));
+                }
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+    None
 }
 
 /// Normalize unmatched display/math delimiters like \] or \) by turning them into literal
@@ -1624,6 +1713,11 @@ pub fn unescape_latex_monospace(text: &str) -> String {
         };
 
         match next {
+            // Double backslash (\\ in LaTeX) becomes single backslash
+            '\\' => {
+                out.push('\\');
+                chars.next();
+            }
             '{' | '}' | '%' | '#' | '&' | '_' | '$' | '@' => {
                 out.push(next);
                 chars.next();
@@ -1791,9 +1885,29 @@ pub fn escape_at_in_words(input: &str) -> String {
     let chars: Vec<char> = input.chars().collect();
     let len = chars.len();
     let mut i = 0usize;
+    let mut in_string = false;
+    let mut string_escape = false;
 
     while i < len {
         let ch = chars[i];
+        if in_string {
+            out.push(ch);
+            if string_escape {
+                string_escape = false;
+            } else if ch == '\\' {
+                string_escape = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+            out.push(ch);
+            i += 1;
+            continue;
+        }
         if ch == '@' {
             let prev = if i > 0 { Some(chars[i - 1]) } else { None };
             let prev_is_escape = prev == Some('\\');
@@ -1834,6 +1948,7 @@ pub fn normalize_latex_quotes(input: &str) -> String {
     let mut in_code_block = false;
     let mut in_inline_raw = false;
     let mut in_string = false;
+    let mut in_math = false;
 
     for line in input.split_inclusive('\n') {
         let trimmed = line.trim_start();
@@ -1851,8 +1966,17 @@ pub fn normalize_latex_quotes(input: &str) -> String {
         let mut i = 0usize;
         while i < bytes.len() {
             let ch = bytes[i];
+            if ch == b'$' && !in_inline_raw && !in_string {
+                let prev_is_escape = i > 0 && bytes[i - 1] == b'\\';
+                if !prev_is_escape {
+                    in_math = !in_math;
+                }
+                out.push(ch);
+                i += 1;
+                continue;
+            }
             if ch == b'\\' {
-                if !in_inline_raw && !in_string && i + 2 < bytes.len() {
+                if !in_inline_raw && !in_string && !in_math && i + 2 < bytes.len() {
                     if bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
                         out.push(b'"');
                         i += 3;
@@ -1874,7 +1998,7 @@ pub fn normalize_latex_quotes(input: &str) -> String {
                 continue;
             }
 
-            if !in_inline_raw && !in_string {
+            if !in_inline_raw && !in_string && !in_math {
                 if ch == b'`' && i + 1 < bytes.len() && bytes[i + 1] == b'`' {
                     out.push(b'"');
                     i += 2;
@@ -1909,18 +2033,29 @@ pub fn normalize_latex_quotes(input: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
-/// Replace \verb delimiters with a brace-based \texttt{...} form so the parser can handle it.
+/// Replace \verb and \lstinline delimiters with a brace-based form so the parser can handle it.
 pub fn replace_verb_commands(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(input.len());
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'\\' {
-            if input[i..].starts_with("\\verb") {
-                let mut j = i + 5;
+            // Handle \verb and \lstinline commands
+            let (cmd_len, target_cmd) = if input[i..].starts_with("\\lstinline") {
+                (10, "lstinline")
+            } else if input[i..].starts_with("\\verb") {
+                (5, "texttt")
+            } else {
+                (0, "")
+            };
+
+            if cmd_len > 0 {
+                let mut j = i + cmd_len;
+                // Skip optional star
                 if j < bytes.len() && bytes[j] == b'*' {
                     j += 1;
                 }
+                // Skip whitespace
                 while j < bytes.len() && bytes[j].is_ascii_whitespace() {
                     j += 1;
                 }
@@ -1928,6 +2063,49 @@ pub fn replace_verb_commands(input: &str) -> String {
                     out.extend_from_slice(input[i..].as_bytes());
                     break;
                 }
+
+                // Handle brace-delimited content
+                if bytes[j] == b'{' {
+                    // Find matching close brace (handle nesting)
+                    let start = j + 1;
+                    let mut depth = 1;
+                    j = start;
+                    while j < bytes.len() && depth > 0 {
+                        if bytes[j] == b'{' {
+                            depth += 1;
+                        } else if bytes[j] == b'}' {
+                            depth -= 1;
+                        }
+                        if depth > 0 {
+                            j += 1;
+                        }
+                    }
+                    if j >= bytes.len() && depth > 0 {
+                        out.extend_from_slice(input[i..].as_bytes());
+                        break;
+                    }
+                    let content = &input[start..j];
+                    // Protect underscores and special chars
+                    let escaped: String = content
+                        .chars()
+                        .map(|ch| match ch {
+                            '_' => "\\_".to_string(),
+                            '{' => "\\{".to_string(),
+                            '}' => "\\}".to_string(),
+                            '#' => "\\#".to_string(),
+                            '%' => "\\%".to_string(),
+                            '&' => "\\&".to_string(),
+                            _ => ch.to_string(),
+                        })
+                        .collect();
+                    out.extend_from_slice(format!("\\{target_cmd}{{").as_bytes());
+                    out.extend_from_slice(escaped.as_bytes());
+                    out.push(b'}');
+                    i = j + 1;
+                    continue;
+                }
+
+                // Handle arbitrary delimiter (like \verb|...|)
                 let delim = bytes[j];
                 j += 1;
                 let start = j;
@@ -1942,12 +2120,16 @@ pub fn replace_verb_commands(input: &str) -> String {
                 let mut escaped = String::with_capacity(content.len());
                 for ch in content.chars() {
                     match ch {
+                        '_' => escaped.push_str("\\_"),
                         '{' => escaped.push_str("\\{"),
                         '}' => escaped.push_str("\\}"),
+                        '#' => escaped.push_str("\\#"),
+                        '%' => escaped.push_str("\\%"),
+                        '&' => escaped.push_str("\\&"),
                         _ => escaped.push(ch),
                     }
                 }
-                out.extend_from_slice(b"\\texttt{");
+                out.extend_from_slice(format!("\\{target_cmd}{{").as_bytes());
                 out.extend_from_slice(escaped.as_bytes());
                 out.push(b'}');
                 i = j + 1;
@@ -2199,12 +2381,13 @@ pub fn expand_latex_inputs(input: &str, base_dir: &std::path::Path) -> String {
 
 /// Collect package names from \usepackage / \RequirePackage commands.
 pub fn collect_usepackage_entries(input: &str) -> Vec<String> {
+    let stripped = strip_latex_comments(input);
     let mut packages = Vec::new();
-    let bytes = input.as_bytes();
+    let bytes = stripped.as_bytes();
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'\\' {
-            let remaining = &input[i..];
+            let remaining = &stripped[i..];
             let (_cmd, cmd_len) = if remaining.starts_with("\\usepackage") {
                 ("\\usepackage", 11usize)
             } else if remaining.starts_with("\\RequirePackage") {
@@ -2238,7 +2421,7 @@ pub fn collect_usepackage_entries(input: &str) -> Vec<String> {
                     }
                 }
                 if j < bytes.len() && bytes[j] == b'{' {
-                    let (content, used) = extract_braced_content(&input[j..]);
+                    let (content, used) = extract_braced_content(&stripped[j..]);
                     if let Some(content) = content {
                         for part in content.split(',') {
                             let trimmed = part.trim();
@@ -2255,6 +2438,23 @@ pub fn collect_usepackage_entries(input: &str) -> Vec<String> {
         i += 1;
     }
     packages
+}
+
+/// Strip LaTeX line comments (% ...) while preserving escaped \%.
+pub fn strip_latex_comments(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for line in input.lines() {
+        let mut prev_backslash = false;
+        for ch in line.chars() {
+            if ch == '%' && !prev_backslash {
+                break;
+            }
+            out.push(ch);
+            prev_backslash = ch == '\\';
+        }
+        out.push('\n');
+    }
+    out
 }
 
 /// Expand local \usepackage / \RequirePackage files found on disk.
@@ -2443,6 +2643,56 @@ pub fn strip_command_with_braced_arg(input: &str, cmd: &str) -> String {
                             _ => {}
                         }
                         j += 1;
+                    }
+                    i = j;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Replace occurrences of \coloremojicode{HEX} with "emoji-HEX".
+pub fn replace_coloremojicode(input: &str) -> String {
+    let needle = "\\coloremojicode";
+    let mut out = String::with_capacity(input.len());
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            let remaining: String = chars[i..].iter().collect();
+            if remaining.starts_with(needle) {
+                let mut j = i + needle.len();
+                while j < chars.len() && chars[j].is_whitespace() {
+                    j += 1;
+                }
+                if j < chars.len() && chars[j] == '{' {
+                    let mut depth = 1usize;
+                    let mut content = String::new();
+                    j += 1;
+                    while j < chars.len() && depth > 0 {
+                        match chars[j] {
+                            '{' => {
+                                depth += 1;
+                                content.push(chars[j]);
+                            }
+                            '}' => {
+                                depth = depth.saturating_sub(1);
+                                if depth > 0 {
+                                    content.push(chars[j]);
+                                }
+                            }
+                            _ => content.push(chars[j]),
+                        }
+                        j += 1;
+                    }
+                    let trimmed = content.trim();
+                    if !trimmed.is_empty() {
+                        out.push_str("emoji-");
+                        out.push_str(trimmed);
                     }
                     i = j;
                     continue;
@@ -2747,20 +2997,84 @@ pub fn convert_caption_text(text: &str) -> String {
 
     while let Some(ch) = chars.next() {
         if ch == '$' {
-            // Collect math content until closing $
+            // Collect math content until closing $, but handle nested $ inside \text{} etc.
             let mut math_content = String::new();
+            let mut text_brace_depth = 0i32; // Track braces after \text commands
+            let mut in_text_cmd = false;
+
             while let Some(&next) = chars.peek() {
-                if next == '$' {
+                if next == '$' && text_brace_depth == 0 {
                     chars.next(); // consume closing $
                     break;
                 }
-                math_content.push(chars.next().unwrap());
+
+                let c = chars.next().unwrap();
+                math_content.push(c);
+
+                // Track \text{} and similar commands to handle nested $
+                if c == '\\' {
+                    // Check for text commands that may contain nested $
+                    let mut cmd = String::new();
+                    while let Some(&nc) = chars.peek() {
+                        if nc.is_ascii_alphabetic() {
+                            cmd.push(chars.next().unwrap());
+                            math_content.push(cmd.chars().last().unwrap());
+                        } else {
+                            break;
+                        }
+                    }
+                    // Commands that can contain nested $ inside their braces
+                    if matches!(cmd.as_str(), "text" | "textrm" | "textup" | "textnormal" | "mbox" | "hbox") {
+                        in_text_cmd = true;
+                    }
+                } else if c == '{' && in_text_cmd {
+                    text_brace_depth += 1;
+                    in_text_cmd = false; // Reset flag after seeing opening brace
+                } else if c == '{' && text_brace_depth > 0 {
+                    text_brace_depth += 1;
+                } else if c == '}' && text_brace_depth > 0 {
+                    text_brace_depth -= 1;
+                }
             }
             // Convert the math content
             let converted = super::latex_math_to_typst(&math_content);
-            result.push('$');
-            result.push_str(&converted);
-            result.push('$');
+            let trimmed = converted.trim();
+            let prev_non_space = result.chars().rev().find(|c| !c.is_whitespace());
+            let attachable = matches!(
+                prev_non_space,
+                Some(c) if c.is_ascii_alphanumeric() || c == ')' || c == ']' || c == '}'
+            );
+            let is_sub = trimmed.starts_with('_');
+            let is_sup = trimmed.starts_with('^');
+            if attachable && (is_sub || is_sup) {
+                let mut inner = trimmed[1..].trim();
+                if (inner.starts_with('(') && inner.ends_with(')'))
+                    || (inner.starts_with('{') && inner.ends_with('}'))
+                {
+                    inner = &inner[1..inner.len() - 1];
+                }
+                let inner_trim = inner.trim();
+                let content = if inner_trim.starts_with('"') && inner_trim.ends_with('"')
+                    && inner_trim.len() >= 2
+                {
+                    &inner_trim[1..inner_trim.len() - 1]
+                } else {
+                    inner_trim
+                };
+                if is_sub {
+                    result.push_str("#sub[");
+                    result.push_str(content);
+                    result.push(']');
+                } else {
+                    result.push_str("#super[");
+                    result.push_str(content);
+                    result.push(']');
+                }
+            } else {
+                result.push('$');
+                result.push_str(&converted);
+                result.push('$');
+            }
         } else if ch == '\\' {
             // Handle backslash commands in text mode
             let mut cmd = String::new();
@@ -2892,6 +3206,23 @@ pub fn convert_caption_text(text: &str) -> String {
                     result.push(']');
                     result.push(' ');
                 }
+                "textsuperscript" => {
+                    result.push_str("#super[");
+                    if let Some(content) = arg_content {
+                        result.push_str(&convert_caption_text(&content));
+                    }
+                    result.push(']');
+                }
+                "textsubscript" => {
+                    result.push_str("#sub[");
+                    if let Some(content) = arg_content {
+                        result.push_str(&convert_caption_text(&content));
+                    }
+                    result.push(']');
+                }
+                "xspace" => {
+                    result.push(' ');
+                }
                 "texttt" => {
                     result.push('`');
                     if let Some(content) = arg_content {
@@ -2955,6 +3286,10 @@ pub fn convert_caption_text(text: &str) -> String {
                 "LuaTeX" => result.push_str("LuaTeX"),
                 "pdfTeX" => result.push_str("pdfTeX"),
                 "BibTeX" => result.push_str("BibTeX"),
+                "eg" => result.push_str("e.g."),
+                "ie" => result.push_str("i.e."),
+                "etal" => result.push_str("et al."),
+                "vs" => result.push_str("vs."),
 
                 // Common escapes
                 "&" => result.push('&'),
@@ -2965,6 +3300,8 @@ pub fn convert_caption_text(text: &str) -> String {
                 "{" => result.push('{'),
                 "}" => result.push('}'),
                 "\\" => result.push_str("\\ "), // line break
+                "backslash" => result.push('\\'),
+                "textbackslash" => result.push('\\'),
                 "" => {
                     // Just a backslash followed by non-alpha (like \\ or \&)
                     // Already consumed, do nothing
@@ -3159,6 +3496,31 @@ pub fn convert_author_text(text: &str) -> String {
                     }
                     result.push(']');
                 }
+                "normalfont" => {
+                    if let Some(content) = read_braced(&mut chars) {
+                        result.push_str(&convert_author_text(&content));
+                    }
+                }
+                "vspace" => {
+                    let _ = read_braced(&mut chars);
+                }
+                "hspace" => {
+                    let _ = read_braced(&mut chars);
+                }
+                "linkbutton" => {
+                    let _ = read_braced(&mut chars);
+                    let _ = read_braced(&mut chars);
+                    let _ = read_braced(&mut chars);
+                }
+                "coloremojicode" => {
+                    if let Some(content) = read_braced(&mut chars) {
+                        let trimmed = content.trim();
+                        if !trimmed.is_empty() {
+                            result.push_str("emoji-");
+                            result.push_str(trimmed);
+                        }
+                    }
+                }
                 "textit" | "it" | "emph" | "itshape" => {
                     result.push_str("#emph[");
                     if let Some(content) = read_braced(&mut chars) {
@@ -3166,10 +3528,35 @@ pub fn convert_author_text(text: &str) -> String {
                     }
                     result.push(']');
                 }
+                "textsuperscript" => {
+                    result.push_str("#super[");
+                    if let Some(content) = read_braced(&mut chars) {
+                        result.push_str(&convert_author_text(&content));
+                    }
+                    result.push(']');
+                }
+                "textsubscript" => {
+                    result.push_str("#sub[");
+                    if let Some(content) = read_braced(&mut chars) {
+                        result.push_str(&convert_author_text(&content));
+                    }
+                    result.push(']');
+                }
+                "xspace" => {
+                    result.push(' ');
+                }
                 "texttt" => {
                     result.push('`');
                     if let Some(content) = read_braced(&mut chars) {
-                        result.push_str(&content);
+                        // Unescape common LaTeX specials for monospace content
+                        let unescaped = content
+                            .replace("\\@", "@")
+                            .replace("\\_", "_")
+                            .replace("\\#", "#")
+                            .replace("\\%", "%")
+                            .replace("\\&", "&")
+                            .replace("\\$", "$");
+                        result.push_str(&unescaped);
                     }
                     result.push('`');
                 }
@@ -3216,6 +3603,66 @@ pub fn convert_author_text(text: &str) -> String {
                 "LuaTeX" => result.push_str("LuaTeX"),
                 "pdfTeX" => result.push_str("pdfTeX"),
                 "BibTeX" => result.push_str("BibTeX"),
+                "eg" => result.push_str("e.g."),
+                "ie" => result.push_str("i.e."),
+                "etal" => result.push_str("et al."),
+                // JMLR author macros: \name, \email, \addr consume text to next macro/newline
+                // Note: Parser may combine e.g. "\email one@" into "\emailone@" so we handle that
+                _ if cmd.starts_with("name") => {
+                    // Extract any text that got merged with the command name
+                    let suffix = &cmd[4..]; // text after "name"
+                    let mut content = suffix.to_string();
+                    // Skip leading whitespace
+                    while let Some(&' ') = chars.peek() {
+                        chars.next();
+                    }
+                    // Read text until next backslash command or newline
+                    while let Some(&ch) = chars.peek() {
+                        if ch == '\\' || ch == '\n' {
+                            break;
+                        }
+                        content.push(chars.next().unwrap());
+                    }
+                    result.push_str(content.trim());
+                }
+                _ if cmd.starts_with("email") => {
+                    // Extract any text that got merged with the command name
+                    let suffix = &cmd[5..]; // text after "email"
+                    let mut content = suffix.to_string();
+                    // Skip leading whitespace
+                    while let Some(&' ') = chars.peek() {
+                        chars.next();
+                    }
+                    // Read text until next backslash command or newline
+                    while let Some(&ch) = chars.peek() {
+                        if ch == '\\' || ch == '\n' {
+                            break;
+                        }
+                        content.push(chars.next().unwrap());
+                    }
+                    // Output email on a new line so it's parsed separately
+                    result.push_str("\n");
+                    result.push_str(content.trim());
+                }
+                _ if cmd.starts_with("addr") => {
+                    // Extract any text that got merged with the command name
+                    let suffix = &cmd[4..]; // text after "addr"
+                    let mut content = suffix.to_string();
+                    // Skip leading whitespace
+                    while let Some(&' ') = chars.peek() {
+                        chars.next();
+                    }
+                    // Read text until next backslash command or newline
+                    while let Some(&ch) = chars.peek() {
+                        if ch == '\\' || ch == '\n' {
+                            break;
+                        }
+                        content.push(chars.next().unwrap());
+                    }
+                    // Output on new line
+                    result.push_str("\n");
+                    result.push_str(content.trim());
+                }
                 _ => {
                     if let Some(content) = read_braced(&mut chars) {
                         result.push_str(&convert_author_text(&content));

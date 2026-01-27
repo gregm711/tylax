@@ -453,7 +453,22 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
 
         // Abstract
         "abstract" => {
-            if conv.state.template_kind == Some(TemplateKind::Ieee) {
+            if matches!(
+                conv.state.template_kind,
+                Some(
+                    TemplateKind::Ieee
+                        | TemplateKind::Cvpr
+                        | TemplateKind::Iclr
+                        | TemplateKind::Icml
+                        | TemplateKind::Neurips
+                        | TemplateKind::Jmlr
+                        | TemplateKind::Tmlr
+                        | TemplateKind::Rlj
+                        | TemplateKind::Lncs
+                        | TemplateKind::Elsevier
+                        | TemplateKind::Springer
+                )
+            ) {
                 let mut buffer = String::new();
                 conv.visit_env_content(&node, &mut buffer);
                 conv.state.abstract_text = Some(buffer.trim().to_string());
@@ -529,6 +544,17 @@ pub fn convert_environment(conv: &mut LatexConverter, elem: SyntaxElement, outpu
         // Algorithm
         "algorithm" | "algorithmic" | "algorithm2e" => {
             convert_algorithm(conv, &node, output);
+        }
+
+        // Ignored wrapper environments (treat as transparent)
+        "footnotesize"
+        | "graphicalabstract"
+        | "highlights"
+        | "links"
+        | "preliminary"
+        | "preface"
+        | "postliminary" => {
+            conv.visit_env_content(&node, output);
         }
 
         // Unknown environments - pass through content

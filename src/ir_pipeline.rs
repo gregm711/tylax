@@ -8,16 +8,20 @@ use crate::preamble_hints::{
     equation_numbering_enabled, extract_preamble_hints, is_two_column, parse_length_to_pt,
     render_article_preamble,
 };
+use crate::template_adapters::aaai::maybe_convert_aaai;
+use crate::template_adapters::acm::maybe_convert_acm;
 use crate::template_adapters::ams::maybe_convert_ams;
 use crate::template_adapters::arxiv::maybe_convert_arxiv;
 use crate::template_adapters::book::maybe_convert_book;
 use crate::template_adapters::cvpr::maybe_convert_cvpr;
+use crate::template_adapters::elsevier::maybe_convert_elsevier;
 use crate::template_adapters::generic::maybe_convert_template_with;
 use crate::template_adapters::iclr::maybe_convert_iclr;
 use crate::template_adapters::icml::maybe_convert_icml;
 use crate::template_adapters::ieee::maybe_convert_ieee;
 use crate::template_adapters::jmlr::maybe_convert_jmlr;
 use crate::template_adapters::letter::maybe_convert_letter;
+use crate::template_adapters::lncs::maybe_convert_lncs;
 use crate::template_adapters::neurips::maybe_convert_neurips;
 use crate::template_adapters::newsletter::maybe_convert_newsletter;
 use crate::template_adapters::tmlr::maybe_convert_tmlr;
@@ -69,6 +73,12 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
         if let Some(rendered) = maybe_convert_ieee(input) {
             return rendered;
         }
+        if let Some(rendered) = maybe_convert_acm(input) {
+            return rendered;
+        }
+        if let Some(rendered) = maybe_convert_aaai(input) {
+            return rendered;
+        }
         if let Some(rendered) = maybe_convert_neurips(input) {
             return rendered;
         }
@@ -88,6 +98,12 @@ pub fn typst_to_latex_ir(input: &str, full_document: bool) -> String {
             return rendered;
         }
         if let Some(rendered) = maybe_convert_ams(input) {
+            return rendered;
+        }
+        if let Some(rendered) = maybe_convert_lncs(input) {
+            return rendered;
+        }
+        if let Some(rendered) = maybe_convert_elsevier(input) {
             return rendered;
         }
         if let Some(rendered) = maybe_convert_book(input) {

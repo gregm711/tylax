@@ -11,7 +11,7 @@ use std::fmt::Write;
 use std::time::Instant;
 
 use crate::data::constants::{AcronymDef, GlossaryDef};
-use crate::data::colors::sanitize_color_expression;
+use crate::data::colors::{parse_color_with_model, sanitize_color_expression, sanitize_color_identifier};
 use crate::data::maps::TEX_COMMAND_SPEC;
 use crate::features::templates::{
     generate_title_block, generate_typst_preamble, parse_document_class, DocumentClass,
@@ -29,7 +29,7 @@ use super::utils::{
     attach_orphan_labels, clean_whitespace, convert_caption_text, escape_typst_string,
     extract_arg_content, extract_arg_content_with_braces, extract_curly_inner_content,
     protect_zero_arg_commands, replace_verb_commands, resolve_reference_markers,
-    restore_protected_commands,
+    restore_protected_commands, strip_latex_comments,
 };
 
 struct ElementProfileGuard {
@@ -356,6 +356,20 @@ pub struct ConversionState {
     pub document_class: Option<String>,
     pub document_class_info: Option<DocumentClass>,
     pub template_kind: Option<TemplateKind>,
+    pub template_package: Option<String>,
+    pub cvpr_review: bool,
+    pub cvpr_final: bool,
+    pub cvpr_paper_id: Option<String>,
+    pub cvpr_conf_year: Option<String>,
+    pub iclr_final: bool,
+    pub icml_accepted: bool,
+    pub neurips_preprint: bool,
+    pub neurips_final: bool,
+    pub tmlr_preprint: bool,
+    pub tmlr_accepted: bool,
+    pub rlj_preprint: bool,
+    pub rlj_final: bool,
+    pub aaai_anonymous: bool,
     pub abstract_text: Option<String>,
     pub keywords: Vec<String>,
     pub author_blocks: Vec<AuthorBlock>,
@@ -409,6 +423,8 @@ pub struct ConversionState {
     pub profile_last: Option<String>,
     pub profile_last_env: Option<String>,
     pub profile_start: Option<Instant>,
+    /// Current recursion depth for visit_node/visit_element (stack overflow protection)
+    pub visit_depth: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -418,12 +434,14 @@ pub enum TemplateKind {
     Lncs,
     Elsevier,
     Springer,
+    Aaai,
     Cvpr,
     Iclr,
     Icml,
     Neurips,
     Jmlr,
     Tmlr,
+    Rlj,
     MitThesis,
     StanfordThesis,
     UcbThesis,
@@ -867,6 +885,7 @@ impl LatexConverter {
         let verb_expanded = replace_verb_commands(input);
         // Preprocess: replace empty superscript math blocks like $^{th}$
         let verb_expanded = super::utils::replace_empty_math_superscripts(&verb_expanded);
+        let verb_expanded = super::utils::replace_coloremojicode(&verb_expanded);
         // Preprocess: protect zero-argument commands that MiTeX would otherwise lose
         let protected_input = protect_zero_arg_commands(&verb_expanded);
 
@@ -879,9 +898,14 @@ impl LatexConverter {
         // Strip bibliography commands that are not meaningful in Typst output.
         expanded_input =
             super::utils::strip_command_with_braced_arg(&expanded_input, "bibliographystyle");
+        expanded_input =
+            super::utils::strip_command_with_braced_arg(&expanded_input, "thispagestyle");
+        expanded_input = super::utils::strip_command_with_braced_arg(&expanded_input, "pagestyle");
         expanded_input = super::utils::strip_sectioning_stars(&expanded_input);
         expanded_input = super::utils::strip_env_stars(&expanded_input);
+        expanded_input = super::utils::normalize_citation_optional_args(&expanded_input);
         expanded_input = super::utils::normalize_spacing_primitives(&expanded_input);
+        expanded_input = self.strip_ifdefined_blocks(&expanded_input);
         expanded_input = super::utils::normalize_display_dollars(&expanded_input);
         expanded_input = super::utils::normalize_math_delimiters(&expanded_input);
         expanded_input = super::utils::normalize_unmatched_braces(&expanded_input);
@@ -938,7 +962,7 @@ impl LatexConverter {
             _ => None,
         };
         if template_kind.is_none() {
-            template_kind = pkg_template;
+            template_kind = pkg_template.as_ref().map(|(kind, _)| *kind);
         }
         if matches!(
             template_kind,
@@ -947,6 +971,7 @@ impl LatexConverter {
                     | TemplateKind::Iclr
                     | TemplateKind::Icml
                     | TemplateKind::Neurips
+                    | TemplateKind::Aaai
             )
         ) && doc_class.columns <= 1
         {
@@ -957,6 +982,12 @@ impl LatexConverter {
         }
         self.state.document_class_info = Some(doc_class.clone());
         self.state.template_kind = template_kind;
+        self.state.template_package = pkg_template.map(|(_, name)| name);
+        // Debug: save expanded input if requested
+        if let Ok(path) = std::env::var("TYLAX_DEBUG_EXPANDED") {
+            let _ = std::fs::write(&path, &expanded_input);
+            eprintln!("[tylax] debug: expanded input saved to {}", path);
+        }
         // Parse with mitex-parser
         let tree = mitex_parser::parse(&expanded_input, self.spec.clone());
         mark_timing("parse", &mut last_mark, timing_enabled);
@@ -1005,6 +1036,26 @@ impl LatexConverter {
 
         // Post-process
         self.postprocess_math(output)
+    }
+
+    /// Convert inline math content (e.g., from embedded $x$ in \text{})
+    /// This is a lightweight conversion that doesn't reset state
+    pub fn convert_inline_math(&mut self, input: &str) -> String {
+        let old_mode = self.state.mode.clone();
+        self.state.mode = ConversionMode::Math;
+
+        // Parse the math content
+        let tree = mitex_parser::parse(input, self.spec.clone());
+
+        // Convert
+        let mut output = String::with_capacity(input.len().max(64));
+        self.visit_node(&tree, &mut output);
+
+        // Restore mode
+        self.state.mode = old_mode;
+
+        // Light post-processing - just trim
+        output.trim().to_string()
     }
 
     /// Convert a complete LaTeX document and return a loss report
@@ -1087,6 +1138,28 @@ impl LatexConverter {
 
     /// Visit a syntax element (node or token)
     pub fn visit_element(&mut self, elem: SyntaxElement, output: &mut String) {
+        // Stack overflow protection: limit recursion depth
+        // Note: This is actual call stack depth, not document nesting depth
+        const MAX_VISIT_DEPTH: usize = 2000;
+        self.state.visit_depth += 1;
+        if self.state.visit_depth > MAX_VISIT_DEPTH {
+            self.state.visit_depth -= 1;
+            if !self.state.warnings.iter().any(|w| w.contains("recursion limit")) {
+                self.state
+                    .warnings
+                    .push("Parser recursion limit reached; some content may be truncated".to_string());
+            }
+            return;
+        }
+
+        // Use a macro to ensure depth is decremented on all exit paths
+        macro_rules! return_dec {
+            () => {{
+                self.state.visit_depth -= 1;
+                return;
+            }};
+        }
+
         use SyntaxKind::*;
         let _profile_guard = if self.state.profile_enabled {
             let label = match elem.kind() {
@@ -1146,11 +1219,11 @@ impl LatexConverter {
                 }
                 _ => {}
             }
-            return;
+            return_dec!();
         }
 
         if self.consume_pending_heading(&elem, output) {
-            return;
+            return_dec!();
         }
 
         match elem.kind() {
@@ -1163,25 +1236,25 @@ impl LatexConverter {
                 let trimmed = text.trim();
                 if text.contains("\\)") {
                     output.push_str(&text.replace("\\)", ")"));
-                    return;
+                    return_dec!();
                 }
                 if text.contains("\\]") {
                     output.push_str(&text.replace("\\]", "]"));
-                    return;
+                    return_dec!();
                 }
                 if trimmed == "spacing"
                     || trimmed == "arraystretch"
                     || trimmed == "eqnarray"
                     || trimmed == "eqnarray*"
                 {
-                    return;
+                    return_dec!();
                 }
                 if trimmed == "}"
                     || trimmed == "document"
                     || trimmed == "\\begin"
                     || trimmed == "\\end"
                 {
-                    return;
+                    return_dec!();
                 }
                 self.state.warnings.push(format!("Parse error: {}", text));
                 let context = match self.state.mode {
@@ -1213,9 +1286,31 @@ impl LatexConverter {
                         if text.contains('\n') {
                             self.visit_node(&n, output);
                         } else if matches!(self.state.mode, ConversionMode::Math) {
+                            // In math mode, separate letters with spaces (abc -> a b c)
+                            // but keep digits together as numbers (123 -> 123, 0.5 -> 0.5)
+                            let mut prev_was_digit_or_dot = false;
                             for c in text.chars() {
+                                let is_digit_or_dot = c.is_ascii_digit() || c == '.';
+                                // Add space before letter, or before digit if previous wasn't digit/dot
+                                if !output.is_empty()
+                                    && !output.ends_with(' ')
+                                    && !output.ends_with('(')
+                                    && !output.ends_with('[')
+                                    && !output.ends_with('{')
+                                {
+                                    if c.is_ascii_alphabetic() {
+                                        output.push(' ');
+                                    } else if is_digit_or_dot && !prev_was_digit_or_dot {
+                                        // Starting a new number after a letter
+                                        output.push(' ');
+                                    }
+                                }
                                 output.push(c);
-                                output.push(' ');
+                                // Add space after letters (for next character)
+                                if c.is_ascii_alphabetic() {
+                                    output.push(' ');
+                                }
+                                prev_was_digit_or_dot = is_digit_or_dot;
                             }
                         } else {
                             super::utils::escape_typst_text_into(&text, output);
@@ -1239,7 +1334,7 @@ impl LatexConverter {
             // Curly group
             ItemCurly => {
                 if self.state.in_preamble {
-                    return;
+                    return_dec!();
                 }
                 super::math::convert_curly(self, elem, output);
             }
@@ -1269,9 +1364,31 @@ impl LatexConverter {
                 if let SyntaxElement::Token(t) = elem {
                     let text = t.text();
                     if matches!(self.state.mode, ConversionMode::Math) {
+                        // In math mode, separate letters with spaces (abc -> a b c)
+                        // but keep digits together as numbers (123 -> 123, 0.5 -> 0.5)
+                        let mut prev_was_digit_or_dot = false;
                         for c in text.chars() {
+                            let is_digit_or_dot = c.is_ascii_digit() || c == '.';
+                            // Add space before letter, or before digit if previous wasn't digit/dot
+                            if !output.is_empty()
+                                && !output.ends_with(' ')
+                                && !output.ends_with('(')
+                                && !output.ends_with('[')
+                                && !output.ends_with('{')
+                            {
+                                if c.is_ascii_alphabetic() {
+                                    output.push(' ');
+                                } else if is_digit_or_dot && !prev_was_digit_or_dot {
+                                    // Starting a new number after a letter
+                                    output.push(' ');
+                                }
+                            }
                             output.push(c);
-                            output.push(' ');
+                            // Add space after letters (for next character)
+                            if c.is_ascii_alphabetic() {
+                                output.push(' ');
+                            }
+                            prev_was_digit_or_dot = is_digit_or_dot;
                         }
                     } else {
                         super::utils::escape_typst_text_into(text, output);
@@ -1354,7 +1471,7 @@ impl LatexConverter {
             TokenAsterisk => {
                 if let Some(ref mut op) = self.state.pending_op {
                     op.is_limits = true;
-                    return;
+                    return_dec!();
                 }
                 if matches!(self.state.mode, ConversionMode::Math) {
                     output.push('*');
@@ -1400,6 +1517,8 @@ impl LatexConverter {
                 }
             }
         }
+        // Decrement depth counter on exit
+        self.state.visit_depth -= 1;
     }
 
     // ============================================================
@@ -1558,8 +1677,13 @@ impl LatexConverter {
 
     /// Extract and convert argument for metadata (title, author, date)
     pub fn extract_metadata_arg(&mut self, cmd: &CmdItem) -> Option<String> {
-        self.get_required_arg_with_braces(cmd, 0)
-            .map(|raw| convert_caption_text(&raw).trim().to_string())
+        self.get_required_arg_with_braces(cmd, 0).map(|raw| {
+            let converted = convert_caption_text(&raw);
+            let normalized = converted
+                .replace("\\\\", " ")
+                .replace("\\ ", " ");
+            super::utils::clean_whitespace(&normalized).trim().to_string()
+        })
     }
 
     /// Extract and convert argument for author fields (preserve \\ and \and, drop footnotes)
@@ -1573,18 +1697,93 @@ impl LatexConverter {
             .split("\\begin{document}")
             .next()
             .unwrap_or(input);
-        capture_geometry_hints(&mut self.state, preamble);
-        capture_length_hints(&mut self.state, preamble);
-        capture_fancyhdr_hints(&mut self.state, preamble);
-        capture_titleformat_hints(&mut self.state, preamble);
-        capture_pagenumbering_hints(&mut self.state, preamble);
-        capture_hypersetup_hints(&mut self.state, preamble);
+        let hint_block = extract_tylax_hint_block(preamble);
+        let hint_source = if hint_block.is_empty() {
+            preamble.to_string()
+        } else {
+            format!("{preamble}\n{hint_block}")
+        };
+        capture_geometry_hints(&mut self.state, &hint_source);
+        capture_length_hints(&mut self.state, &hint_source);
+        capture_fancyhdr_hints(&mut self.state, &hint_source);
+        capture_titleformat_hints(&mut self.state, &hint_source);
+        capture_pagenumbering_hints(&mut self.state, &hint_source);
+        capture_hypersetup_hints(&mut self.state, &hint_source);
+        capture_color_defs(&mut self.state, &hint_source);
         if preamble.contains("\\doublespacing") {
             self.state.line_spacing = Some("1.4em".to_string());
         } else if preamble.contains("\\onehalfspacing") {
             self.state.line_spacing = Some("0.8em".to_string());
         } else if preamble.contains("\\singlespacing") {
             self.state.line_spacing = None;
+        }
+        if let Some(value) = extract_macro_arg(preamble, "setstretch") {
+            if let Ok(scale) = value.trim().parse::<f32>() {
+                if scale > 1.0 {
+                    let leading = scale - 1.0;
+                    self.state.line_spacing = Some(format!("{:.3}em", leading));
+                } else {
+                    self.state.line_spacing = None;
+                }
+            }
+        }
+        let preamble_clean = strip_latex_comments(preamble);
+        let preamble_lower = preamble_clean.to_ascii_lowercase();
+        if preamble_lower.contains("\\def\\aaaianonymous")
+            || preamble_lower.contains("\\aaaianonymoustrue")
+        {
+            self.state.aaai_anonymous = true;
+        }
+        if preamble_lower.contains("\\usepackage[review]{cvpr}") {
+            self.state.cvpr_review = true;
+            self.state.cvpr_final = false;
+        }
+        if preamble_lower.contains("\\usepackage{cvpr}")
+            || preamble_lower.contains("\\usepackage[pagenumbers]{cvpr}")
+        {
+            self.state.cvpr_final = true;
+        }
+        if preamble_lower.contains("\\cvprfinalcopy") {
+            self.state.cvpr_final = true;
+            self.state.cvpr_review = false;
+        }
+        if preamble_lower.contains("\\iclrfinalcopy") {
+            self.state.iclr_final = true;
+        }
+        if preamble_lower.contains("\\usepackage[accepted]{icml") {
+            self.state.icml_accepted = true;
+        }
+        if preamble_lower.contains("\\usepackage[preprint]{neurips") {
+            self.state.neurips_preprint = true;
+        }
+        if preamble_lower.contains("\\usepackage[final]{neurips") {
+            self.state.neurips_final = true;
+        }
+        if preamble_lower.contains("\\usepackage[preprint]{tmlr}") {
+            self.state.tmlr_preprint = true;
+        }
+        if preamble_lower.contains("\\usepackage[accepted]{tmlr}") {
+            self.state.tmlr_accepted = true;
+        }
+        if preamble_lower.contains("\\usepackage[preprint]{rlj}")
+            || preamble_lower.contains("\\usepackage[preprint]{rlc}")
+        {
+            self.state.rlj_preprint = true;
+        }
+        if preamble_lower.contains("\\usepackage[final]{rlj}")
+            || preamble_lower.contains("\\usepackage[final]{rlc}")
+            || preamble_lower.contains("\\usepackage[accepted]{rlj}")
+            || preamble_lower.contains("\\usepackage[accepted]{rlc}")
+        {
+            self.state.rlj_final = true;
+        }
+        if let Some(id) = extract_def_macro(preamble, "paperID")
+            .or_else(|| extract_def_macro(preamble, "cvprPaperID"))
+        {
+            self.state.cvpr_paper_id = Some(id);
+        }
+        if let Some(year) = extract_def_macro(preamble, "confYear") {
+            self.state.cvpr_conf_year = Some(year);
         }
     }
 
@@ -1622,6 +1821,7 @@ impl LatexConverter {
         result = self.fix_blackboard_bold(&result);
         result = self.fix_empty_accent_args(&result);
         result = self.fix_symbol_spacing(&result);
+        result = self.fix_multiletter_before_attachment(&result);
         result = self.collapse_spaces(&result);
 
         result = result.replace(" ,", ",");
@@ -1646,6 +1846,60 @@ impl LatexConverter {
         result = result.replace(" _", "_");
 
         result
+    }
+
+    pub(crate) fn fix_multiletter_before_attachment(&self, input: &str) -> String {
+        // Known Typst symbol names that should NOT be split
+        static TYPST_SYMBOLS: &[&str] = &[
+            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
+            "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi", "rho",
+            "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega",
+            "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta",
+            "Iota", "Kappa", "Lambda", "Mu", "Nu", "Xi", "Omicron", "Pi", "Rho",
+            "Sigma", "Tau", "Upsilon", "Phi", "Chi", "Psi", "Omega",
+            "infty", "infinity", "partial", "nabla", "forall", "exists",
+            "emptyset", "nothing", "dots", "cdots", "ldots", "vdots", "ddots",
+            "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan",
+            "sinh", "cosh", "tanh", "coth", "log", "ln", "exp", "lim", "max", "min",
+            "sup", "inf", "det", "dim", "ker", "deg", "gcd", "lcm", "mod", "arg",
+            "sum", "prod", "product", "int", "integral", "oint", "iint", "iiint", "coprod",
+        ];
+
+        let chars: Vec<char> = input.chars().collect();
+        let mut out = String::with_capacity(input.len());
+        let mut i = 0usize;
+        while i < chars.len() {
+            let ch = chars[i];
+            if ch.is_ascii_alphabetic() {
+                let start = i;
+                let mut j = i;
+                while j < chars.len() && chars[j].is_ascii_alphabetic() {
+                    j += 1;
+                }
+                let word: String = chars[start..j].iter().collect();
+                let mut k = j;
+                while k < chars.len() && chars[k].is_whitespace() {
+                    k += 1;
+                }
+                // Don't split if this is a known Typst symbol name
+                let is_symbol = TYPST_SYMBOLS.contains(&word.as_str());
+                if word.len() > 1 && k < chars.len() && (chars[k] == '_' || chars[k] == '^') && !is_symbol {
+                    for (idx, letter) in word.chars().enumerate() {
+                        if idx > 0 {
+                            out.push(' ');
+                        }
+                        out.push(letter);
+                    }
+                } else {
+                    out.push_str(&word);
+                }
+                i = j;
+                continue;
+            }
+            out.push(ch);
+            i += 1;
+        }
+        out
     }
 
     /// Fix missing spaces before Typst symbol names.
@@ -2006,7 +2260,20 @@ impl LatexConverter {
         }
 
         let doc_class = self.state.document_class_info.clone().unwrap_or_default();
-        doc.push_str(&generate_typst_preamble(&doc_class));
+        if !matches!(
+            self.state.template_kind,
+            Some(
+                TemplateKind::Cvpr
+                    | TemplateKind::Iclr
+                    | TemplateKind::Icml
+                    | TemplateKind::Neurips
+                    | TemplateKind::Jmlr
+                    | TemplateKind::Tmlr
+                    | TemplateKind::Rlj
+            )
+        ) {
+            doc.push_str(&generate_typst_preamble(&doc_class));
+        }
         if !self.state.color_defs.is_empty() {
             for (name, value) in &self.state.color_defs {
                 let _ = writeln!(doc, "#let {} = {}", name, value);
@@ -2018,7 +2285,8 @@ impl LatexConverter {
         }
 
         if let Some(paper) = self.state.page_paper.as_deref() {
-            let _ = writeln!(doc, "#set page(paper: \"{}\")", paper);
+            let typst_paper = normalize_paper_size(paper);
+            let _ = writeln!(doc, "#set page(paper: \"{}\")", typst_paper);
         }
         if let Some(margin) = self.state.page_margin.to_typst() {
             let _ = writeln!(doc, "#set page(margin: {})", margin);
@@ -2147,6 +2415,61 @@ impl LatexConverter {
                     &self.state.keywords,
                 ));
             }
+            Some(TemplateKind::Cvpr) => {
+                doc.push_str(&self.render_cvpr_block_open(
+                    self.state.title.as_deref(),
+                    self.state.author.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                ));
+            }
+            Some(TemplateKind::Iclr) => {
+                doc.push_str(&self.render_iclr_show_rule(
+                    self.state.title.as_deref(),
+                    self.state.author.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                    &self.state.keywords,
+                ));
+            }
+            Some(TemplateKind::Icml) => {
+                doc.push_str(&self.render_icml_show_rule(
+                    self.state.title.as_deref(),
+                    self.state.author.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                    &self.state.keywords,
+                ));
+            }
+            Some(TemplateKind::Neurips) => {
+                doc.push_str(&self.render_neurips_show_rule(
+                    self.state.title.as_deref(),
+                    self.state.author.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                    &self.state.keywords,
+                ));
+            }
+            Some(TemplateKind::Jmlr) => {
+                doc.push_str(&self.render_jmlr_show_rule(
+                    self.state.title.as_deref(),
+                    self.state.author.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                    &self.state.keywords,
+                ));
+            }
+            Some(TemplateKind::Tmlr) => {
+                doc.push_str(&self.render_tmlr_show_rule(
+                    self.state.title.as_deref(),
+                    self.state.author.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                    &self.state.keywords,
+                ));
+            }
+            Some(TemplateKind::Rlj) => {
+                doc.push_str(&self.render_rlj_show_rule(
+                    self.state.title.as_deref(),
+                    self.state.author.as_deref(),
+                    self.state.abstract_text.as_deref(),
+                    &self.state.keywords,
+                ));
+            }
             _ => {
                 let title_block = generate_title_block(
                     self.state.title.as_deref(),
@@ -2173,6 +2496,9 @@ impl LatexConverter {
         // Clean up content
         let cleaned_content = clean_whitespace(&content);
         doc.push_str(&cleaned_content);
+        if self.state.template_kind == Some(TemplateKind::Cvpr) {
+            doc.push_str("\n]\n");
+        }
 
         // Add warnings as comments
         let warnings = dedupe_string_warnings(self.state.warnings.clone());
@@ -2270,6 +2596,120 @@ impl LatexConverter {
         }
     }
 
+    pub fn capture_ieee_author_blocks(&mut self, raw: &str) -> bool {
+        fn read_braced_content(input: &str) -> Option<(String, usize)> {
+            let bytes = input.as_bytes();
+            let mut i = 0usize;
+            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i >= bytes.len() || bytes[i] != b'{' {
+                return None;
+            }
+            let mut depth = 0usize;
+            let mut start = None;
+            for (idx, ch) in input[i..].char_indices() {
+                match ch {
+                    '{' => {
+                        depth += 1;
+                        if depth == 1 {
+                            start = Some(i + idx + 1);
+                        }
+                    }
+                    '}' => {
+                        if depth > 0 {
+                            depth -= 1;
+                            if depth == 0 {
+                                if let Some(s) = start {
+                                    let end = i + idx;
+                                    return Some((input[s..end].to_string(), end + 1));
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+
+        let mut blocks: Vec<AuthorBlock> = Vec::new();
+        let mut current: Option<AuthorBlock> = None;
+        let mut saw_ieee = false;
+        let mut idx = 0usize;
+
+        while idx < raw.len() {
+            let slice = &raw[idx..];
+            if slice.starts_with("\\IEEEauthorblockN") {
+                saw_ieee = true;
+                if let Some(block) = current.take() {
+                    if block.name.is_some() || !block.lines.is_empty() || block.email.is_some() {
+                        blocks.push(block);
+                    }
+                }
+                idx += "\\IEEEauthorblockN".len();
+                if let Some((content, used)) = read_braced_content(&raw[idx..]) {
+                    let name = super::utils::convert_author_text(&content);
+                    let mut block = AuthorBlock::default();
+                    let trimmed = name.trim();
+                    if !trimmed.is_empty() {
+                        block.name = Some(trimmed.to_string());
+                    }
+                    current = Some(block);
+                    idx += used;
+                    continue;
+                }
+            } else if slice.starts_with("\\IEEEauthorblockA") {
+                saw_ieee = true;
+                idx += "\\IEEEauthorblockA".len();
+                if let Some((content, used)) = read_braced_content(&raw[idx..]) {
+                    let mut block = current.take().unwrap_or_default();
+                    let converted = super::utils::convert_author_text(&content);
+                    let normalized = converted.replace("\\\\", "\n");
+                    for line in normalized.lines() {
+                        let cleaned = Self::normalize_author_field_line(line);
+                        if cleaned.is_empty() {
+                            continue;
+                        }
+                        if block.email.is_none() {
+                            if let Some(found) = Self::extract_email_from_line(&cleaned) {
+                                block.email = Some(found);
+                                continue;
+                            }
+                        }
+                        block.lines.push(cleaned);
+                    }
+                    current = Some(block);
+                    idx += used;
+                    continue;
+                }
+            } else if slice.starts_with("\\and") {
+                saw_ieee = true;
+                if let Some(block) = current.take() {
+                    if block.name.is_some() || !block.lines.is_empty() || block.email.is_some() {
+                        blocks.push(block);
+                    }
+                }
+                idx += "\\and".len();
+                continue;
+            }
+            idx += 1;
+        }
+
+        if let Some(block) = current.take() {
+            if block.name.is_some() || !block.lines.is_empty() || block.email.is_some() {
+                blocks.push(block);
+            }
+        }
+
+        if !saw_ieee || blocks.is_empty() {
+            return false;
+        }
+        self.state.author_blocks = blocks;
+        self.state.current_author_idx = None;
+        true
+    }
+
     pub fn push_thesis_meta(&mut self, label: &str, value: String) {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
@@ -2347,6 +2787,378 @@ impl LatexConverter {
         authors
     }
 
+    fn parse_author_blocks_with_lines(raw: &str) -> Vec<AuthorBlock> {
+        let mut normalized = raw.replace("\\and", "\n\n");
+        normalized = normalized.replace("\\\\", "\n");
+        let mut blocks = Vec::new();
+        for block in normalized.split("\n\n") {
+            let mut lines: Vec<String> = Vec::new();
+            for line in block.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let mut cleaned = trimmed.to_string();
+                if cleaned.starts_with('{') && cleaned.ends_with('}') && cleaned.len() > 1 {
+                    cleaned = cleaned[1..cleaned.len() - 1].trim().to_string();
+                }
+                cleaned = cleaned.replace("\\@", "@");
+                lines.push(cleaned);
+            }
+            if lines.is_empty() {
+                continue;
+            }
+            let name = lines.first().cloned();
+            let mut rest: Vec<String> = Vec::new();
+            let mut email: Option<String> = None;
+            for line in lines.iter().skip(1) {
+                let trimmed = line.trim();
+                if trimmed.contains('@') && !trimmed.contains(' ') {
+                    email = Some(trimmed.to_string());
+                    continue;
+                }
+                rest.push(trimmed.to_string());
+            }
+            let mut block_out = AuthorBlock::default();
+            block_out.name = name;
+            block_out.lines = rest;
+            block_out.email = email;
+            blocks.push(block_out);
+        }
+        blocks
+    }
+
+    fn parse_cvpr_author_groups(&self, raw: &str) -> Option<(Vec<String>, Vec<String>)> {
+        let mut normalized = raw.replace("\\and", "\n\n");
+        normalized = normalized.replace("\\\\", "\n");
+        let mut lines: Vec<String> = Vec::new();
+        for line in normalized.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let mut cleaned = trimmed.to_string();
+            if cleaned.starts_with('{') && cleaned.ends_with('}') && cleaned.len() > 1 {
+                cleaned = cleaned[1..cleaned.len() - 1].trim().to_string();
+            }
+            cleaned = cleaned.replace("\\@", "@");
+            if let Some(idx) = cleaned.find("#link(") {
+                cleaned = cleaned[..idx].trim().to_string();
+            }
+            if let Some(idx) = cleaned.find("http") {
+                if idx == 0 {
+                    continue;
+                }
+                cleaned = cleaned[..idx].trim().to_string();
+            }
+            if cleaned.is_empty() {
+                continue;
+            }
+            lines.push(cleaned);
+        }
+        if lines.len() < 2 {
+            return None;
+        }
+
+        let mut affl_lines: Vec<String> = Vec::new();
+        while let Some(last) = lines.last() {
+            let cleaned = Self::normalize_author_field_line(last);
+            if cleaned.is_empty() {
+                lines.pop();
+                continue;
+            }
+            let lower = cleaned.to_ascii_lowercase();
+            let is_affl_tail = Self::looks_like_organization(&cleaned)
+                || Self::looks_like_department(&cleaned)
+                || lower.contains("city")
+                || lower.contains("state")
+                || lower.contains("country")
+                || lower.contains("province");
+            if is_affl_tail {
+                affl_lines.push(cleaned);
+                lines.pop();
+            } else {
+                break;
+            }
+        }
+        if affl_lines.is_empty() {
+            return None;
+        }
+        affl_lines.reverse();
+
+        let mut names: Vec<String> = Vec::new();
+        for line in lines {
+            let cleaned = Self::normalize_author_field_line(&line);
+            for part in cleaned.split(',') {
+                let name = part.trim();
+                if name.is_empty() {
+                    continue;
+                }
+                names.push(name.to_string());
+            }
+        }
+        if names.is_empty() {
+            return None;
+        }
+
+        Some((names, affl_lines))
+    }
+
+    fn normalize_author_field_line(line: &str) -> String {
+        let mut cleaned = line.trim().to_string();
+        if cleaned.starts_with('{') && cleaned.ends_with('}') && cleaned.len() > 1 {
+            cleaned = cleaned[1..cleaned.len() - 1].trim().to_string();
+        }
+        cleaned = cleaned.replace("\\@", "@");
+        cleaned = Self::strip_typst_markup(&cleaned);
+        cleaned = Self::strip_typst_links(&cleaned);
+
+        let trimmed = cleaned.trim();
+        for prefix in ["#emph[", "#strong[", "#smallcaps[", "#underline["] {
+            if trimmed.starts_with(prefix) && trimmed.ends_with(']') {
+                return trimmed[prefix.len()..trimmed.len() - 1].trim().to_string();
+            }
+        }
+
+        if trimmed.starts_with("#link(") && trimmed.ends_with(']') {
+            if let Some(start) = trimmed.rfind('[') {
+                let inner = &trimmed[start + 1..trimmed.len() - 1];
+                if !inner.trim().is_empty() {
+                    return inner.trim().to_string();
+                }
+            }
+        }
+
+        if trimmed.starts_with('`') && trimmed.ends_with('`') && trimmed.len() > 1 {
+            return trimmed[1..trimmed.len() - 1].trim().to_string();
+        }
+
+        trimmed.to_string()
+    }
+
+    fn strip_typst_markup(text: &str) -> String {
+        let prefixes = ["#emph[", "#strong[", "#smallcaps[", "#underline["];
+        let mut out = String::new();
+        let mut i = 0usize;
+        let bytes = text.as_bytes();
+        while i < bytes.len() {
+            let mut matched = None;
+            for prefix in prefixes {
+                if text[i..].starts_with(prefix) {
+                    matched = Some(prefix.len());
+                    break;
+                }
+            }
+            if let Some(len) = matched {
+                i += len;
+                let mut depth = 1i32;
+                while i < bytes.len() {
+                    let ch = text[i..].chars().next().unwrap();
+                    let ch_len = ch.len_utf8();
+                    if ch == '[' {
+                        depth += 1;
+                        out.push(ch);
+                    } else if ch == ']' {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += ch_len;
+                            break;
+                        }
+                        out.push(ch);
+                    } else {
+                        out.push(ch);
+                    }
+                    i += ch_len;
+                }
+                continue;
+            }
+            let ch = text[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+        out
+    }
+
+    fn strip_typst_links(text: &str) -> String {
+        let mut out = String::new();
+        let mut i = 0usize;
+        let bytes = text.as_bytes();
+        while i < bytes.len() {
+            if text[i..].starts_with("#link(") {
+                i += "#link(".len();
+                let mut depth = 1i32;
+                while i < bytes.len() && depth > 0 {
+                    let ch = text[i..].chars().next().unwrap();
+                    let ch_len = ch.len_utf8();
+                    if ch == '(' {
+                        depth += 1;
+                    } else if ch == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += ch_len;
+                            break;
+                        }
+                    }
+                    i += ch_len;
+                }
+                while i < bytes.len() && text[i..].chars().next().unwrap().is_whitespace() {
+                    i += text[i..].chars().next().unwrap().len_utf8();
+                }
+                if i < bytes.len() && text[i..].starts_with('[') {
+                    i += 1;
+                    let mut depth = 1i32;
+                    while i < bytes.len() && depth > 0 {
+                        let ch = text[i..].chars().next().unwrap();
+                        let ch_len = ch.len_utf8();
+                        if ch == '[' {
+                            depth += 1;
+                            out.push(ch);
+                        } else if ch == ']' {
+                            depth -= 1;
+                            if depth == 0 {
+                                i += ch_len;
+                                break;
+                            }
+                            out.push(ch);
+                        } else {
+                            out.push(ch);
+                        }
+                        i += ch_len;
+                    }
+                }
+                continue;
+            }
+            if text[i..].starts_with("#image(") {
+                i += "#image(".len();
+                let mut depth = 1i32;
+                while i < bytes.len() && depth > 0 {
+                    let ch = text[i..].chars().next().unwrap();
+                    let ch_len = ch.len_utf8();
+                    if ch == '(' {
+                        depth += 1;
+                    } else if ch == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += ch_len;
+                            break;
+                        }
+                    }
+                    i += ch_len;
+                }
+                continue;
+            }
+            let ch = text[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+        out
+    }
+
+    fn extract_email_from_line(line: &str) -> Option<String> {
+        if let Some(idx) = line.find("mailto:") {
+            let start = idx + "mailto:".len();
+            let mut end = start;
+            for ch in line[start..].chars() {
+                if ch == '"' || ch == ']' || ch == ')' || ch.is_whitespace() {
+                    break;
+                }
+                end += ch.len_utf8();
+            }
+            let candidate = line[start..end].trim();
+            if candidate.contains('@') && candidate.contains('.') {
+                return Some(candidate.to_string());
+            }
+        }
+
+        let mut token = String::new();
+        let mut best: Option<String> = None;
+        for ch in line.chars() {
+            if ch.is_ascii_alphanumeric() || "@._%+-".contains(ch) {
+                token.push(ch);
+            } else {
+                if token.contains('@') && token.contains('.') {
+                    best = Some(token.clone());
+                    break;
+                }
+                token.clear();
+            }
+        }
+        if best.is_none() && token.contains('@') && token.contains('.') {
+            best = Some(token);
+        }
+        best
+    }
+
+    fn looks_like_department(line: &str) -> bool {
+        let lower = line.to_ascii_lowercase();
+        lower.contains("department")
+            || lower.contains("dept.")
+            || lower.starts_with("dept ")
+            || lower.contains("school of")
+            || lower.contains("faculty of")
+            || lower.contains("division of")
+    }
+
+    fn looks_like_organization(line: &str) -> bool {
+        let lower = line.to_ascii_lowercase();
+        lower.contains("university")
+            || lower.contains("institute")
+            || lower.contains("laboratory")
+            || lower.contains("laboratories")
+            || lower.contains("lab")
+            || lower.contains("college")
+            || lower.contains("academy")
+            || lower.contains("center")
+            || lower.contains("centre")
+            || lower.contains("corporation")
+            || lower.contains("company")
+            || lower.contains("inc.")
+            || lower.contains("corp.")
+            || lower.contains("ltd")
+    }
+
+    fn looks_like_location(line: &str) -> bool {
+        let lower = line.to_ascii_lowercase();
+        line.contains(',')
+            || lower.contains("city")
+            || lower.contains("state")
+            || lower.contains("country")
+            || lower.contains("province")
+    }
+
+    fn split_name_affiliation(line: &str) -> (String, Option<String>) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return (String::new(), None);
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        let keywords = [
+            "department",
+            "dept.",
+            "school of",
+            "faculty of",
+            "college of",
+            "institute",
+            "university",
+            "laboratory",
+            "lab",
+        ];
+        let mut split_at: Option<usize> = None;
+        for kw in keywords {
+            if let Some(pos) = lower.find(kw) {
+                split_at = Some(split_at.map_or(pos, |prev| prev.min(pos)));
+            }
+        }
+        if let Some(pos) = split_at {
+            let name = trimmed[..pos].trim();
+            let aff = trimmed[pos..].trim();
+            if !name.is_empty() && !aff.is_empty() {
+                return (name.to_string(), Some(aff.to_string()));
+            }
+        }
+        (trimmed.to_string(), None)
+    }
+
     fn render_ieee_show_rule(
         &self,
         title: Option<&str>,
@@ -2360,12 +3172,180 @@ impl LatexConverter {
             let escaped = super::utils::escape_typst_text(title);
             let _ = writeln!(out, "  title: [{}],", escaped);
         }
-        let authors = author.map(Self::split_authors).unwrap_or_default();
-        if !authors.is_empty() {
+        let mut blocks = Vec::new();
+        if let Some(raw) = author {
+            blocks = Self::parse_author_blocks_with_lines(raw);
+        }
+        if blocks.is_empty() {
+            blocks = self.collect_author_blocks();
+        }
+        if !blocks.is_empty() {
             out.push_str("  authors: (\n");
-            for name in authors {
+            for block in blocks {
+                let raw_name = block.name.as_deref().unwrap_or("").trim();
+                let raw_name = Self::strip_typst_markup(raw_name);
+                let (mut name, name_aff) = Self::split_name_affiliation(&raw_name);
+                if name.is_empty() {
+                    continue;
+                }
+                let mut department: Option<String> = None;
+                let mut organization: Option<String> = None;
+                let mut location_parts: Vec<String> = Vec::new();
+                let mut email = block.email.clone();
+
+                let mut lines = Vec::new();
+                if let Some(line) = name_aff.as_deref() {
+                    lines.push(line.to_string());
+                }
+                lines.extend(self.collect_affiliation_lines(&block));
+
+                if !lines.is_empty() {
+                    let mut merged: Vec<String> = Vec::new();
+                    let mut idx = 0usize;
+                    while idx < lines.len() {
+                        let mut line = lines[idx].trim().to_string();
+                        while idx + 1 < lines.len() {
+                            let lower = line.to_ascii_lowercase();
+                            let next = lines[idx + 1].trim();
+                            if next.is_empty() {
+                                idx += 1;
+                                continue;
+                            }
+                            if line.ends_with('-') {
+                                line.pop();
+                                line.push_str(next);
+                                idx += 1;
+                                continue;
+                            }
+                            if lower.ends_with("and") || lower.ends_with("of") {
+                                line.push(' ');
+                                line.push_str(next);
+                                idx += 1;
+                                continue;
+                            }
+                            break;
+                        }
+                        if !line.is_empty() {
+                            merged.push(line);
+                        }
+                        idx += 1;
+                    }
+                    lines = merged;
+                }
+
+                let mut prefer_org = false;
+                if name_aff.is_none() && !lines.is_empty() {
+                    let tokens: Vec<&str> = name.split_whitespace().collect();
+                    if tokens.len() >= 4 {
+                        let split = if tokens.len() > 5 { 3 } else { 2 };
+                        let new_name = tokens[..split].join(" ");
+                        let aff = tokens[split..].join(" ");
+                        if !new_name.trim().is_empty() && !aff.trim().is_empty() {
+                            name = new_name;
+                            lines.insert(0, aff);
+                            prefer_org = true;
+                        }
+                    }
+                }
+
+                let mut name_parts: Vec<String> = Vec::new();
+                for raw_line in lines {
+                    let mut cleaned = Self::normalize_author_field_line(&raw_line);
+                    if cleaned.is_empty() {
+                        continue;
+                    }
+                    let mut lower = cleaned.to_ascii_lowercase();
+                    if lower.starts_with("and ") {
+                        let rest = cleaned[4..].trim();
+                        let words: Vec<&str> = rest.split_whitespace().collect();
+                        if words.len() >= 3 {
+                            name_parts.push(format!("and {} {}", words[0], words[1]));
+                            cleaned = words[2..].join(" ");
+                            lower = cleaned.to_ascii_lowercase();
+                        } else if !rest.is_empty() {
+                            name_parts.push(format!("and {}", rest));
+                            continue;
+                        }
+                    }
+                    if lower.starts_with("email:")
+                        || lower.starts_with("telephone:")
+                        || lower.starts_with("tel:")
+                        || lower.starts_with("fax:")
+                    {
+                        if email.is_none() {
+                            if let Some(found) = Self::extract_email_from_line(&cleaned) {
+                                email = Some(found);
+                            }
+                        }
+                        continue;
+                    }
+                    if email.is_none() {
+                        if let Some(found) = Self::extract_email_from_line(&cleaned) {
+                            email = Some(found);
+                            continue;
+                        }
+                    }
+
+                    if department.is_none() && Self::looks_like_department(&cleaned) {
+                        department = Some(cleaned);
+                        continue;
+                    }
+                    if organization.is_none() && Self::looks_like_organization(&cleaned) {
+                        organization = Some(cleaned);
+                        continue;
+                    }
+                    if Self::looks_like_location(&cleaned) {
+                        location_parts.push(cleaned);
+                        continue;
+                    }
+
+                    if prefer_org && organization.is_none() {
+                        organization = Some(cleaned);
+                    } else if department.is_none() {
+                        department = Some(cleaned);
+                    } else if organization.is_none() {
+                        organization = Some(cleaned);
+                    } else {
+                        location_parts.push(cleaned);
+                    }
+                }
+
+                if !name_parts.is_empty() {
+                    let mut combined = String::new();
+                    combined.push_str(&name);
+                    for part in name_parts {
+                        combined.push(' ');
+                        combined.push_str(&part);
+                    }
+                    name = combined.trim().to_string();
+                }
+
+                let location = if !location_parts.is_empty() {
+                    Some(location_parts.join(", "))
+                } else {
+                    None
+                };
+
+                out.push_str("    (\n");
                 let escaped = super::utils::escape_typst_string(&name);
-                let _ = writeln!(out, "    (name: \"{}\"),", escaped);
+                let _ = writeln!(out, "      name: \"{}\",", escaped);
+                if let Some(department) = department.as_deref() {
+                    let escaped = super::utils::escape_typst_string(department);
+                    let _ = writeln!(out, "      department: \"{}\",", escaped);
+                }
+                if let Some(organization) = organization.as_deref() {
+                    let escaped = super::utils::escape_typst_string(organization);
+                    let _ = writeln!(out, "      organization: \"{}\",", escaped);
+                }
+                if let Some(location) = location.as_deref() {
+                    let escaped = super::utils::escape_typst_string(location);
+                    let _ = writeln!(out, "      location: \"{}\",", escaped);
+                }
+                if let Some(email) = email.as_deref() {
+                    let escaped = super::utils::escape_typst_string(email);
+                    let _ = writeln!(out, "      email: \"{}\",", escaped);
+                }
+                out.push_str("    ),\n");
             }
             out.push_str("  ),\n");
         }
@@ -2456,11 +3436,16 @@ impl LatexConverter {
                 out.push_str("    (\n");
                 let escaped_name = super::utils::escape_typst_text(name);
                 let _ = writeln!(out, "      name: [{}],", escaped_name);
+                // Always include email field (clean-acmart template requires it)
                 if let Some(email) = block.email.as_deref() {
                     if !email.trim().is_empty() {
                         let escaped = super::utils::escape_typst_text(email.trim());
                         let _ = writeln!(out, "      email: [{}],", escaped);
+                    } else {
+                        out.push_str("      email: [],\n");
                     }
+                } else {
+                    out.push_str("      email: [],\n");
                 }
                 let aff_lines = self.collect_affiliation_lines(&block);
                 for (idx, line) in aff_lines.iter().enumerate() {
@@ -2612,6 +3597,907 @@ impl LatexConverter {
         out
     }
 
+    fn collect_author_blocks_from_arg(&self, author: Option<&str>) -> Vec<AuthorBlock> {
+        let mut blocks = Vec::new();
+        if let Some(raw) = author {
+            blocks = Self::parse_author_blocks_with_lines(raw);
+        }
+        if blocks.is_empty() {
+            blocks = self.collect_author_blocks();
+        }
+        blocks
+    }
+
+    fn extract_author_fields(
+        &self,
+        block: &AuthorBlock,
+    ) -> (
+        Option<String>,
+        Option<String>,
+        Vec<String>,
+        Option<String>,
+        Vec<String>,
+    ) {
+        let mut department: Option<String> = None;
+        let mut institution: Option<String> = None;
+        let mut location_parts: Vec<String> = Vec::new();
+        let mut email = block.email.clone();
+        let mut extra_parts: Vec<String> = Vec::new();
+
+        for raw_line in self.collect_affiliation_lines(block) {
+            let cleaned = Self::normalize_author_field_line(&raw_line);
+            if cleaned.is_empty() {
+                continue;
+            }
+            let lower = cleaned.to_ascii_lowercase();
+            if lower.starts_with("email:") {
+                if email.is_none() {
+                    if let Some(found) = Self::extract_email_from_line(&cleaned) {
+                        email = Some(found);
+                    }
+                }
+                continue;
+            }
+            if email.is_none() {
+                if let Some(found) = Self::extract_email_from_line(&cleaned) {
+                    email = Some(found);
+                    continue;
+                }
+            }
+            if department.is_none() && Self::looks_like_department(&cleaned) {
+                department = Some(cleaned);
+                continue;
+            }
+            if institution.is_none() && Self::looks_like_organization(&cleaned) {
+                institution = Some(cleaned);
+                continue;
+            }
+            if Self::looks_like_location(&cleaned) {
+                location_parts.push(cleaned);
+                continue;
+            }
+            if institution.is_none() {
+                institution = Some(cleaned);
+            } else {
+                extra_parts.push(cleaned);
+            }
+        }
+
+        (department, institution, location_parts, email, extra_parts)
+    }
+
+    fn build_author_affl_entries(
+        &self,
+        blocks: &[AuthorBlock],
+    ) -> (Vec<String>, Vec<String>) {
+        let mut author_entries: Vec<String> = Vec::new();
+        let mut affl_entries: Vec<String> = Vec::new();
+
+        for (idx, block) in blocks.iter().enumerate() {
+            let name = block.name.as_deref().unwrap_or("").trim();
+            if name.is_empty() {
+                continue;
+            }
+            let (department, institution, mut location_parts, email, extra_parts) =
+                self.extract_author_fields(block);
+            location_parts.extend(extra_parts);
+
+            // Build affiliation only if there's actual content
+            let affl_key = format!("affl{}", idx + 1);
+            let mut affl_content = String::new();
+            if let Some(department) = department.as_deref() {
+                let escaped = super::utils::escape_typst_string(department);
+                let _ = write!(affl_content, "department: \"{}\", ", escaped);
+            }
+            if let Some(institution) = institution.as_deref() {
+                let escaped = super::utils::escape_typst_string(institution);
+                let _ = write!(affl_content, "institution: \"{}\", ", escaped);
+            }
+            if !location_parts.is_empty() {
+                let escaped = super::utils::escape_typst_string(&location_parts.join(", "));
+                let _ = write!(affl_content, "location: \"{}\", ", escaped);
+            }
+            let has_affl = !affl_content.is_empty();
+            if has_affl {
+                if affl_content.ends_with(", ") {
+                    affl_content.truncate(affl_content.len() - 2);
+                }
+                let affl = format!("{}: ({})", affl_key, affl_content);
+                affl_entries.push(affl);
+            }
+
+            let escaped_name = super::utils::escape_typst_string(name);
+            let mut author_entry = String::new();
+            author_entry.push_str("(name: \"");
+            author_entry.push_str(&escaped_name);
+            if has_affl {
+                author_entry.push_str("\", affl: (\"");
+                author_entry.push_str(&affl_key);
+                author_entry.push_str("\",)");
+            } else {
+                // Include empty affl tuple for template compatibility
+                author_entry.push_str("\", affl: ()");
+            }
+            if let Some(email) = email.as_deref() {
+                let escaped = super::utils::escape_typst_string(email.trim());
+                if !escaped.is_empty() {
+                    author_entry.push_str(", email: \"");
+                    author_entry.push_str(&escaped);
+                    author_entry.push('"');
+                }
+            }
+            author_entry.push(')');
+            author_entries.push(author_entry);
+        }
+
+        (author_entries, affl_entries)
+    }
+
+    fn format_affl_tuple(&self, author_entries: &[String], affl_entries: &[String]) -> String {
+        let mut authors_value = String::new();
+        authors_value.push_str("(\n    (");
+        if !author_entries.is_empty() {
+            authors_value.push('\n');
+            for entry in author_entries {
+                authors_value.push_str("      ");
+                authors_value.push_str(entry);
+                authors_value.push_str(",\n");
+            }
+            authors_value.push_str("    ),\n    (\n");
+            for entry in affl_entries {
+                authors_value.push_str("      ");
+                authors_value.push_str(entry);
+                authors_value.push_str(",\n");
+            }
+            authors_value.push_str("    )\n  )");
+        } else {
+            authors_value.push_str("), ())");
+        }
+        authors_value
+    }
+
+    fn template_year_from_package(&self) -> Option<u32> {
+        let package = self.state.template_package.as_deref()?;
+        let digits: String = package.chars().filter(|ch| ch.is_ascii_digit()).collect();
+        if digits.len() < 4 {
+            return None;
+        }
+        digits[0..4].parse::<u32>().ok()
+    }
+
+    fn ifdefined_value(&self, name: &str) -> Option<bool> {
+        match name {
+            "aaaianonymous" => Some(self.state.aaai_anonymous),
+            _ => None,
+        }
+    }
+
+    fn strip_ifdefined_blocks(&self, input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        let mut i = 0usize;
+        let bytes = input.as_bytes();
+        while let Some(pos) = input[i..].find("\\ifdefined") {
+            let start = i + pos;
+            out.push_str(&input[i..start]);
+            let mut j = start + "\\ifdefined".len();
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'\\' {
+                j += 1;
+            }
+            let name_start = j;
+            while j < bytes.len()
+                && (bytes[j].is_ascii_alphabetic() || bytes[j] == b'@')
+            {
+                j += 1;
+            }
+            if name_start == j {
+                out.push_str("\\ifdefined");
+                i = start + "\\ifdefined".len();
+                continue;
+            }
+            let name = input
+                .get(name_start..j)
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let cond = match self.ifdefined_value(name.trim()) {
+                Some(value) => value,
+                None => {
+                    out.push_str(input.get(start..j).unwrap_or(""));
+                    i = j;
+                    continue;
+                }
+            };
+
+            let mut depth = 1i32;
+            let mut k = j;
+            let mut else_pos: Option<usize> = None;
+            let mut end_pos: Option<usize> = None;
+            while k < bytes.len() {
+                if bytes.get(k..).map(|s| s.starts_with(b"\\ifdefined")) == Some(true) {
+                    depth += 1;
+                    k += "\\ifdefined".len();
+                    continue;
+                }
+                if bytes.get(k..).map(|s| s.starts_with(b"\\fi")) == Some(true) {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_pos = Some(k);
+                        break;
+                    }
+                    k += "\\fi".len();
+                    continue;
+                }
+                if depth == 1
+                    && else_pos.is_none()
+                    && bytes.get(k..).map(|s| s.starts_with(b"\\else")) == Some(true)
+                {
+                    else_pos = Some(k);
+                    k += "\\else".len();
+                    continue;
+                }
+                k += 1;
+            }
+
+            let end = match end_pos {
+                Some(pos) => pos,
+                None => {
+                    out.push_str(&input[start..]);
+                    return out;
+                }
+            };
+
+            let then_start = j;
+            let then_end = else_pos.unwrap_or(end);
+            let else_start = else_pos.map(|p| p + "\\else".len()).unwrap_or(end);
+            let chosen = if cond {
+                input.get(then_start..then_end).unwrap_or("")
+            } else {
+                input.get(else_start..end).unwrap_or("")
+            };
+            out.push_str(chosen);
+            i = end + "\\fi".len();
+        }
+        out.push_str(&input[i..]);
+        out
+    }
+
+    fn render_cvpr_block_open(
+        &self,
+        title: Option<&str>,
+        author: Option<&str>,
+        abstract_text: Option<&str>,
+    ) -> String {
+        let mut out = String::new();
+        out.push_str("#import \"/cvpr.typ\": cvpr\n\n");
+
+        let mut author_entries: Vec<String> = Vec::new();
+        let mut affl_entries: Vec<String> = Vec::new();
+        let mut extras_line: Option<String> = None;
+
+        let mut used_cvpr_group = false;
+        if let Some(raw_author) = author {
+            if let Some((names, affl_lines)) = self.parse_cvpr_author_groups(raw_author) {
+                let mut affl_block = AuthorBlock::default();
+                affl_block.lines = affl_lines;
+                let (department, institution, mut location_parts, _, extra_parts) =
+                    self.extract_author_fields(&affl_block);
+                location_parts.extend(extra_parts);
+
+                let affl_key = "affl1".to_string();
+                let mut affl = String::new();
+                affl.push_str(&format!("{}: (", affl_key));
+                if let Some(department) = department.as_deref() {
+                    let escaped = super::utils::escape_typst_string(department);
+                    let _ = write!(affl, "department: \"{}\", ", escaped);
+                }
+                if let Some(institution) = institution.as_deref() {
+                    let escaped = super::utils::escape_typst_string(institution);
+                    let _ = write!(affl, "institution: \"{}\", ", escaped);
+                }
+                if !location_parts.is_empty() {
+                    let escaped = super::utils::escape_typst_string(&location_parts.join(", "));
+                    let _ = write!(affl, "location: \"{}\", ", escaped);
+                }
+                if affl.ends_with(", ") {
+                    affl.truncate(affl.len() - 2);
+                }
+                affl.push_str(")");
+                affl_entries.push(affl);
+
+                for name in names {
+                    let escaped_name = super::utils::escape_typst_string(&name);
+                    let mut author_entry = String::new();
+                    author_entry.push_str("(name: \"");
+                    author_entry.push_str(&escaped_name);
+                    author_entry.push_str("\", affl: (\"");
+                    author_entry.push_str(&affl_key);
+                    author_entry.push_str("\",))");
+                    author_entries.push(author_entry);
+                }
+                used_cvpr_group = !author_entries.is_empty();
+            }
+        }
+
+        if let Some(raw_author) = author {
+            let buttons = self.extract_linkbuttons(raw_author);
+            if !buttons.is_empty() {
+                let mut extras = String::new();
+                for (idx, (url, label)) in buttons.into_iter().enumerate() {
+                    if idx > 0 {
+                        extras.push_str(" #h(8pt) ");
+                    }
+                    let url_escaped = super::utils::escape_typst_string(&url);
+                    let label_escaped = super::utils::escape_typst_text(&label);
+                    let _ = write!(
+                        extras,
+                        "#link(\"{}\")[#strong[{}]]",
+                        url_escaped, label_escaped
+                    );
+                }
+                extras_line = Some(extras);
+            }
+        }
+
+        if !used_cvpr_group {
+            let mut blocks = Vec::new();
+            if let Some(raw_author) = author {
+                blocks = Self::parse_author_blocks_with_lines(raw_author);
+            }
+            if blocks.is_empty() {
+                blocks = self.collect_author_blocks();
+            }
+
+            for (idx, block) in blocks.iter().enumerate() {
+                let name = block.name.as_deref().unwrap_or("").trim();
+                if name.is_empty() {
+                    continue;
+                }
+                let mut department: Option<String> = None;
+                let mut institution: Option<String> = None;
+                let mut location_parts: Vec<String> = Vec::new();
+                let mut email = block.email.clone();
+
+                for raw_line in self.collect_affiliation_lines(block) {
+                    let cleaned = Self::normalize_author_field_line(&raw_line);
+                    if cleaned.is_empty() {
+                        continue;
+                    }
+                    let lower = cleaned.to_ascii_lowercase();
+                    if lower.starts_with("email:") {
+                        if email.is_none() {
+                            if let Some(found) = Self::extract_email_from_line(&cleaned) {
+                                email = Some(found);
+                            }
+                        }
+                        continue;
+                    }
+                    if email.is_none() {
+                        if let Some(found) = Self::extract_email_from_line(&cleaned) {
+                            email = Some(found);
+                            continue;
+                        }
+                    }
+                    if department.is_none() && Self::looks_like_department(&cleaned) {
+                        department = Some(cleaned);
+                        continue;
+                    }
+                    if institution.is_none() && Self::looks_like_organization(&cleaned) {
+                        institution = Some(cleaned);
+                        continue;
+                    }
+                    if Self::looks_like_location(&cleaned) {
+                        location_parts.push(cleaned);
+                        continue;
+                    }
+                    if institution.is_none() {
+                        institution = Some(cleaned);
+                    } else {
+                        location_parts.push(cleaned);
+                    }
+                }
+
+                let affl_key = format!("affl{}", idx + 1);
+                let mut affl = String::new();
+                affl.push_str(&format!("{}: (", affl_key));
+                if let Some(department) = department.as_deref() {
+                    let escaped = super::utils::escape_typst_string(department);
+                    let _ = write!(affl, "department: \"{}\", ", escaped);
+                }
+                if let Some(institution) = institution.as_deref() {
+                    let escaped = super::utils::escape_typst_string(institution);
+                    let _ = write!(affl, "institution: \"{}\", ", escaped);
+                }
+                if !location_parts.is_empty() {
+                    let escaped = super::utils::escape_typst_string(&location_parts.join(", "));
+                    let _ = write!(affl, "location: \"{}\", ", escaped);
+                }
+                if affl.ends_with(", ") {
+                    affl.truncate(affl.len() - 2);
+                }
+                affl.push_str(")");
+                affl_entries.push(affl);
+
+                let escaped_name = super::utils::escape_typst_string(name);
+                let mut author_entry = String::new();
+                author_entry.push_str("(name: \"");
+                author_entry.push_str(&escaped_name);
+                author_entry.push_str("\", affl: (\"");
+                author_entry.push_str(&affl_key);
+                author_entry.push_str("\",)");
+                if let Some(email) = email.as_deref() {
+                    let escaped = super::utils::escape_typst_string(email.trim());
+                    if !escaped.is_empty() {
+                        author_entry.push_str(", email: \"");
+                        author_entry.push_str(&escaped);
+                        author_entry.push('"');
+                    }
+                }
+                author_entry.push(')');
+                author_entries.push(author_entry);
+            }
+        }
+
+        let mut authors_value = String::new();
+        authors_value.push_str("(\n    (");
+        if !author_entries.is_empty() {
+            authors_value.push('\n');
+            for entry in &author_entries {
+                authors_value.push_str("      ");
+                authors_value.push_str(entry);
+                authors_value.push_str(",\n");
+            }
+            authors_value.push_str("    ),\n    (\n");
+            for entry in &affl_entries {
+                authors_value.push_str("      ");
+                authors_value.push_str(entry);
+                authors_value.push_str(",\n");
+            }
+            authors_value.push_str("    )\n  )");
+        } else {
+            authors_value.push_str("), ())");
+        }
+
+        out.push_str("#cvpr(\n");
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        let accepted = if self.state.cvpr_review {
+            "false"
+        } else if self.state.cvpr_final {
+            "true"
+        } else {
+            "none"
+        };
+        let _ = writeln!(out, "  accepted: {},", accepted);
+        if let Some(id) = self.state.cvpr_paper_id.as_deref() {
+            let _ = writeln!(out, "  id: \"{}\",", id);
+        }
+        if let Some(year) = self.state.cvpr_conf_year.as_deref() {
+            let _ = writeln!(out, "  aux: (conf-year: \"{}\"),", year);
+        }
+        let _ = writeln!(out, "  authors: {},", authors_value);
+        if let Some(extras) = extras_line.as_deref() {
+            let _ = writeln!(out, "  extras: [{}],", extras);
+        }
+        if let Some(abs) = abstract_text {
+            let cleaned = strip_abstract_label(abs);
+            let _ = writeln!(out, "  abstract: [{}],", cleaned.trim());
+        }
+        out.push_str(")[\n\n");
+
+        out
+    }
+
+    fn extract_linkbuttons(&self, raw: &str) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = Vec::new();
+        let mut pos = 0usize;
+        while let Some(idx) = raw[pos..].find("\\linkbutton") {
+            let start = pos + idx + "\\linkbutton".len();
+            let (url, next1) = extract_braced_arg_at(raw, start);
+            let (icon, next2) = match next1 {
+                Some(next) => extract_braced_arg_at(raw, next),
+                None => (None, None),
+            };
+            let (label, next3) = match next2 {
+                Some(next) => extract_braced_arg_at(raw, next),
+                None => (None, None),
+            };
+            if let (Some(url), Some(label)) = (url, label) {
+                let clean_label = label
+                    .replace('\\', "")
+                    .replace('{', "")
+                    .replace('}', "")
+                    .trim()
+                    .to_string();
+                out.push((url.trim().to_string(), clean_label));
+            }
+            let _ = icon;
+            let next = next3.or(next2).or(next1).unwrap_or(start + 1);
+            pos = next;
+        }
+        out
+    }
+
+    fn render_iclr_show_rule(
+        &self,
+        title: Option<&str>,
+        author: Option<&str>,
+        abstract_text: Option<&str>,
+        keywords: &[String],
+    ) -> String {
+        let blocks = self.collect_author_blocks_from_arg(author);
+        let mut author_entries: Vec<String> = Vec::new();
+
+        for block in blocks {
+            let name = block.name.as_deref().unwrap_or("").trim();
+            if name.is_empty() {
+                continue;
+            }
+            let (department, institution, location_parts, email, extra_parts) =
+                self.extract_author_fields(&block);
+            let mut affl_parts: Vec<String> = Vec::new();
+            if let Some(department) = department {
+                affl_parts.push(department);
+            }
+            if let Some(institution) = institution {
+                affl_parts.push(institution);
+            }
+            affl_parts.extend(extra_parts);
+
+            let affl_text = if !affl_parts.is_empty() {
+                let parts: Vec<String> = affl_parts
+                    .iter()
+                    .map(|part| super::utils::escape_typst_text(part))
+                    .collect();
+                Some(parts.join(" \\\\ "))
+            } else {
+                None
+            };
+            let address_text = if !location_parts.is_empty() {
+                Some(super::utils::escape_typst_text(&location_parts.join(", ")))
+            } else {
+                None
+            };
+
+            let mut entry = String::new();
+            let escaped_name = super::utils::escape_typst_text(name);
+            entry.push_str("(names: ([");
+            entry.push_str(&escaped_name);
+            entry.push_str("],)");
+            if let Some(affl_text) = affl_text {
+                entry.push_str(", affilation: [");
+                entry.push_str(&affl_text);
+                entry.push(']');
+            }
+            if let Some(address_text) = address_text {
+                entry.push_str(", address: [");
+                entry.push_str(&address_text);
+                entry.push(']');
+            }
+            if let Some(email) = email.as_deref() {
+                let escaped = super::utils::escape_typst_string(email.trim());
+                if !escaped.is_empty() {
+                    entry.push_str(", email: \"");
+                    entry.push_str(&escaped);
+                    entry.push('"');
+                }
+            }
+            entry.push(')');
+            author_entries.push(entry);
+        }
+
+        let mut out = String::new();
+        out.push_str("#import \"/iclr.typ\": iclr\n\n");
+        out.push_str("#show: iclr.with(\n");
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        if !author_entries.is_empty() {
+            out.push_str("  authors: (\n");
+            for entry in &author_entries {
+                let _ = writeln!(out, "    {},", entry);
+            }
+            out.push_str("  ),\n");
+        }
+        if !keywords.is_empty() {
+            out.push_str("  keywords: (");
+            let mut first = true;
+            for kw in keywords {
+                let kw = kw.trim();
+                if kw.is_empty() {
+                    continue;
+                }
+                if !first {
+                    out.push_str(", ");
+                }
+                first = false;
+                let escaped = super::utils::escape_typst_string(kw);
+                out.push('"');
+                out.push_str(&escaped);
+                out.push('"');
+            }
+            out.push_str("),\n");
+        }
+        let accepted = if self.state.iclr_final { "true" } else { "false" };
+        let _ = writeln!(out, "  accepted: {},", accepted);
+        if let Some(abs) = abstract_text {
+            let cleaned = strip_abstract_label(abs);
+            let _ = writeln!(out, "  abstract: [{}],", cleaned.trim());
+        }
+        out.push_str(")\n\n");
+        out
+    }
+
+    fn render_icml_show_rule(
+        &self,
+        title: Option<&str>,
+        author: Option<&str>,
+        abstract_text: Option<&str>,
+        keywords: &[String],
+    ) -> String {
+        let blocks = self.collect_author_blocks_from_arg(author);
+        let (author_entries, affl_entries) = self.build_author_affl_entries(&blocks);
+        let authors_value = self.format_affl_tuple(&author_entries, &affl_entries);
+
+        let template = match self.template_year_from_package() {
+            Some(2024) => "icml2024",
+            _ => "icml2025",
+        };
+
+        let mut out = String::new();
+        let _ = writeln!(out, "#import \"/{}.typ\": {}", template, template);
+        out.push('\n');
+        let _ = writeln!(out, "#show: {}.with(", template);
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        let _ = writeln!(out, "  authors: {},", authors_value);
+        if !keywords.is_empty() {
+            out.push_str("  keywords: (");
+            let mut first = true;
+            for kw in keywords {
+                let kw = kw.trim();
+                if kw.is_empty() {
+                    continue;
+                }
+                if !first {
+                    out.push_str(", ");
+                }
+                first = false;
+                let escaped = super::utils::escape_typst_string(kw);
+                out.push('"');
+                out.push_str(&escaped);
+                out.push('"');
+            }
+            out.push_str("),\n");
+        }
+        let accepted = if self.state.icml_accepted { "true" } else { "false" };
+        let _ = writeln!(out, "  accepted: {},", accepted);
+        if let Some(abs) = abstract_text {
+            let cleaned = strip_abstract_label(abs);
+            let _ = writeln!(out, "  abstract: [{}],", cleaned.trim());
+        }
+        out.push_str(")\n\n");
+        out
+    }
+
+    fn render_neurips_show_rule(
+        &self,
+        title: Option<&str>,
+        author: Option<&str>,
+        abstract_text: Option<&str>,
+        keywords: &[String],
+    ) -> String {
+        let blocks = self.collect_author_blocks_from_arg(author);
+        let (author_entries, affl_entries) = self.build_author_affl_entries(&blocks);
+        let authors_value = self.format_affl_tuple(&author_entries, &affl_entries);
+        let template = match self.template_year_from_package() {
+            Some(2024) => "neurips2024",
+            Some(2025) => "neurips2025",
+            _ => "neurips2023",
+        };
+
+        let mut out = String::new();
+        let _ = writeln!(out, "#import \"/{}.typ\": {}", template, template);
+        out.push('\n');
+        let _ = writeln!(out, "#show: {}.with(", template);
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        let accepted = if self.state.neurips_preprint {
+            "none"
+        } else if self.state.neurips_final {
+            "true"
+        } else {
+            "false"
+        };
+        let _ = writeln!(out, "  accepted: {},", accepted);
+        let _ = writeln!(out, "  authors: {},", authors_value);
+        if !keywords.is_empty() {
+            out.push_str("  keywords: (");
+            let mut first = true;
+            for kw in keywords {
+                let kw = kw.trim();
+                if kw.is_empty() {
+                    continue;
+                }
+                if !first {
+                    out.push_str(", ");
+                }
+                first = false;
+                let escaped = super::utils::escape_typst_string(kw);
+                out.push('"');
+                out.push_str(&escaped);
+                out.push('"');
+            }
+            out.push_str("),\n");
+        }
+        if let Some(abs) = abstract_text {
+            let cleaned = strip_abstract_label(abs);
+            let _ = writeln!(out, "  abstract: [{}],", cleaned.trim());
+        }
+        out.push_str(")\n\n");
+        out
+    }
+
+    fn render_jmlr_show_rule(
+        &self,
+        title: Option<&str>,
+        author: Option<&str>,
+        abstract_text: Option<&str>,
+        keywords: &[String],
+    ) -> String {
+        let blocks = self.collect_author_blocks_from_arg(author);
+        let (author_entries, affl_entries) = self.build_author_affl_entries(&blocks);
+        let authors_value = self.format_affl_tuple(&author_entries, &affl_entries);
+
+        let mut out = String::new();
+        out.push_str("#import \"/jmlr.typ\": jmlr\n\n");
+        out.push_str("#show: jmlr.with(\n");
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        let _ = writeln!(out, "  authors: {},", authors_value);
+        if !keywords.is_empty() {
+            out.push_str("  keywords: (");
+            let mut first = true;
+            for kw in keywords {
+                let kw = kw.trim();
+                if kw.is_empty() {
+                    continue;
+                }
+                if !first {
+                    out.push_str(", ");
+                }
+                first = false;
+                let escaped = super::utils::escape_typst_string(kw);
+                out.push('"');
+                out.push_str(&escaped);
+                out.push('"');
+            }
+            out.push_str("),\n");
+        }
+        if let Some(abs) = abstract_text {
+            let cleaned = strip_abstract_label(abs);
+            let _ = writeln!(out, "  abstract: [{}],", cleaned.trim());
+        }
+        out.push_str(")\n\n");
+        out
+    }
+
+    fn render_tmlr_show_rule(
+        &self,
+        title: Option<&str>,
+        author: Option<&str>,
+        abstract_text: Option<&str>,
+        keywords: &[String],
+    ) -> String {
+        let blocks = self.collect_author_blocks_from_arg(author);
+        let (author_entries, affl_entries) = self.build_author_affl_entries(&blocks);
+        let authors_value = self.format_affl_tuple(&author_entries, &affl_entries);
+
+        let mut out = String::new();
+        out.push_str("#import \"/tmlr.typ\": tmlr\n\n");
+        out.push_str("#show: tmlr.with(\n");
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        let accepted = if self.state.tmlr_preprint {
+            "none"
+        } else if self.state.tmlr_accepted {
+            "true"
+        } else {
+            "false"
+        };
+        let _ = writeln!(out, "  accepted: {},", accepted);
+        let _ = writeln!(out, "  authors: {},", authors_value);
+        if !keywords.is_empty() {
+            out.push_str("  keywords: (");
+            let mut first = true;
+            for kw in keywords {
+                let kw = kw.trim();
+                if kw.is_empty() {
+                    continue;
+                }
+                if !first {
+                    out.push_str(", ");
+                }
+                first = false;
+                let escaped = super::utils::escape_typst_string(kw);
+                out.push('"');
+                out.push_str(&escaped);
+                out.push('"');
+            }
+            out.push_str("),\n");
+        }
+        if let Some(abs) = abstract_text {
+            let _ = writeln!(out, "  abstract: [{}],", abs.trim());
+        }
+        out.push_str(")\n\n");
+        out
+    }
+
+    fn render_rlj_show_rule(
+        &self,
+        title: Option<&str>,
+        author: Option<&str>,
+        abstract_text: Option<&str>,
+        keywords: &[String],
+    ) -> String {
+        let blocks = self.collect_author_blocks_from_arg(author);
+        let (author_entries, affl_entries) = self.build_author_affl_entries(&blocks);
+        let authors_value = self.format_affl_tuple(&author_entries, &affl_entries);
+
+        let mut out = String::new();
+        out.push_str("#import \"/rlj.typ\": rlj\n\n");
+        out.push_str("#show: rlj.with(\n");
+        if let Some(title) = title {
+            let escaped = super::utils::escape_typst_text(title);
+            let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        let accepted = if self.state.rlj_preprint {
+            "none"
+        } else if self.state.rlj_final {
+            "true"
+        } else {
+            "false"
+        };
+        let _ = writeln!(out, "  accepted: {},", accepted);
+        let _ = writeln!(out, "  authors: {},", authors_value);
+        if !keywords.is_empty() {
+            out.push_str("  keywords: (");
+            let mut first = true;
+            for kw in keywords {
+                let kw = kw.trim();
+                if kw.is_empty() {
+                    continue;
+                }
+                if !first {
+                    out.push_str(", ");
+                }
+                first = false;
+                let escaped = super::utils::escape_typst_string(kw);
+                out.push('"');
+                out.push_str(&escaped);
+                out.push('"');
+            }
+            out.push_str("),\n");
+        }
+        if let Some(abs) = abstract_text {
+            let _ = writeln!(out, "  abstract: [{}],", abs.trim());
+        }
+        out.push_str(")\n\n");
+        out
+    }
+
     fn render_elsevier_show_rule(
         &self,
         title: Option<&str>,
@@ -2653,8 +4539,10 @@ impl LatexConverter {
                     institution_keys.insert(aff_text, next_key.clone());
                     next_key
                 };
-                let inst_list = format!("\"{}\"", key);
+                let inst_list = format!("\"{}\",", key);
                 fields.push(format!("institutions: ({})", inst_list));
+            } else {
+                fields.push("institutions: (\"\",)".to_string());
             }
 
             if let Some(email) = block.email.as_deref() {
@@ -2663,6 +4551,7 @@ impl LatexConverter {
                     fields.push(format!("email: \"{}\"", escaped));
                 }
             }
+            fields.push("corresponding: true".to_string());
 
             authors_out.push(format!("({})", fields.join(", ")));
         }
@@ -2671,6 +4560,9 @@ impl LatexConverter {
         if let Some(title) = title {
             let escaped = super::utils::escape_typst_text(title);
             let _ = writeln!(out, "  title: [{}],", escaped);
+        }
+        if authors_out.is_empty() {
+            authors_out.push("(name: \"\", institutions: (\"\",), corresponding: true)".to_string());
         }
         if !authors_out.is_empty() {
             out.push_str("  authors: (\n");
@@ -2687,6 +4579,7 @@ impl LatexConverter {
             }
             out.push_str("  ),\n");
         }
+        out.push_str("  paper-info: (extra-info: none),\n");
         if let Some(abs) = abstract_text {
             let _ = writeln!(out, "  abstract: [{}],", abs.trim());
         }
@@ -3105,6 +4998,46 @@ fn extract_macro_arg(raw: &str, name: &str) -> Option<String> {
         if let Some(end_idx) = end {
             let content = raw[start + 1..end_idx].trim();
             if !content.is_empty() {
+                return Some(content.to_string());
+            }
+        }
+        idx = start + 1;
+    }
+    None
+}
+
+fn extract_def_macro(raw: &str, name: &str) -> Option<String> {
+    let needle = format!("\\def\\{}", name);
+    let mut idx = 0usize;
+    while let Some(pos) = raw[idx..].find(&needle) {
+        let mut i = idx + pos + needle.len();
+        let bytes = raw.as_bytes();
+        while i < raw.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= raw.len() || bytes[i] != b'{' {
+            idx = i;
+            continue;
+        }
+        let start = i;
+        let mut depth = 0i32;
+        let mut end = None;
+        for (off, ch) in raw[start..].char_indices() {
+            if ch == '{' {
+                depth += 1;
+                continue;
+            }
+            if ch == '}' {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(start + off);
+                    break;
+                }
+            }
+        }
+        if let Some(end_idx) = end {
+            let content = raw[start + 1..end_idx].trim();
+            if !content.is_empty() {
                 return Some(convert_caption_text(content));
             }
         }
@@ -3113,95 +5046,52 @@ fn extract_macro_arg(raw: &str, name: &str) -> Option<String> {
     None
 }
 
-fn detect_template_from_packages(input: &str) -> Option<TemplateKind> {
+fn detect_template_from_packages(input: &str) -> Option<(TemplateKind, String)> {
     let packages = extract_usepackage_names(input);
     for pkg in packages {
         let name = pkg.to_lowercase();
         if name.starts_with("cvpr") {
-            return Some(TemplateKind::Cvpr);
+            return Some((TemplateKind::Cvpr, pkg));
+        }
+        if name.starts_with("aaai") {
+            return Some((TemplateKind::Aaai, pkg));
         }
         if name.starts_with("llncs") {
-            return Some(TemplateKind::Lncs);
+            return Some((TemplateKind::Lncs, pkg));
         }
         if name.starts_with("iclr") {
-            return Some(TemplateKind::Iclr);
+            return Some((TemplateKind::Iclr, pkg));
         }
         if name.starts_with("icml") {
-            return Some(TemplateKind::Icml);
+            return Some((TemplateKind::Icml, pkg));
         }
         if name.starts_with("neurips") {
-            return Some(TemplateKind::Neurips);
+            return Some((TemplateKind::Neurips, pkg));
         }
         if name.starts_with("jmlr") {
-            return Some(TemplateKind::Jmlr);
+            return Some((TemplateKind::Jmlr, pkg));
         }
         if name.starts_with("tmlr") {
-            return Some(TemplateKind::Tmlr);
+            return Some((TemplateKind::Tmlr, pkg));
+        }
+        if name.starts_with("rlj") || name.starts_with("rlc") {
+            return Some((TemplateKind::Rlj, pkg));
         }
         if name.starts_with("elsarticle") {
-            return Some(TemplateKind::Elsevier);
+            return Some((TemplateKind::Elsevier, pkg));
         }
         if name.starts_with("svjour") || name.starts_with("svproc") {
-            return Some(TemplateKind::Springer);
+            return Some((TemplateKind::Springer, pkg));
         }
         if name.starts_with("suthesis") {
-            return Some(TemplateKind::StanfordThesis);
+            return Some((TemplateKind::StanfordThesis, pkg));
         }
     }
     None
 }
 
 fn extract_usepackage_names(input: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    let mut idx = 0usize;
-    let needle = "\\usepackage";
-    while let Some(pos) = input[idx..].find(needle) {
-        let mut i = idx + pos + needle.len();
-        let bytes = input.as_bytes();
-        while i < input.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if i < input.len() && bytes[i] == b'[' {
-            if let Some(end) = find_matching_bracket(&input[i..], '[', ']') {
-                i += end + 1;
-            }
-        }
-        while i < input.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if i >= input.len() || bytes[i] != b'{' {
-            idx = i;
-            continue;
-        }
-        if let Some(end) = find_matching_bracket(&input[i..], '{', '}') {
-            let content = &input[i + 1..i + end];
-            for pkg in content.split(',') {
-                let trimmed = pkg.trim();
-                if !trimmed.is_empty() {
-                    names.push(trimmed.to_string());
-                }
-            }
-            idx = i + end + 1;
-        } else {
-            idx = i + 1;
-        }
-    }
-    names
-}
-
-fn find_matching_bracket(s: &str, open: char, close: char) -> Option<usize> {
-    let mut depth = 0i32;
-    for (i, c) in s.char_indices() {
-        if c == open {
-            depth += 1;
-        } else if c == close {
-            depth -= 1;
-            if depth == 0 {
-                return Some(i);
-            }
-        }
-    }
-    None
+    super::utils::collect_usepackage_entries(input)
 }
 
 impl Default for LatexConverter {
@@ -3476,6 +5366,55 @@ fn extract_bracket_arg_at(input: &str, start: usize) -> (Option<String>, Option<
     (None, None)
 }
 
+fn extract_tylax_hint_block(input: &str) -> String {
+    let start_marker = "%__TYLAX_HINTS_BEGIN__";
+    let end_marker = "%__TYLAX_HINTS_END__";
+    let Some(start_idx) = input.find(start_marker) else {
+        return String::new();
+    };
+    let after_start = &input[start_idx + start_marker.len()..];
+    let Some(end_idx) = after_start.find(end_marker) else {
+        return String::new();
+    };
+    let block = &after_start[..end_idx];
+    let mut out = String::new();
+    for line in block.lines() {
+        let trimmed = line.trim_start();
+        let decommented = if let Some(rest) = trimmed.strip_prefix('%') {
+            rest.strip_prefix(' ').unwrap_or(rest)
+        } else {
+            line
+        };
+        out.push_str(decommented);
+        out.push('\n');
+    }
+    out
+}
+
+fn strip_abstract_label(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if !lower.starts_with("abstract") {
+        return trimmed.to_string();
+    }
+    let mut rest = trimmed["abstract".len()..].trim_start();
+    if let Some(stripped) = rest.strip_prefix(':') {
+        rest = stripped.trim_start();
+    } else if let Some(stripped) = rest.strip_prefix('-') {
+        rest = stripped.trim_start();
+    } else if let Some(stripped) = rest.strip_prefix('—') {
+        rest = stripped.trim_start();
+    }
+    if rest.is_empty() {
+        trimmed.to_string()
+    } else {
+        rest.to_string()
+    }
+}
+
 fn apply_geometry_options_state(state: &mut ConversionState, options: &str) {
     for raw in options.split(',') {
         let opt = raw.trim();
@@ -3515,15 +5454,106 @@ fn apply_geometry_options_state(state: &mut ConversionState, options: &str) {
     }
 }
 
+/// Normalize LaTeX paper sizes to Typst-compatible names
+fn normalize_paper_size(paper: &str) -> &str {
+    match paper.to_lowercase().as_str() {
+        "letter" | "letterpaper" => "us-letter",
+        "legal" | "legalpaper" => "us-legal",
+        "executive" | "executivepaper" => "us-executive",
+        "tabloid" => "us-tabloid",
+        "ledger" => "us-ledger",
+        _ => paper, // a4, a5, etc. are already valid in Typst
+    }
+}
+
 fn apply_length_setting_state(state: &mut ConversionState, target: &str, value: &str) {
     let mut name = target.trim().trim_start_matches('\\').to_string();
     name.retain(|c| c.is_ascii_alphabetic());
-    let val = value.trim().trim_matches(|c| c == '{' || c == '}');
+    // Handle LaTeX internal dimension macros first
+    let raw = value
+        .trim()
+        .trim_matches(|c| c == '{' || c == '}')
+        .replace("\\p@", "pt")
+        .replace("\\z@", "0pt")
+        .replace("\\@plus", " ")
+        .replace("\\@minus", " ");
+    let raw = raw.trim();
+    let val = if let Some(mult) = raw.strip_suffix("\\baselineskip") {
+        let factor = mult.trim();
+        if factor.is_empty() {
+            "1em".to_string()
+        } else if let Ok(value) = factor.parse::<f32>() {
+            let mut out = format!("{value:.3}");
+            while out.contains('.') && out.ends_with('0') {
+                out.pop();
+            }
+            if out.ends_with('.') {
+                out.pop();
+            }
+            format!("{out}em")
+        } else {
+            "1em".to_string()
+        }
+    } else if let Some(rest) = raw.strip_prefix("\\stretch") {
+        let rest = rest.trim();
+        if let Some(arg) = rest.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+            let inner = arg.trim();
+            if !inner.is_empty() {
+                format!("{inner}fr")
+            } else {
+                "1fr".to_string()
+            }
+        } else {
+            "1fr".to_string()
+        }
+    } else if raw == "\\fill" || raw == "\\hfill" || raw == "\\vfill" {
+        "1fr".to_string()
+    } else if raw.ends_with("pc") {
+        let number = raw.trim_end_matches("pc").trim();
+        if let Ok(value) = number.parse::<f32>() {
+            let pts = value * 12.0;
+            let mut out = format!("{:.4}", pts);
+            while out.contains('.') && out.ends_with('0') {
+                out.pop();
+            }
+            if out.ends_with('.') {
+                out.pop();
+            }
+            format!("{out}pt")
+        } else {
+            raw.to_string()
+        }
+    } else if raw.parse::<f32>().is_ok() {
+        format!("{raw}pt")
+    } else {
+        // Handle ex unit - Typst parser can misinterpret "0.05ex" as "0.05e" (scientific notation)
+        // Convert to multiplication form to avoid parsing issues
+        fix_ex_dimension(&raw)
+    };
     if name.contains("parskip") {
-        state.par_skip = Some(val.to_string());
+        state.par_skip = Some(val);
     } else if name.contains("parindent") {
-        state.par_indent = Some(val.to_string());
+        state.par_indent = Some(val);
     }
+}
+
+/// Fix dimension values with 'ex' unit to avoid Typst parser issues.
+/// Typst interprets "1ex" as "1e" (scientific notation start) + "x".
+/// Convert 'ex' to 'em' with approximate ratio (1ex ≈ 0.43em).
+fn fix_ex_dimension(dim: &str) -> String {
+    let dim = dim.trim();
+    if dim.ends_with("ex") {
+        let num_part = dim.trim_end_matches("ex").trim();
+        if let Ok(val) = num_part.parse::<f64>() {
+            // Convert ex to em (1ex ≈ 0.43em based on typical x-height ratio)
+            let em_val = val * 0.43;
+            // Format with reasonable precision
+            let formatted = format!("{:.4}", em_val);
+            let formatted = formatted.trim_end_matches('0').trim_end_matches('.');
+            return format!("{}em", formatted);
+        }
+    }
+    dim.to_string()
 }
 
 fn apply_fancy_head_state(state: &mut ConversionState, opt: &str, content: &str) {
@@ -3640,5 +5670,51 @@ fn capture_hypersetup_hints(state: &mut ConversionState, input: &str) {
         }
 
         pos = start + brace_rel + content.len();
+    }
+}
+
+fn capture_color_defs(state: &mut ConversionState, input: &str) {
+    let stripped = strip_latex_comments(input);
+    let mut pos = 0usize;
+    while let Some(idx) = stripped[pos..].find("\\definecolor") {
+        let start = pos + idx + "\\definecolor".len();
+        let (name, next1) = extract_braced_arg_at(&stripped, start);
+        let (model, next2) = if let Some(next) = next1 {
+            extract_braced_arg_at(&stripped, next)
+        } else {
+            (None, None)
+        };
+        let (spec, next3) = if let Some(next) = next2 {
+            extract_braced_arg_at(&stripped, next)
+        } else {
+            (None, None)
+        };
+        if let (Some(name), Some(model), Some(spec)) = (name, model, spec) {
+            let ident = sanitize_color_identifier(name.trim());
+            if !ident.is_empty() {
+                let value = parse_color_with_model(model.trim(), spec.trim());
+                state.register_color_def(ident, value);
+            }
+        }
+        pos = next3.unwrap_or(start + 1);
+    }
+
+    let mut pos = 0usize;
+    while let Some(idx) = stripped[pos..].find("\\colorlet") {
+        let start = pos + idx + "\\colorlet".len();
+        let (name, next1) = extract_braced_arg_at(&stripped, start);
+        let (spec, next2) = if let Some(next) = next1 {
+            extract_braced_arg_at(&stripped, next)
+        } else {
+            (None, None)
+        };
+        if let (Some(name), Some(spec)) = (name, spec) {
+            let ident = sanitize_color_identifier(name.trim());
+            if !ident.is_empty() {
+                let value = sanitize_color_expression(spec.trim());
+                state.register_color_def(ident, value);
+            }
+        }
+        pos = next2.unwrap_or(start + 1);
     }
 }

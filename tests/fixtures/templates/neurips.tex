@@ -1,0 +1,116 @@
+\documentclass{article}
+\IfFileExists{neurips_2025.sty}{\usepackage{neurips_2025}}{\def\tylaxNoStyle{1}}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage[table]{xcolor}
+\usepackage{hyperref}
+\usepackage{natbib}
+\ifdefined\tylaxNoStyle
+\def\And{\\}
+\fi
+\title{Attention Is All You Need: Revisited with Sparse Transformers}
+\author{
+Yoshua Bengio \\
+Mila, Université de Montréal \\
+\texttt{yoshua.bengio@mila.quebec}
+\And
+Geoffrey Hinton \\
+University of Toronto, Google DeepMind \\
+\texttt{geoffrey.hinton@utoronto.ca}
+\And
+Yann LeCun \\
+NYU, Meta AI Research \\
+\texttt{yann@cs.nyu.edu}
+}
+\begin{document}
+\maketitle
+\begin{abstract}
+ Transformer architectures have become the de facto standard for sequence modeling, achieving remarkable success across natural language processing, computer vision, and scientific computing. However, the quadratic complexity of self-attention limits scalability to long sequences. We introduce Sparse Transformers with Learned Patterns (STLP), which reduces attention complexity to   while maintaining expressive power. Our method learns task-specific sparsity patterns through differentiable masking, avoiding the need for hand-crafted patterns. Experiments on language modeling (WikiText-103), long-range arena, and protein structure prediction demonstrate that STLP matches dense transformer performance while enabling 10x longer context windows. 
+\end{abstract}
+\section{Introduction}
+
+The transformer architecture \cite{vaswani2017attention} has revolutionized deep learning, achieving state-of-the-art results in natural language processing \cite{devlin2019bert} \cite{brown2020gpt3}, computer vision \cite{dosovitskiy2021vit}, and scientific applications \cite{jumper2021alphafold}. The key innovation is self-attention, which enables modeling long-range dependencies without the recurrence bottleneck of RNNs.
+
+However, the computational cost of self-attention scales quadratically with sequence length: $O(n^2 d)$ where $n$ is the sequence length and $d$ is the hidden dimension. This prohibits direct application to long sequences, limiting context windows to typically 512--2048 tokens.
+
+Prior work has proposed various sparse attention patterns including:
+
+\begin{itemize}
+  \item \textbf{Local windows}: Attending only to nearby tokens \cite{beltagy2020longformer}
+  \item \textbf{Strided patterns}: Fixed sparse patterns with global tokens \cite{zaheer2020bigbird}
+  \item \textbf{Learned routing}: Dynamic token clustering \cite{roy2021routing}
+  \item \textbf{Linear attention}: Kernel-based approximations \cite{katharopoulos2020transformers}
+\end{itemize}
+
+We propose \textbf{Sparse Transformers with Learned Patterns (STLP)}, which automatically discovers task-optimal sparsity patterns through gradient descent.
+
+\section{Background}
+
+\subsection{Self-Attention}
+
+Standard self-attention computes: $\text{Attention}(Q, K, V) = \text{softmax}((Q K^T) / \sqrt{d_k}) V$ where $Q, K, V \in \mathbb{R}^{n times d}$ are query, key, and value matrices projected from input $X \in \mathbb{R}^{n times d}$.
+
+\subsection{Sparse Attention}
+
+Sparse attention restricts the attention pattern via a binary mask $M \in {0, 1}^{n times n}$: $\text{SparseAttn}(Q, K, V) = \text{softmax}((Q K^T) / \sqrt{d_k} + M_\text{neg}) V$ where $M_\text{neg}$ sets masked positions to $-infinity$. The complexity reduces to $O(\text{nnz}(M) dot d)$.
+
+\section{Method}
+
+\subsection{Learned Sparsity Patterns}
+
+We parameterize the mask $M$ using a differentiable function $f_\phi: \mathbb{R}^{n times d} \to [0, 1]^{n times n}$: $M_{i j} = \sigma(f_\phi(X)_{i j})$ where $\sigma$ is the sigmoid function.
+
+\subsection{Training Objective}
+
+We optimize a multi-task objective: $\mathcal{L} = \mathcal{L}_\text{task} + \lambda_1 \mathcal{L}_\text{sparse} + \lambda_2 \mathcal{L}_\text{entropy}$
+
+\section{Experiments}
+
+\subsection{Language Modeling}
+
+\begin{table}[t]
+\centering
+\caption{WikiText-103 language modeling results.}
+\begin{tabular}{|c|c|c|c|}
+\hline
+\textbf{Model} & \textbf{Context} & \textbf{PPL} & \textbf{Speed} \\
+\hline
+Transformer-XL & 3800 & 18.3 & 1.0x \\
+\hline
+Longformer & 4096 & 18.0 & 2.1x \\
+\hline
+BigBird & 4096 & 18.2 & 2.0x \\
+\hline
+STLP (Ours) & 8192 & \textbf{17.4} & \textbf{3.2x} \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Long-Range Arena}
+
+\begin{table}[t]
+\centering
+\caption{Long-Range Arena benchmark accuracy (\%).}
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+\textbf{Task} & \textbf{Trans.} & \textbf{Performer} & \textbf{BigBird} & \textbf{STLP} \\
+\hline
+ListOps & 36.4 & 18.0 & 36.0 & \textbf{38.2} \\
+\hline
+Text & 64.3 & 65.4 & 64.0 & \textbf{67.1} \\
+\hline
+Retrieval & 57.5 & 53.8 & 59.3 & \textbf{61.8} \\
+\hline
+Average & 54.4 & 51.4 & 55.0 & \textbf{58.0} \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Conclusion}
+
+We introduced STLP, a method for learning task-specific sparse attention patterns that reduces transformer complexity from $O(n^2)$ to $O(n \sqrt{n})$ while matching dense model performance.
+\bibliographystyle{plainnat}
+\bibliography{refs}
+\end{document}

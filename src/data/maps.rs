@@ -492,6 +492,14 @@ lazy_static! {
             args: ArgShape::Right { pattern: ArgPattern::None },
             alias: Some("#h".to_string()),
         }));
+        m.insert("hskip".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("vskip".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
         m.insert("iff".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::None },
             alias: Some("arrow.l.r.double.long".to_string()),
@@ -1349,6 +1357,10 @@ lazy_static! {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
             alias: None,
         }));
+        m.insert("link".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
         m.insert("bibliography".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
             alias: None,
@@ -1824,6 +1836,10 @@ lazy_static! {
             alias: None,
         }));
         m.insert("texttt".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("lstinline".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
             alias: None,
         }));

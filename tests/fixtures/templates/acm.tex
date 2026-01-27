@@ -1,0 +1,116 @@
+\PassOptionsToPackage{table}{xcolor}
+\documentclass[sigconf]{acmart}
+\acmDOI{https://doi.org/10.1145/1234567.8901234}
+\setcopyright{acmlicensed}
+\acmConference[KDD '24]{ACM SIGKDD Conference on Knowledge Discovery and Data Mining}{August 25--29}{Barcelona, Spain}
+\usepackage{graphicx}
+\usepackage{bm}
+\usepackage{booktabs}
+\title{Deep Learning Approaches for Efficient Graph Neural Networks}
+\author{Alice Chen}
+\email{alice.chen@stanford.edu}
+\affiliation{\institution{Department of Computer Science, Stanford University}\country{}}
+\author{Bob Williams}
+\email{bob.williams@mit.edu}
+\affiliation{\institution{CSAIL, Massachusetts Institute of Technology}\country{}}
+\author{Carol Martinez}
+\email{carol@google.com}
+\affiliation{\institution{Google Research}\country{}}
+\begin{document}
+\maketitle
+\section{Abstract}
+
+Graph Neural Networks (GNNs) have emerged as a powerful paradigm for learning on graph-structured data. However, scaling GNNs to large graphs remains challenging due to the neighborhood explosion problem. In this paper, we present EfficientGNN, a novel architecture that achieves state-of-the-art performance while reducing computational complexity from $O(n^2)$ to $O(n log n)$.
+
+\section{Introduction}
+
+Graph Neural Networks (GNNs) have revolutionized machine learning on graph-structured data. Applications range from social network analysis to molecular property prediction.
+
+Despite their success, GNNs face significant scalability challenges. The standard message-passing framework requires aggregating information from neighboring nodes, leading to exponential growth in computational requirements as network depth increases.
+
+Our key contributions are:
+
+\begin{itemize}
+  \item A novel sparse attention mechanism that reduces complexity from $O(n^2)$ to $O(n log n)$
+  \item A theoretical analysis proving convergence guarantees
+  \item Extensive experiments on five benchmark datasets
+\end{itemize}
+
+\section{Related Work}
+
+\subsection{Message Passing Neural Networks}
+
+The message passing framework defines GNN computation as: $h_v^{(l+1)} = \sigma(W^{(l)} dot \sum_{u \in N(v)} (h_u^{(l)})/(\sqrt{d_u d_v}))$ where $h_v^{(l)}$ is the hidden state of node $v$ at layer $l$.
+
+\subsection{Scalable GNN Architectures}
+
+Several approaches address GNN scalability:
+
+\begin{table}[t]
+\centering
+\caption{Comparison of scalable GNN methods.}
+\begin{tabular}{|c|c|c|c|}
+\hline
+\textbf{Method} & \textbf{Complexity} & \textbf{Sampling} & \textbf{Mini-batch} \\
+\hline
+GraphSAGE & $O(k^L n)$ & Yes & Yes \\
+\hline
+FastGCN & $O(s L n)$ & Yes & Yes \\
+\hline
+ClusterGCN & $O(n + m)$ & No & Yes \\
+\hline
+\textbf{EfficientGNN (Ours)} & $O(n log n)$ & No & Yes \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Method}
+
+\subsection{Sparse Attention Mechanism}
+
+We introduce a learnable sparse attention pattern:
+
+\begin{align*}
+\alpha_{i j} = \begin{cases}\text{softmax}((q_i^T k_j) / \sqrt{d}) & \text{if} (i,j) \in S \\ 0 & \text{otherwise}\end{cases}
+\end{align*}
+
+\subsection{Theoretical Analysis}
+
+\textbf{Theorem 1.} \textit{For any $\epsilon > 0$, EfficientGNN approximates full attention within error $\epsilon$ using $O(n log n / \epsilon^2)$ edges in expectation.}
+
+\section{Experiments}
+
+\subsection{Datasets}
+
+We evaluate on five benchmark datasets:
+
+\begin{enumerate}
+  \item Cora, CiteSeer, PubMed (citation networks)
+  \item Reddit (social network)
+  \item ogbn-products (e-commerce)
+\end{enumerate}
+
+\subsection{Results}
+
+\begin{table}[t]
+\centering
+\caption{Node classification accuracy (\%).}
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+\textbf{Dataset} & \textbf{GCN} & \textbf{GAT} & \textbf{GraphSAINT} & \textbf{Ours} \\
+\hline
+Cora & 81.5 & 83.0 & 81.2 & \textbf{84.2} \\
+\hline
+CiteSeer & 70.3 & 72.5 & 70.1 & \textbf{73.8} \\
+\hline
+PubMed & 79.0 & 79.0 & 78.8 & \textbf{80.5} \\
+\hline
+Reddit & 93.4 & 94.2 & 96.6 & \textbf{97.1} \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Conclusion}
+
+We presented EfficientGNN, achieving $O(n log n)$ complexity while matching or exceeding state-of-the-art accuracy on all benchmarks.
+\end{document}

@@ -780,8 +780,9 @@ pub fn render_image_expr(path: &str, attrs: &ImageAttributes) -> String {
     }
 
     if let Some(scale) = attrs.scale {
-        let scale_val = format_num(scale);
-        expr = format!("scale(x: {0}, y: {0}, {1})", scale_val, expr);
+        // Typst scale() expects ratio/percentage, not float
+        let scale_percent = (scale * 100.0) as i32;
+        expr = format!("scale(x: {0}%, y: {0}%, {1})", scale_percent, expr);
     }
     if let Some(angle) = attrs.angle {
         let angle_val = format_num(angle);

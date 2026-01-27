@@ -1,0 +1,222 @@
+\documentclass{article}
+\IfFileExists{iclr2025_conference.sty}{\usepackage{iclr2025_conference}}{\def\tylaxNoStyle{1}}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage[table]{xcolor}
+\usepackage{hyperref}
+\hypersetup{hidelinks}
+\usepackage{url}
+\usepackage{natbib}
+\ifdefined\tylaxNoStyle
+\def\And{\\}
+\fi
+\providecommand{\iclrfinalcopy}{}
+\iclrfinalcopy
+\title{Scaling Laws for Multimodal Foundation Models}
+\author{
+Ilya Sutskever \\
+OpenAI \\
+San Francisco, CA, USA \\
+\texttt{ilya@openai.com}
+\And
+Alex Krizhevsky \\
+Google Research \\
+Mountain View, CA, USA \\
+\texttt{kriz@google.com}
+\And
+Karen Simonyan \\
+Google DeepMind \\
+London, UK \\
+\texttt{simonyan@deepmind.com}
+}
+\begin{document}
+\maketitle
+\begin{abstract}
+ Understanding how model performance scales with compute, data, and parameters is crucial for efficient resource allocation in foundation model development. While scaling laws have been extensively studied for language models, their behavior in multimodal settings remains poorly understood. We present a comprehensive study of scaling laws for vision-language models, analyzing performance across 200 model configurations spanning 4 orders of magnitude in compute. Our key findings include: (1) multimodal models follow power-law scaling similar to language models but with modality-specific coefficients, (2) optimal compute allocation between modalities varies with total compute budget, and (3) cross-modal transfer exhibits diminishing returns at scale. We derive practical guidelines for training compute-optimal multimodal models and release a scaling law calculator to predict performance for any configuration. 
+\end{abstract}
+\section{Introduction}
+
+Large-scale pretraining has transformed machine learning, enabling models to achieve remarkable capabilities through scaling \citep{kaplan2020scaling} \citep{hoffmann2022chinchilla}. The discovery of neural scaling laws---predictable relationships between compute, data, parameters, and performance---has enabled principled resource allocation and accurate capability forecasting.
+
+Recent progress in multimodal models \citep{radford2021clip} \citep{alayrac2022flamingo} demonstrates that similar scaling benefits extend beyond language. However, fundamental questions remain:
+
+\begin{itemize}
+  \item How do scaling laws differ between modalities?
+  \item What is the optimal compute allocation between vision and language components?
+  \item How does cross-modal transfer scale with model size?
+\end{itemize}
+
+We address these questions through an empirical study of 200+ vision-language models, spanning compute budgets from $10^18$ to $10^22$ FLOPs. Our contributions include:
+
+\begin{enumerate}
+  \item The first comprehensive scaling law analysis for multimodal models
+  \item Discovery of modality-specific scaling coefficients
+  \item Compute-optimal allocation strategies for different budget regimes
+  \item A practical calculator for predicting multimodal model performance
+\end{enumerate}
+
+\section{Background}
+
+\subsection{Neural Scaling Laws}
+
+For language models, \citep{kaplan2020scaling} established that cross-entropy loss $L$ follows: $L(N, D) = ((N_c) / N)^{\alpha_N} + ((D_c) / D)^{\alpha_D}$ where $N$ is parameters, $D$ is data tokens, and $\alpha_N \approx 0.076$, $\alpha_D \approx 0.095$ for dense transformers.
+
+\subsection{Multimodal Architectures}
+
+Modern vision-language models typically consist of:
+
+\begin{itemize}
+  \item \textbf{Vision encoder}: ViT \citep{dosovitskiy2021vit} processing image patches
+  \item \textbf{Language model}: Decoder-only transformer generating text
+  \item \textbf{Cross-modal connector}: Projection or cross-attention layers
+\end{itemize}
+
+The total parameters decompose as $N = N_V + N_L + N_C$ where subscripts denote vision, language, and connector components.
+
+\section{Methodology}
+
+\subsection{Model Configurations}
+
+We train models with:
+
+\begin{table}[t]
+\centering
+\caption{Model configurations spanning 4 orders of magnitude in compute.}
+\begingroup
+\begin{tabular}{cccc}
+\textbf{\textbf{Config}} & \textbf{\textbf{Vision}} & \textbf{\textbf{Language}} & \textbf{\textbf{Connector}} \\
+XS & ViT-S/16 & 125M & Linear \\
+S & ViT-B/16 & 350M & MLP \\
+M & ViT-L/14 & 1.3B & Cross-Attn \\
+L & ViT-H/14 & 6.7B & Cross-Attn \\
+XL & ViT-G/14 & 30B & Cross-Attn \\
+\end{tabular}
+\endgroup
+\end{table}
+
+\subsection{Training Setup}
+
+All models are trained on a mixture of:
+
+\begin{itemize}
+  \item \textbf{Image-text pairs}: LAION-5B filtered to high-quality subset
+  \item \textbf{Interleaved documents}: CommonCrawl with images
+  \item \textbf{Instruction data}: Human-annotated visual QA
+\end{itemize}
+
+Total training data ranges from $10^9$ to $10^12$ tokens depending on compute budget.
+
+\section{Results}
+
+\subsection{Scaling Law Fit}
+
+We find multimodal loss follows a modified power law: $L(N_V, N_L, D) = ((N_{V,c}) / N_V)^{\alpha_V} + ((N_{L,c}) / N_L)^{\alpha_L} + ((D_c) / D)^{\alpha_D} + L_infinity$
+
+\begin{table}[t]
+\centering
+\caption{Fitted scaling coefficients for multimodal models.}
+\begingroup
+\begin{tabular}{ccc}
+\textbf{\textbf{Coefficient}} & \textbf{\textbf{Value}} & \textbf{\textbf{95\% CI}} \\
+$\alpha_V$ & 0.084 & [0.079, 0.089] \\
+$\alpha_L$ & 0.073 & [0.068, 0.078] \\
+$\alpha_D$ & 0.091 & [0.086, 0.096] \\
+$L_infinity$ & 1.42 & [1.38, 1.46] \\
+\end{tabular}
+\endgroup
+\end{table}
+
+Interestingly, $\alpha_V > \alpha_L$, indicating vision components benefit more from scaling than language at fixed compute.
+
+\subsection{Compute-Optimal Allocation}
+
+For a fixed compute budget $C$, optimal allocation minimizes loss subject to: $C = 6 N_V D_V + 6 N_L D_L$ where $D_V$ and $D_L$ are vision and language tokens processed.
+
+The compute-optimal allocation ratio $r^* = N_V / N_L$ satisfies: $r^* = (\alpha_V / \alpha_L)^{1/(\alpha_V + \alpha_D)}$ yielding $r^* \approx 1.3$ for our fitted coefficients.
+
+\subsection{Downstream Performance}
+
+We evaluate on standard benchmarks:
+
+\begin{table}[t]
+\centering
+\caption{Downstream task performance scales predictably with compute.}
+\begingroup
+\begin{tabular}{ccccc}
+\textbf{\textbf{Model}} & \textbf{\textbf{VQAv2}} & \textbf{\textbf{COCO}} & \textbf{\textbf{RefCOCO}} & \textbf{\textbf{OKVQA}} \\
+XS (100M) & 64.2 & 102.3 & 68.4 & 42.1 \\
+S (500M) & 71.8 & 118.7 & 74.2 & 48.9 \\
+M (2B) & 78.3 & 128.4 & 80.1 & 55.6 \\
+L (8B) & 82.1 & 134.2 & 84.7 & 61.2 \\
+XL (40B) & \textbf{85.4} & \textbf{138.9} & \textbf{87.3} & \textbf{65.8} \\
+\end{tabular}
+\endgroup
+\end{table}
+
+Performance on all tasks follows power-law scaling with compute ($R^2 > 0.98$).
+
+\subsection{Cross-Modal Transfer}
+
+We measure how visual pretraining improves language tasks and vice versa:
+
+\begin{table}[t]
+\centering
+\caption{Cross-modal transfer (improvement in language loss from adding vision). Transfer benefits diminish at scale.}
+\begingroup
+\begin{tabular}{cccc}
+\textbf{\textbf{Compute}} & \textbf{\textbf{Lang Only}} & \textbf{\textbf{+Vision}} & \textbf{\textbf{Transfer}} \\
+$10^19$ & 15.2 & 14.8 & +2.6\% \\
+$10^20$ & 12.4 & 12.1 & +2.4\% \\
+$10^21$ & 10.1 & 9.9 & +2.0\% \\
+$10^22$ & 8.3 & 8.2 & +1.2\% \\
+\end{tabular}
+\endgroup
+\end{table}
+
+\section{Analysis}
+
+\subsection{Why Does Vision Scale Faster?}
+
+We hypothesize that vision encoders are currently undertrained relative to language models. Supporting evidence:
+
+\begin{enumerate}
+  \item Vision pretraining datasets are smaller and noisier
+  \item Optimal vision/language ratio increases with compute
+  \item Vision loss curves show less saturation
+\end{enumerate}
+
+\subsection{Implications for Model Design}
+
+Based on our findings, we recommend:
+
+\begin{table}[t]
+\centering
+\caption{Recommended configurations for different compute budgets.}
+\begingroup
+\begin{tabular}{ccc}
+\textbf{\textbf{Budget}} & \textbf{\textbf{V/L Ratio}} & \textbf{\textbf{Architecture}} \\
+< $10^20$ & 1:1 & Shared backbone \\
+$10^20$ - $10^21$ & 1.3:1 & Separate encoders \\
+> $10^21$ & 1.5:1 & Mixture-of-experts \\
+\end{tabular}
+\endgroup
+\end{table}
+
+\section{Related Work}
+
+\textbf{Language Scaling Laws.} \citep{kaplan2020scaling} established compute-optimal scaling. \citep{hoffmann2022chinchilla} revised optimal data/parameter ratios. \citep{muennighoff2023scaling} extended to data-constrained regimes.
+
+\textbf{Vision Scaling.} \citep{zhai2022scaling} studied ViT scaling. \citep{dehghani2023scaling} analyzed vision transformer architectures. Our work extends to joint vision-language scaling.
+
+\textbf{Multimodal Models.} \citep{radford2021clip} pioneered contrastive vision-language learning. \citep{alayrac2022flamingo} demonstrated few-shot visual reasoning. \citep{liu2023llava} showed instruction tuning benefits.
+
+\section{Conclusion}
+
+We presented the first comprehensive scaling law analysis for multimodal foundation models. Our findings reveal that vision and language components exhibit distinct scaling behavior, with vision benefiting more from increased compute. We provide practical guidelines for compute-optimal allocation and release tools for performance prediction. Future work includes extending to video and audio modalities.
+
+\section*{Reproducibility Statement}
+
+All training code, model checkpoints, and evaluation scripts are available at github.com/scaling-multimodal/laws. We provide detailed documentation of hyperparameters, hardware configurations, and random seeds.
+\end{document}

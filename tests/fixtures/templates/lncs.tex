@@ -1,0 +1,165 @@
+\documentclass[runningheads]{llncs}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage[table]{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\providecommand{\textsubscript}[1]{$_{\text{#1}}$}
+\begin{document}
+\title{Advances in Neural Network Compression for Edge Deployment}
+\author{Alice Chen\inst{1} \and Bob Williams\inst{1} \and Carol Davis\inst{1}}
+\authorrunning{A. Chen, B. Williams, C. Davis}
+\maketitle
+\begin{abstract}
+ Deep neural networks have achieved remarkable success across various domains, but their deployment on resource-constrained edge devices remains challenging due to memory and computational limitations. This paper presents a comprehensive framework for neural network compression that combines pruning, quantization, and knowledge distillation techniques. Our approach achieves up to 10x compression ratio while maintaining accuracy within 1\% of the original model. We demonstrate the effectiveness of our method on multiple benchmark datasets and real-world edge deployment scenarios. 
+\keywords{Neural network compression \and Edge deployment \and Model pruning \and Quantization \and Knowledge distillation}
+\end{abstract}
+\section{Introduction}
+
+The proliferation of edge computing devices has created an urgent need for efficient neural network deployment strategies. While deep learning models continue to grow in size and complexity, edge devices remain constrained by limited memory, computational power, and energy budgets \cite{lecun2015deep}. This disparity between model requirements and device capabilities presents a significant challenge for practical AI deployment.
+
+Our work addresses this challenge through a unified compression framework that integrates multiple complementary techniques:
+
+\begin{itemize}
+  \item \textbf{Structured pruning}: Removes entire filters or channels based on importance scores
+  \item \textbf{Mixed-precision quantization}: Adapts bit-width per layer based on sensitivity analysis
+  \item \textbf{Progressive knowledge distillation}: Transfers knowledge from teacher to student incrementally
+\end{itemize}
+
+The key insight driving our approach is that different compression techniques target different sources of redundancy, and their combination can achieve compression ratios beyond what any single technique can accomplish alone.
+
+\section{Related Work}
+
+\subsection{Network Pruning}
+
+Network pruning has a rich history dating back to early work on optimal brain damage \cite{lecun1990optimal}. Modern approaches can be categorized into unstructured and structured pruning. Unstructured pruning \cite{han2015learning} achieves high sparsity but requires specialized hardware for speedup. Structured pruning \cite{li2017pruning} removes entire filters, enabling acceleration on commodity hardware.
+
+\subsection{Quantization Techniques}
+
+Quantization reduces the bit-width of weights and activations. Post-training quantization \cite{jacob2018quantization} offers a simple deployment path but may suffer accuracy loss. Quantization-aware training \cite{krishnamoorthi2018quantizing} typically achieves better accuracy by incorporating quantization effects during training.
+
+\subsection{Knowledge Distillation}
+
+Knowledge distillation \cite{hinton2015distilling} transfers knowledge from a large teacher model to a smaller student model. Recent advances include feature-based distillation \cite{romero2015fitnets} and attention transfer \cite{zagoruyko2017paying}.
+
+\section{Methodology}
+
+\subsection{Problem Formulation}
+
+Let $f_\theta: \mathcal{X} \to \mathcal{Y}$ denote a neural network with parameters $\theta \in \mathbb{R}^n$. Our goal is to find a compressed model $f_{\theta'}$ with $\theta' \in \mathbb{R}^m$ where $m << n$, such that the task performance degradation is minimized:
+
+\[
+\min_{\theta'} \mathcal{L}(f_{\theta'}(x), y) + \lambda R(\theta')
+\]
+
+where $\mathcal{L}$ is the task loss, $R$ is a regularization term promoting compression, and $\lambda$ balances the two objectives.
+
+\subsection{Unified Compression Framework}
+
+Our framework operates in three stages:
+
+\textbf{Stage 1: Importance Analysis.} We compute importance scores for each layer using Taylor expansion:
+
+\[
+I_k = |\partial \mathcal{L} / (\partial W_k) dot W_k|
+\]
+
+\textbf{Stage 2: Adaptive Compression.} Based on importance scores, we determine per-layer compression ratios:
+
+\[
+r_k = f(I_k, C_\text{target})
+\]
+
+where $C_\text{target}$ is the target compression ratio.
+
+\textbf{Stage 3: Distillation-Guided Fine-tuning.} We fine-tune the compressed model using knowledge distillation:
+
+\[
+\mathcal{L}_\text{total} = \alpha \mathcal{L}_\text{task} + (1 - \alpha) \mathcal{L}_\text{KD}
+\]
+
+\begin{table}[h]
+\centering
+\caption{Comparison of compression methods on CIFAR-10 with ResNet-50.}
+\label{tab:comparison}
+\begin{tabular}{cccc}
+\toprule
+\textbf{Method} & \textbf{Compression} & \textbf{Accuracy} & \textbf{Speedup} \\
+Baseline & 1x & 94.2\% & 1.0x \\
+Pruning only & 4x & 92.8\% & 2.1x \\
+Quantization only & 4x & 93.5\% & 1.8x \\
+Ours (combined) & 10x & 93.4\% & 4.2x \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Experiments}
+
+\subsection{Experimental Setup}
+
+We evaluate our framework on three benchmark datasets: CIFAR-10, ImageNet, and a proprietary edge deployment dataset. For each dataset, we use standard train/validation/test splits. All experiments are conducted on NVIDIA A100 GPUs for training and Raspberry Pi 4 for edge deployment evaluation.
+
+\textbf{Baselines.} We compare against several state-of-the-art methods:
+
+\begin{enumerate}
+  \item Magnitude-based pruning \cite{han2015learning}
+  \item ADMM-based structured pruning \cite{zhang2018admm}
+  \item Post-training quantization \cite{jacob2018quantization}
+  \item Combined pruning and quantization \cite{han2016deep}
+\end{enumerate}
+
+\subsection{Main Results}
+
+Table~\ref{tab:comparison} shows the comparison of different compression methods on CIFAR-10 with ResNet-50. Our unified framework achieves superior compression-accuracy trade-off compared to individual techniques.
+
+\begin{table}[h]
+\centering
+\caption{Compression results across different architectures on ImageNet.}
+\label{tab:imagenet}
+\begin{tabular}{ccccc}
+\toprule
+\textbf{Model} & \textbf{Original} & \textbf{Compressed} & \textbf{Ratio} & \textbf{Acc. Drop} \\
+ResNet-18 & 44.6 MB & 4.5 MB & 9.9x & 0.8\% \\
+ResNet-50 & 97.5 MB & 9.8 MB & 9.9x & 0.9\% \\
+MobileNetV2 & 13.4 MB & 1.4 MB & 9.6x & 1.2\% \\
+EfficientNet-B0 & 20.5 MB & 2.1 MB & 9.8x & 0.7\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Ablation Study}
+
+To understand the contribution of each component, we conduct ablation experiments by progressively adding compression techniques.
+
+\textbf{Effect of pruning ratio.} We vary the pruning ratio from 0.3 to 0.9 and observe that accuracy degrades gracefully up to 0.7, after which it drops sharply.
+
+\textbf{Effect of quantization bit-width.} Mixed-precision quantization with 4-8 bits per layer achieves the best trade-off, outperforming uniform quantization at the same average bit-width.
+
+\section{Discussion}
+
+\subsection{Practical Deployment Considerations}
+
+Deploying compressed models on edge devices involves several practical considerations:
+
+\begin{itemize}
+  \item \textbf{Runtime selection}: Different edge platforms support different inference engines
+  \item \textbf{Memory management}: Careful buffer allocation is essential for memory-constrained devices
+  \item \textbf{Power optimization}: Batch size and frequency scaling significantly impact energy consumption
+\end{itemize}
+
+\subsection{Limitations}
+
+Our approach has several limitations:
+
+\begin{enumerate}
+  \item The importance analysis requires a forward-backward pass over the entire training set
+  \item Mixed-precision quantization requires hardware support for variable bit-width operations
+  \item Knowledge distillation adds computational overhead during training
+\end{enumerate}
+
+\section{Conclusion}
+
+We presented a unified framework for neural network compression that combines pruning, quantization, and knowledge distillation. Our experiments demonstrate that the framework achieves 10x compression with minimal accuracy loss across multiple architectures and datasets. Future work will explore automated architecture search for compression-aware network design.
+\bibliographystyle{splncs04}
+\bibliography{refs}
+\end{document}

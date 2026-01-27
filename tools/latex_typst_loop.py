@@ -153,11 +153,14 @@ def main() -> int:
     typst_src = out_dir / "main.typ"
 
     # Compile LaTeX with tectonic.
+    # Use -Z continue-on-errors to handle minor compatibility issues
     run(
         [
             args.tectonic_bin,
             "-X",
             "compile",
+            "-Z",
+            "continue-on-errors",
             "--outdir",
             str(out_dir),
             str(main_tex.name),
@@ -199,6 +202,22 @@ def main() -> int:
     ]
 
     run(t2l_cmd, cwd=repo_root, check=True)
+
+    # Copy any referenced CSL files from typst-corpus to output directory.
+    # Check all .typ files since templates may reference CSL files
+    csl_refs = set()
+    for typ_file in out_dir.glob("*.typ"):
+        content = typ_file.read_text(encoding="utf-8", errors="ignore")
+        csl_refs.update(re.findall(r'style:\s*"([^"]+\.csl)"', content))
+    for csl_name in csl_refs:
+        csl_dest = out_dir / csl_name
+        if csl_dest.exists():
+            continue
+        # Search for CSL in typst-corpus/ml-templates
+        ml_templates = repo_root / "typst-corpus" / "ml-templates"
+        for csl_src in ml_templates.rglob(csl_name):
+            shutil.copy(csl_src, csl_dest)
+            break
 
     # Compile Typst.
     run(

@@ -96,6 +96,7 @@ wasm-pack build --target web --out-dir web/src/pkg --features wasm --no-default-
 To build a handy tool specifically for LaTeX and Typst conversion scenarios.
 
 *   **Goal**: Preserve the original source structure to make the output human-readable and easy to manually edit and adjust.
+*   **Active goal**: Achieve template-preserving round-trip conversion for major academic templates (IEEE/ACM/LNCS/Elsevier), so LaTeX → Typst → LaTeX retains the template class and metadata.
 *   **Roadmap**: We are committed to maintaining this project, slowly but surely improving it. While currently static, we plan to explore adding limited dynamic evaluation in future versions.
 
 ### Architecture

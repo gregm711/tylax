@@ -233,6 +233,16 @@ enum Direction {
 
 #[cfg(feature = "cli")]
 fn main() -> io::Result<()> {
+    // Spawn main logic in a thread with larger stack to handle deeply nested documents
+    // mitex parser can create deeply nested ASTs for complex LaTeX templates
+    const STACK_SIZE: usize = 256 * 1024 * 1024; // 256 MB stack
+    let builder = std::thread::Builder::new().stack_size(STACK_SIZE);
+    let handle = builder.spawn(main_inner).expect("Failed to spawn main thread");
+    handle.join().expect("Main thread panicked")
+}
+
+#[cfg(feature = "cli")]
+fn main_inner() -> io::Result<()> {
     let cli = Cli::parse();
 
     // Handle subcommands first
@@ -308,6 +318,35 @@ fn main() -> io::Result<()> {
 
     // Determine if this is a full document based on content or flag.
     let is_full_document = cli.full_document || is_latex_document(&input);
+    let template_assets = if matches!(direction, Direction::L2t) && is_full_document {
+        let packages = collect_usepackage_entries(&input);
+        TemplateAssetFlags {
+            cvpr: packages
+                .iter()
+                .any(|pkg| pkg.trim().to_lowercase().starts_with("cvpr")),
+            iclr: packages
+                .iter()
+                .any(|pkg| pkg.trim().to_lowercase().starts_with("iclr")),
+            icml: packages
+                .iter()
+                .any(|pkg| pkg.trim().to_lowercase().starts_with("icml")),
+            neurips: packages
+                .iter()
+                .any(|pkg| pkg.trim().to_lowercase().starts_with("neurips")),
+            jmlr: packages
+                .iter()
+                .any(|pkg| pkg.trim().to_lowercase().starts_with("jmlr")),
+            tmlr: packages
+                .iter()
+                .any(|pkg| pkg.trim().to_lowercase().starts_with("tmlr")),
+            rlj: packages.iter().any(|pkg| {
+                let lower = pkg.trim().to_lowercase();
+                lower.starts_with("rlj") || lower.starts_with("rlc")
+            }),
+        }
+    } else {
+        TemplateAssetFlags::default()
+    };
 
     let timing_enabled = std::env::var("TYLAX_TIMING").is_ok();
     if matches!(direction, Direction::L2t) && is_full_document {
@@ -349,6 +388,7 @@ fn main() -> io::Result<()> {
                 graphic_dirs = collect_graphicspath_entries(&input);
                 graphic_paths = collect_includegraphics_paths(&input);
                 graphics_base_dir = Some(parent.to_path_buf());
+                input = inject_class_hints(&input, parent)?;
             }
         }
     }
@@ -475,6 +515,8 @@ fn main() -> io::Result<()> {
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| std::path::PathBuf::from("."));
         let mut citation_keys = extract_citation_keys_from_typst(&result);
+        let label_keys = extract_typst_labels(&result);
+        citation_keys.retain(|key| !label_keys.contains(key));
         let bibitem_keys = extract_bibitem_keys_from_typst(&result);
         citation_keys.extend(bibitem_keys.iter().cloned());
 
@@ -546,6 +588,15 @@ fn main() -> io::Result<()> {
     // Output
     match cli.output {
         Some(path) => {
+            if template_assets.any() {
+                let out_dir = Path::new(&path)
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."));
+                if let Err(err) = write_ml_template_assets(&out_dir, &template_assets) {
+                    eprintln!("⚠ Unable to write Typst template assets: {}", err);
+                }
+            }
             let mut file = fs::File::create(&path)?;
             writeln!(file, "{}", result)?;
             if diagnostics.is_empty() {
@@ -566,14 +617,277 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+#[derive(Default, Clone, Copy)]
+struct TemplateAssetFlags {
+    cvpr: bool,
+    iclr: bool,
+    icml: bool,
+    neurips: bool,
+    jmlr: bool,
+    tmlr: bool,
+    rlj: bool,
+}
+
+impl TemplateAssetFlags {
+    fn any(&self) -> bool {
+        self.cvpr
+            || self.iclr
+            || self.icml
+            || self.neurips
+            || self.jmlr
+            || self.tmlr
+            || self.rlj
+    }
+}
+
 #[cfg(feature = "cli")]
 fn is_macro_expansion_blacklisted_package(name: &str) -> bool {
     let lower = name.trim().to_lowercase();
     lower == "eccv"
         || lower.starts_with("iclr")
         || lower.starts_with("icml")
+        || lower.starts_with("mlsys")
         || lower.starts_with("neurips")
         || lower.starts_with("aaai")
+        || lower.starts_with("cvpr")
+        || lower.starts_with("jmlr")
+        || lower.starts_with("tmlr")
+        || lower.starts_with("rlj")
+        || lower.starts_with("rlc")
+        || lower.starts_with("bxcoloremoji")
+        || lower == "cjkutf8"
+}
+
+fn extract_braced_arg_at(input: &str, start: usize) -> Option<(String, usize)> {
+    let bytes = input.as_bytes();
+    let mut i = start;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return None;
+    }
+    if bytes[i] != b'{' {
+        if let Some(pos) = input[i..].find('{') {
+            i += pos;
+        } else {
+            return None;
+        }
+    }
+    let mut depth = 0i32;
+    let mut j = i;
+    while j < bytes.len() {
+        match bytes[j] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let content = input[i + 1..j].to_string();
+                    return Some((content, j + 1));
+                }
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    None
+}
+
+fn extract_bracket_arg_at(input: &str, start: usize) -> (Option<String>, usize) {
+    let bytes = input.as_bytes();
+    let mut i = start;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return (None, i);
+    }
+    if bytes[i] != b'[' {
+        return (None, i);
+    }
+    let mut depth = 0i32;
+    let mut j = i;
+    while j < bytes.len() {
+        match bytes[j] {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    let content = input[i + 1..j].to_string();
+                    return (Some(content), j + 1);
+                }
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    (None, j)
+}
+
+fn extract_documentclass_name(input: &str) -> Option<String> {
+    let mut pos = 0usize;
+    while let Some(idx) = input[pos..].find("\\documentclass") {
+        let start = pos + idx + "\\documentclass".len();
+        let (opt, next) = extract_bracket_arg_at(input, start);
+        let cursor = if let Some(_) = opt { next } else { start };
+        if let Some((arg, _)) = extract_braced_arg_at(input, cursor) {
+            let name = arg.trim();
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+        pos = start + 1;
+    }
+    None
+}
+
+fn inject_class_hints(input: &str, base_dir: &Path) -> io::Result<String> {
+    if input.contains("__TYLAX_HINTS_BEGIN__") {
+        return Ok(input.to_string());
+    }
+    let class_name = match extract_documentclass_name(input) {
+        Some(name) => name,
+        None => return Ok(input.to_string()),
+    };
+    let class_path = base_dir.join(format!("{class_name}.cls"));
+    if !class_path.exists() {
+        return Ok(input.to_string());
+    }
+    let metadata = class_path.metadata()?;
+    if metadata.len() > 1_000_000 {
+        return Ok(input.to_string());
+    }
+    let content = std::fs::read_to_string(&class_path)?;
+    let mut hint_block = String::new();
+    hint_block.push_str("\n%__TYLAX_HINTS_BEGIN__\n");
+    for line in content.lines() {
+        hint_block.push('%');
+        hint_block.push_str(line);
+        hint_block.push('\n');
+    }
+    hint_block.push_str("%__TYLAX_HINTS_END__\n");
+    if let Some(pos) = input.find("\\begin{document}") {
+        let mut out = String::with_capacity(input.len() + hint_block.len());
+        out.push_str(&input[..pos]);
+        out.push_str(&hint_block);
+        out.push_str(&input[pos..]);
+        Ok(out)
+    } else {
+        Ok(format!("{input}{hint_block}"))
+    }
+}
+
+#[cfg(feature = "cli")]
+fn write_cvpr_assets(out_dir: &Path) -> io::Result<()> {
+    const CVPR: &str = include_str!("../../typst-corpus/ml-templates/cvpr/cvpr.typ");
+    const CVPR_2022: &str = include_str!("../../typst-corpus/ml-templates/cvpr/cvpr2022.typ");
+    const CVPR_2025: &str = include_str!("../../typst-corpus/ml-templates/cvpr/cvpr2025.typ");
+    const LOGO: &str = include_str!("../../typst-corpus/ml-templates/cvpr/logo.typ");
+
+    fs::write(out_dir.join("cvpr.typ"), CVPR)?;
+    fs::write(out_dir.join("cvpr2022.typ"), CVPR_2022)?;
+    fs::write(out_dir.join("cvpr2025.typ"), CVPR_2025)?;
+    fs::write(out_dir.join("logo.typ"), LOGO)?;
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn write_iclr_assets(out_dir: &Path) -> io::Result<()> {
+    const ICLR: &str = include_str!("../../typst-corpus/ml-templates/iclr/iclr.typ");
+    const ICLR_2025: &str =
+        include_str!("../../typst-corpus/ml-templates/iclr/iclr2025.typ");
+    const ICLR_CSL: &str = include_str!("../../typst-corpus/ml-templates/iclr/iclr.csl");
+
+    fs::write(out_dir.join("iclr.typ"), ICLR)?;
+    fs::write(out_dir.join("iclr2025.typ"), ICLR_2025)?;
+    fs::write(out_dir.join("iclr.csl"), ICLR_CSL)?;
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn write_icml_assets(out_dir: &Path) -> io::Result<()> {
+    const ICML: &str = include_str!("../../typst-corpus/ml-templates/icml/icml.typ");
+    const ICML_2024: &str =
+        include_str!("../../typst-corpus/ml-templates/icml/icml2024.typ");
+    const ICML_2025: &str =
+        include_str!("../../typst-corpus/ml-templates/icml/icml2025.typ");
+    const ICML_CSL: &str = include_str!("../../typst-corpus/ml-templates/icml/icml.csl");
+
+    fs::write(out_dir.join("icml.typ"), ICML)?;
+    fs::write(out_dir.join("icml2024.typ"), ICML_2024)?;
+    fs::write(out_dir.join("icml2025.typ"), ICML_2025)?;
+    fs::write(out_dir.join("icml.csl"), ICML_CSL)?;
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn write_neurips_assets(out_dir: &Path) -> io::Result<()> {
+    const NEURIPS: &str =
+        include_str!("../../typst-corpus/ml-templates/neurips/neurips.typ");
+    const NEURIPS_2023: &str =
+        include_str!("../../typst-corpus/ml-templates/neurips/neurips2023.typ");
+    const NEURIPS_2024: &str =
+        include_str!("../../typst-corpus/ml-templates/neurips/neurips2024.typ");
+    const NEURIPS_2025: &str =
+        include_str!("../../typst-corpus/ml-templates/neurips/neurips2025.typ");
+    const NATBIB_CSL: &str =
+        include_str!("../../typst-corpus/ml-templates/neurips/natbib.csl");
+
+    fs::write(out_dir.join("neurips.typ"), NEURIPS)?;
+    fs::write(out_dir.join("neurips2023.typ"), NEURIPS_2023)?;
+    fs::write(out_dir.join("neurips2024.typ"), NEURIPS_2024)?;
+    fs::write(out_dir.join("neurips2025.typ"), NEURIPS_2025)?;
+    fs::write(out_dir.join("natbib.csl"), NATBIB_CSL)?;
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn write_jmlr_assets(out_dir: &Path) -> io::Result<()> {
+    const JMLR: &str = include_str!("../../typst-corpus/ml-templates/jmlr/jmlr.typ");
+    fs::write(out_dir.join("jmlr.typ"), JMLR)?;
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn write_tmlr_assets(out_dir: &Path) -> io::Result<()> {
+    const TMLR: &str = include_str!("../../typst-corpus/ml-templates/tmlr/tmlr.typ");
+    const TMLR_CSL: &str = include_str!("../../typst-corpus/ml-templates/tmlr/tmlr.csl");
+    fs::write(out_dir.join("tmlr.typ"), TMLR)?;
+    fs::write(out_dir.join("tmlr.csl"), TMLR_CSL)?;
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn write_rlj_assets(out_dir: &Path) -> io::Result<()> {
+    const RLJ: &str = include_str!("../../typst-corpus/ml-templates/rlj/rlj.typ");
+    fs::write(out_dir.join("rlj.typ"), RLJ)?;
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn write_ml_template_assets(out_dir: &Path, flags: &TemplateAssetFlags) -> io::Result<()> {
+    if flags.cvpr {
+        write_cvpr_assets(out_dir)?;
+    }
+    if flags.iclr {
+        write_iclr_assets(out_dir)?;
+    }
+    if flags.icml {
+        write_icml_assets(out_dir)?;
+    }
+    if flags.neurips {
+        write_neurips_assets(out_dir)?;
+    }
+    if flags.jmlr {
+        write_jmlr_assets(out_dir)?;
+    }
+    if flags.tmlr {
+        write_tmlr_assets(out_dir)?;
+    }
+    if flags.rlj {
+        write_rlj_assets(out_dir)?;
+    }
+    Ok(())
 }
 
 #[cfg(feature = "cli")]
@@ -713,6 +1027,41 @@ fn extract_citation_keys_from_typst(input: &str) -> std::collections::HashSet<St
 }
 
 #[cfg(feature = "cli")]
+fn extract_typst_labels(input: &str) -> std::collections::HashSet<String> {
+    let mut labels = std::collections::HashSet::new();
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() {
+                let ch = bytes[j] as char;
+                if ch == '>' {
+                    if j > start {
+                        let raw = &input[start..j];
+                        if raw
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                        {
+                            labels.insert(raw.to_string());
+                        }
+                    }
+                    i = j + 1;
+                    break;
+                }
+                if ch.is_whitespace() {
+                    break;
+                }
+                j += 1;
+            }
+        }
+        i += 1;
+    }
+    labels
+}
+
+#[cfg(feature = "cli")]
 fn extract_bibitem_keys_from_typst(input: &str) -> std::collections::HashSet<String> {
     let mut keys = std::collections::HashSet::new();
     let bytes = input.as_bytes();
@@ -784,49 +1133,67 @@ fn populate_placeholder_bibliography(
         return Ok(());
     }
 
+    let mut present = std::collections::HashSet::new();
+    let mut file_contents: Vec<(String, String)> = Vec::new();
     for file in files {
         let path = out_dir.join(file);
         if !path.exists() {
+            file_contents.push((file.clone(), String::new()));
             continue;
         }
         let content = fs::read_to_string(&path).unwrap_or_default();
-        let has_entries = content.contains('@');
-        let is_placeholder = content.trim().is_empty()
-            || content.contains("TYLAX-STUB-BIB")
-            || content
-                .lines()
-                .next()
-                .map(|line| line.contains("Missing bibliography source"))
-                .unwrap_or(false);
-        // Build stub entries for any missing keys.
-        let mut missing: Vec<&String> = Vec::new();
         for key in keys {
-            if !bibtex_contains_key(&content, key) {
-                missing.push(key);
+            if !present.contains(key) && bibtex_contains_key(&content, key) {
+                present.insert(key.clone());
             }
         }
+        file_contents.push((file.clone(), content));
+    }
 
-        if !missing.is_empty() {
-            let mut stub = String::new();
-            for key in &missing {
-                stub.push_str("@misc{");
-                stub.push_str(key);
-                stub.push_str(",\n  title = \"{Missing citation}\",\n  author = \"{Unknown}\",\n  year = \"{0000}\",\n}\n\n");
-            }
-            if is_placeholder || !has_entries {
-                fs::write(&path, stub)?;
-            } else {
-                let mut updated = content;
-                if !updated.ends_with('\n') {
-                    updated.push('\n');
-                }
-                updated.push_str(&stub);
-                fs::write(&path, updated)?;
-            }
-        } else if is_placeholder && !has_entries {
-            // Ensure placeholder files are at least non-empty
-            fs::write(&path, content)?;
+    let mut missing: Vec<&String> = Vec::new();
+    for key in keys {
+        if !present.contains(key) {
+            missing.push(key);
         }
+    }
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    let target_file = match file_contents.first() {
+        Some((name, _)) => name,
+        None => return Ok(()),
+    };
+    let target_path = out_dir.join(target_file);
+    let mut content = file_contents
+        .iter()
+        .find(|(name, _)| name == target_file)
+        .map(|(_, content)| content.clone())
+        .unwrap_or_default();
+    let has_entries = content.contains('@');
+    let is_placeholder = content.trim().is_empty()
+        || content.contains("TYLAX-STUB-BIB")
+        || content
+            .lines()
+            .next()
+            .map(|line| line.contains("Missing bibliography source"))
+            .unwrap_or(false);
+
+    let mut stub = String::new();
+    for key in &missing {
+        stub.push_str("@misc{");
+        stub.push_str(key);
+        stub.push_str(",\n  title = \"{Missing citation}\",\n  author = \"{Unknown}\",\n  year = \"{0000}\",\n}\n\n");
+    }
+    if is_placeholder || !has_entries {
+        fs::write(&target_path, stub)?;
+    } else {
+        if !content.ends_with('\n') {
+            content.push('\n');
+        }
+        content.push_str(&stub);
+        fs::write(&target_path, content)?;
     }
     Ok(())
 }
@@ -1303,10 +1670,10 @@ fn copy_graphics_assets(
                     rel_path.set_extension(&actual_norm);
                     final_rel = rel_path.to_string_lossy().to_string();
                 }
-            } else if is_known_image_extension(rel_ext) {
-                missing.push(trimmed.to_string());
-                continue;
             }
+            // Note: If we can't detect the image type but the file exists (resolve_graphics_path
+            // already verified this), we still copy it - don't mark as missing just because
+            // we can't read the magic bytes.
 
             if seen.insert(final_rel.clone()) {
                 let dest = out_dir.join(&final_rel);

@@ -45,3 +45,4 @@
 - LaTeX → Typst: `\definecolor` / `\colorlet` from the preamble are captured as `#let` color definitions.
 - CLI post-processes image paths to resolve extensionless `image("path")` against files copied into the output folder.
 - Bibliography auto-discovery ignores generated `*.typst.bib` files to prevent self-including merges.
+- Active goal: template-preserving round-trip conversion for major academic templates (IEEE/ACM/LNCS/Elsevier), so LaTeX → Typst → LaTeX retains the template class and metadata.

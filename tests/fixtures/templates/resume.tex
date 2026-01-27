@@ -1,8 +1,9 @@
 \documentclass[10pt,letterpaper]{article}
-\usepackage[left=0.5in,right=0.5in,top=0.5in,bottom=0.5in]{geometry}
+\usepackage[margin=0.75in]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{hyperref}
+\hypersetup{hidelinks}
 \usepackage[table]{xcolor}
 \usepackage{booktabs}
 \usepackage{enumitem}
@@ -11,34 +12,62 @@
 \usepackage{array}
 \usepackage{textcomp}
 \usepackage{float}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{1em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.8em}{0.3em}
+\titlespacing*{\subsubsection}{0pt}{0.6em}{0.2em}
+\titlespacing*{\paragraph}{0pt}{0.5em}{0.1em}
 \usepackage{newcomputermodern}
 \usepackage{setspace}
 \setstretch{1.25}
-\AtBeginDocument{\raggedright}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
+\title{Professional Resume}
+\author{Alex Johnson}
 \begin{document}
 
-\begin{center}
-{\huge \textbf{Your Name}}
-\par\vspace{0.3em}
-San Francisco, CA | \href{mailto:you@email.com}{you@email.com} | \href{https://linkedin.com/in/yourprofile}{linkedin.com/in/yourprofile} | \href{https://github.com/yourusername}{github.com/yourusername}
-\end{center}
+\maketitle
 
-\{ v(0.5em) text(size: 11pt, weight: "bold", fill: rgb(""))[] v(-0.3em) line(length: 100\%, stroke: 0.5pt + rgb("")) v(0.3em) \}
+\section{Alex Johnson}
 
-\{ grid( columns: (1fr, auto), text(weight: "bold")[Bachelor of Science in Computer Science], text(style: "italic")[Aug 2020 - May 2024], ) grid( columns: (1fr, auto), text(style: "italic")[University Name], text[City, State], ) if details.len() > 0 \{ v(0.2em) for detail in details \{ [- ] \} \} v(0.5em) \}
+{\small 123 Tech Street, San Francisco, CA 94102 | alex.johnson@email.com | (555) 987-6543 | linkedin.com/in/alexjohnson }
 
-\{ v(0.5em) text(size: 11pt, weight: "bold", fill: rgb(""))[] v(-0.3em) line(length: 100\%, stroke: 0.5pt + rgb("")) v(0.3em) \}
+\section{Summary}
 
-\{ grid( columns: (1fr, auto), text(weight: "bold")[Software Engineer Intern], text(style: "italic")[May 2023 - Aug 2023], ) grid( columns: (1fr, auto), text(style: "italic")[Tech Company], text[San Francisco, CA], ) if details.len() > 0 \{ v(0.2em) for detail in details \{ [- ] \} \} v(0.5em) \}
+Experienced software engineer with 7+ years of expertise in full-stack development, cloud architecture, and team leadership. Proven track record of delivering scalable solutions for enterprise clients.
 
-\{ grid( columns: (1fr, auto), text(weight: "bold")[Research Assistant], text(style: "italic")[Jan 2022 - May 2023], ) grid( columns: (1fr, auto), text(style: "italic")[University Research Lab], text[City, State], ) if details.len() > 0 \{ v(0.2em) for detail in details \{ [- ] \} \} v(0.5em) \}
+\section{Experience}
 
-\{ v(0.5em) text(size: 11pt, weight: "bold", fill: rgb(""))[] v(-0.3em) line(length: 100\%, stroke: 0.5pt + rgb("")) v(0.3em) \}
+\subsection{Senior Software Engineer | Tech Corp | 2021 - Present}
 
-\{ grid( columns: (1fr, auto), text(weight: "bold")[Project Name], text(style: "italic")[2023], ) grid( columns: (1fr, auto), text(style: "italic")[Personal Project], text[], ) if details.len() > 0 \{ v(0.2em) for detail in details \{ [- ] \} \} v(0.5em) \}
+\begin{itemize}
+  \item Led development of microservices architecture serving 10M+ users
+  \item Mentored team of 5 junior developers
+  \item Reduced deployment time by 60\% through CI/CD improvements
+\end{itemize}
 
-\{ v(0.5em) text(size: 11pt, weight: "bold", fill: rgb(""))[] v(-0.3em) line(length: 100\%, stroke: 0.5pt + rgb("")) v(0.3em) \}
+\subsection{Software Engineer | StartupXYZ | 2018 - 2021}
 
-\textbf{Languages:} Python, TypeScript, Go, Rust, SQL \\ \textbf{Frameworks:} React, Next.js, FastAPI, PyTorch \\ \textbf{Tools:} Git, Docker, Kubernetes, AWS, PostgreSQL, Redis
+\begin{itemize}
+  \item Built core product features using React and Node.js
+  \item Implemented real-time collaboration features
+  \item Contributed to 200\% user growth
+\end{itemize}
+
+\section{Education}
+
+\subsection{Master of Science in Computer Science}
+
+Stanford University | 2018
+
+\subsection{Bachelor of Science in Computer Science}
+
+UC Berkeley | 2016
+
+\section{Skills}
+
+\textbf{Languages:} Python, JavaScript, TypeScript, Go, Java
+
+\textbf{Frameworks:} React, Node.js, Django, FastAPI
+
+\textbf{Cloud:} AWS, GCP, Kubernetes, Docker
 \end{document}

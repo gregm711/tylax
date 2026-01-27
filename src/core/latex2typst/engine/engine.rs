@@ -156,7 +156,8 @@ impl MacroDb {
 // ============================================================================
 
 /// Default maximum expansion depth (prevents stack overflow on recursive macros).
-const DEFAULT_MAX_DEPTH: usize = 256;
+/// Increased from 256 to handle complex templates like neurips with deeply nested macros.
+const DEFAULT_MAX_DEPTH: usize = 1024;
 
 /// Default maximum token count (prevents exponential macro expansion).
 const DEFAULT_MAX_TOKENS: usize = 100_000;

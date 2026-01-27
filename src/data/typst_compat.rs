@@ -69,6 +69,7 @@ lazy_static! {
         m.insert("ref", MarkupHandler::Special);
         m.insert("label", MarkupHandler::Special);
         m.insert("bibliography", MarkupHandler::Special);
+        m.insert("raw", MarkupHandler::Special);
         m.insert("footnote", MarkupHandler::Special);
         m.insert("caption", MarkupHandler::Special);
         m.insert("rotate", MarkupHandler::Special);
@@ -197,8 +198,9 @@ lazy_static! {
         // Font styles
         m.insert("text", MathHandler::Command { latex_cmd: "\\text" });
         m.insert("upright", MathHandler::Command { latex_cmd: "\\mathrm" });
-        m.insert("bold", MathHandler::Command { latex_cmd: "\\mathbf" });
-        m.insert("bf", MathHandler::Command { latex_cmd: "\\mathbf" });
+        // Use \bm instead of \mathbf for proper bold Greek letter support
+        m.insert("bold", MathHandler::Command { latex_cmd: "\\bm" });
+        m.insert("bf", MathHandler::Command { latex_cmd: "\\bm" });
         m.insert("italic", MathHandler::Command { latex_cmd: "\\mathit" });
         m.insert("it", MathHandler::Command { latex_cmd: "\\mathit" });
         m.insert("cal", MathHandler::Command { latex_cmd: "\\mathcal" });

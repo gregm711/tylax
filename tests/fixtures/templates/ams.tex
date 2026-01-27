@@ -1,0 +1,142 @@
+\documentclass{amsart}
+\usepackage{amsmath,amssymb}
+\usepackage{amsthm}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{hyperref}
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{claim}[theorem]{Claim}
+\newtheorem{axiom}[theorem]{Axiom}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+\begin{document}
+\title{On the Spectral Properties of Random Matrices with Structured Sparsity}
+\author{David Chen}
+\email{dchen@princeton.edu}
+\author{Maria Gonzalez}
+\maketitle
+\begin{abstract}
+ We study the spectral properties of large random matrices with structured sparsity patterns. Building on recent advances in free probability theory, we derive precise asymptotic formulas for the empirical spectral distribution of sparse random matrices whose sparsity pattern follows a block structure. Our main result establishes a phase transition phenomenon: below a critical sparsity threshold, the limiting spectral distribution is compactly supported, while above this threshold, outlier eigenvalues emerge. We provide explicit formulas for the location of these outliers and characterize their fluctuations. Applications to community detection in sparse networks are discussed. 
+\end{abstract}
+\section{Introduction}
+
+Random matrix theory has emerged as a powerful tool for understanding the behavior of large complex systems across mathematics, physics, and statistics. The celebrated Wigner semicircle law \cite{wigner1958distribution} establishes that the empirical spectral distribution of symmetric random matrices with independent entries converges to a universal limit. However, many applications involve matrices with structural constraints, particularly sparsity, which can dramatically alter spectral behavior.
+
+In this paper, we consider random matrices of the form $A_n = \frac{1}{\sqrt{n p_n}} X_n circle.small B_n$ where $X_n$ is a symmetric matrix with independent standard Gaussian entries, $B_n$ is a deterministic binary matrix encoding the sparsity pattern, and $circle.small$ denotes the Hadamard product.
+
+Our main contributions are:
+
+\begin{enumerate}
+  \item We prove that when $n p_n \to infinity$ and the sparsity pattern $B_n$ has a block structure, the empirical spectral distribution converges almost surely to a deterministic limit.
+  \item We identify a critical threshold $p_c$ such that for $p_n > p_c$, outlier eigenvalues emerge outside the bulk of the spectrum.
+  \item We characterize the fluctuations of these outliers, showing they exhibit Tracy-Widom statistics after appropriate centering and scaling.
+\end{enumerate}
+
+\section{Preliminaries}
+
+\subsection{Notation}
+
+Throughout this paper, we use the following notation:
+
+\begin{itemize}
+  \item $\mathcal{M}_n(\mathbb{R})$ denotes the space of $n times n$ real matrices
+  \item $\lambda_1(A) \ge \lambda_2(A) \ge dots \ge \lambda_n(A)$ are the ordered eigenvalues of a symmetric matrix $A$
+  \item $\mu_A = \frac{1}{n} \sum_{i=1}^n \delta_{\lambda_i(A)}$ is the empirical spectral distribution
+\end{itemize}
+
+\subsection{Free Probability Background}
+
+Free probability theory, developed by Voiculescu \cite{voiculescu1991limit}, provides powerful tools for computing limiting spectral distributions. A key concept is the free convolution $\mu boxplus \nu$ of two probability measures.
+
+\begin{theorem}
+Let $A_n$ and $B_n$ be independent random matrices whose empirical spectral distributions converge almost surely to $\mu$ and $\nu$ respectively. Then the empirical spectral distribution of $A_n + B_n$ converges almost surely to $\mu boxplus \nu$.
+\end{theorem}
+
+The free convolution can be computed via the $R$-transform: if $G_\mu(z) = \int \frac{1}{z - t} d \mu(t)$ is the Cauchy transform of $\mu$, define the $R$-transform via the functional equation $G_\mu(R_\mu(z) + 1/z) = z$
+
+Then $R_{\mu boxplus \nu}(z) = R_\mu(z) + R_\nu(z)$.
+
+\section{Main Results}
+
+\subsection{Limiting Spectral Distribution}
+
+Consider a sequence of random matrices $A_n$ as defined above, where the sparsity pattern $B_n$ consists of $k$ blocks of sizes $n_1, dots, n_k$ with $n_i / n \to \alpha_i > 0$.
+
+\begin{theorem}
+Assume $n p_n \to infinity$ as $n \to infinity$. Then the empirical spectral distribution $\mu_{A_n}$ converges almost surely to a deterministic measure $\mu$ whose Cauchy transform satisfies $G(z) = \sum_{i=1}^k \alpha_i \frac{1}{z - R_i(G(z))}$ where $R_i$ are the $R$-transforms of the individual block distributions.
+\label{thm:main}
+\end{theorem}
+
+The proof of Theorem~\ref{thm:main} relies on a careful analysis of the resolvent $(A_n - z I)^{-1}$ combined with concentration inequalities for quadratic forms.
+
+\subsection{Phase Transition and Outliers}
+
+\begin{theorem}
+Let $p_c = (\sum_{i=1}^k \alpha_i^2)^{-1}$. If $p_n > p_c$, then with probability tending to 1, there exist exactly $k-1$ eigenvalues outside the support of $\mu$.
+\end{theorem}
+
+The locations of these outliers are determined by the following system of equations:
+
+\[
+\theta_j = 1 + \sum_{i=1}^k \frac{\alpha_i \sigma_i^2}{\theta_j - m_i}, quad j = 1, dots, k-1
+\]
+
+where $m_i$ and $\sigma_i^2$ are the mean and variance of the $i$-th block.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|c|}
+\hline
+$k$ & $p_c$ & Outlier locations & Support of $\mu$ \\
+\hline
+2 & 2 & $\theta_1 \approx 2.41$ & $[-2, 2]$ \\
+\hline
+3 & 3 & $\theta_1 \approx 2.73, \theta_2 \approx 1.85$ & $[-1.8, 1.8]$ \\
+\hline
+4 & 4 & $\theta_1 \approx 2.94, \theta_2 \approx 2.12, \theta_3 \approx 1.54$ & $[-1.6, 1.6]$ \\
+\hline
+\end{tabular}
+\caption{Critical sparsity thresholds and outlier locations for equal-sized blocks with unit variance.}
+\label{tab:outliers}
+\end{table}
+
+\section{Applications}
+
+\subsection{Community Detection}
+
+The spectral properties we establish have direct applications to community detection in sparse networks. Consider a stochastic block model with $k$ communities of sizes $n_1, dots, n_k$, where the edge probability between nodes in communities $i$ and $j$ is $p_{i j} / n$.
+
+\begin{corollary}
+Community detection by spectral clustering is statistically consistent if and only if the second eigenvalue of the expected adjacency matrix exceeds the critical threshold $\sqrt{p_c}$.
+\end{corollary}
+
+This result provides a sharp characterization of the information-theoretic limit for community detection, extending previous results \cite{abbe2018community} to the structured sparsity setting.
+
+\section{Proof of Main Results}
+
+\subsection{Proof of Theorem~\ref{thm:main}}
+
+The proof proceeds in three steps.
+
+\textbf{Step 1: Truncation.} We first show that we may assume the entries of $X_n$ are bounded by $log n$ without affecting the limit.
+
+\textbf{Step 2: Resolvent Analysis.} Let $G_n(z) = \frac{1}{n} \text{Tr}(A_n - z I)^{-1}$ be the Stieltjes transform. Using the Schur complement formula, we establish the approximate self-consistent equation $G_n(z) \approx \sum_{i=1}^k \alpha_i \frac{1}{z - \frac{\sigma_i^2 p_n G_n(z)}{1 + \sigma_i^2 p_n G_n(z)}}$
+
+\textbf{Step 3: Concentration.} We prove that $G_n(z)$ concentrates around its expectation using a martingale argument combined with the Burkholder inequality.
+
+The details are provided in Appendix A.
+
+\section{Conclusion}
+
+We have established precise asymptotic results for the spectral distribution of random matrices with block-structured sparsity. The phase transition we identify has practical implications for algorithms in network analysis and machine learning. Future work will extend these results to more general sparsity patterns and non-Gaussian entries.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+\end{document}

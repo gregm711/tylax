@@ -171,8 +171,9 @@ mod l2t_figures {
             "Expected width conversion, got: {}",
             result
         );
+        // Accept both decimal (0.75) and percentage (75%) formats for scale
         assert!(
-            result.contains("scale(x: 0.75"),
+            result.contains("scale(x: 0.75") || result.contains("scale(x: 75%"),
             "Expected scale conversion, got: {}",
             result
         );

@@ -3,6 +3,7 @@
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{hyperref}
+\hypersetup{hidelinks}
 \usepackage[table]{xcolor}
 \usepackage{booktabs}
 \usepackage{enumitem}
@@ -20,25 +21,15 @@
 \usepackage{setspace}
 \setstretch{1.38}
 \providecommand{\textsubscript}[1]{$_{\text{#1}}$}
+\title{Your Paper Title}
+\author{Author Name, Co-Author Name}
 \begin{document}
 
-\begin{center}
-{\Large \textbf{Your Paper Title}}
-\par\vspace{0.5em}
-Author Name\textsuperscript{1}, Co-Author Name\textsuperscript{2}
-\par\vspace{0.3em}
-{\small \textit{ \textsuperscript{1}Department of Computer Science, University Name \\ \textsuperscript{2}Department of Mathematics, Another University }}
-\par\vspace{0.5em}
-{\small \href{mailto:author@university.edu}{author@university.edu} }
-\end{center}
+\maketitle
 
-\par\vspace{1em}
-
-\begin{center}
- \textbf{Abstract.} {\small This paper presents... Write your abstract here. The abstract should provide a brief summary of your research, including the problem statement, methodology, key findings, and conclusions. Keep it concise, typically 150-300 words. } 
-\end{center}
-
-\par\vspace{1em}
+\begin{abstract}
+This paper presents a study of an important topic. Write your abstract here. The abstract should provide a brief summary of your research, including the problem statement, methodology, key findings, and conclusions. Keep it concise, typically 150-300 words.
+\end{abstract}
 
 \section{Introduction}
 
@@ -66,8 +57,6 @@ Summarize your contributions and suggest directions for future work.
 
 \newpage
 
-\begin{thebibliography}{99}
-\bibitem{ref1} {\small Author, A. "Paper Title." \textit{Journal Name}, vol. X, no. Y, pp. 1-10, 2024.}
-\bibitem{ref2} {\small Researcher, B. and Collaborator, C. "Another Paper." In \textit{Proceedings of Conference}, 2023. }
-\end{thebibliography}
+\bibliographystyle{plain}
+\bibliography{refs}
 \end{document}

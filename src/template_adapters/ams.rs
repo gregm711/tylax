@@ -6,6 +6,7 @@ use crate::preamble_hints::{
     equation_number_within, equation_numbering_enabled, extract_preamble_hints, is_two_column,
     parse_length_to_pt, render_amsthm_definitions,
 };
+use crate::template_adapters::common::find_show_rule_with_prefix;
 
 #[derive(Debug, Default)]
 struct AuthorMeta {
@@ -27,7 +28,10 @@ struct AmsMeta {
 
 pub fn maybe_convert_ams(input: &str) -> Option<String> {
     let root = parse(input);
-    let show = find_show_with(&root, "ams-article.with")?;
+    // Try both "ams" and "ams-article" prefixes
+    let show = find_show_rule_with_prefix(&root, "ams")
+        .or_else(|| find_show_rule_with_prefix(&root, "ams-article"))
+        .map(|(node, _)| node)?;
     let meta = extract_meta(&show);
 
     let doc = typst_to_ir(input);
@@ -140,25 +144,6 @@ pub fn maybe_convert_ams(input: &str) -> Option<String> {
 
     out.push_str("\\end{document}\n");
     Some(out)
-}
-
-fn find_show_with(root: &SyntaxNode, name: &str) -> Option<SyntaxNode> {
-    let mut stack = vec![root.clone()];
-    while let Some(node) = stack.pop() {
-        if node.kind() == SyntaxKind::ShowRule {
-            if let Some(func) = node.children().find(|c| c.kind() == SyntaxKind::FuncCall) {
-                if let Some(func_name) = func_call_name(&func) {
-                    if func_name == name {
-                        return Some(node);
-                    }
-                }
-            }
-        }
-        for child in node.children() {
-            stack.push(child.clone());
-        }
-    }
-    None
 }
 
 fn extract_meta(show_rule: &SyntaxNode) -> AmsMeta {

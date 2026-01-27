@@ -782,6 +782,10 @@ fn handle_special_markup_func(func_name: &str, children: &[&SyntaxNode], ctx: &m
             convert_bibliography_to_latex(children, ctx);
         }
 
+        "raw" => {
+            convert_raw_func_to_latex(children, ctx);
+        }
+
         "footnote" => {
             ctx.push("\\footnote{");
             convert_func_args_text(children, ctx);
@@ -909,11 +913,6 @@ fn handle_special_markup_func(func_name: &str, children: &[&SyntaxNode], ctx: &m
 
         "enum" => {
             convert_list_to_latex(children, ctx, true);
-        }
-
-        // Raw/verbatim blocks
-        "raw" => {
-            convert_raw_to_latex(children, ctx);
         }
 
         // Horizontal spacing: h(1fr) -> \hfill, h(1em) -> \hspace{1em}
@@ -1897,6 +1896,86 @@ fn convert_label_to_latex(children: &[&SyntaxNode], ctx: &mut ConvertContext) {
             }
         }
     }
+}
+
+/// Convert #raw(...) to LaTeX
+fn convert_raw_func_to_latex(children: &[&SyntaxNode], ctx: &mut ConvertContext) {
+    // Extract content and options from args
+    let args = FuncArgs::from_func_call(children);
+    let content = args.first().unwrap_or_default();
+    let is_block = args.named("block").map(|v| v == "true").unwrap_or(false);
+    let lang = args.named("lang");
+
+    // Strip quotes and unescape Typst string escapes
+    let text = content.trim_matches('"');
+    let unescaped = unescape_typst_string(text);
+
+    if is_block || unescaped.contains('\n') {
+        // Block code
+        ctx.ensure_paragraph_break();
+        if let Some(language) = lang {
+            let lang_clean = language.trim_matches('"');
+            if is_listings_supported(lang_clean) {
+                ctx.push_line(&format!("\\begin{{lstlisting}}[language={}]", lang_clean));
+                ctx.push(&unescaped);
+                ctx.newline();
+                ctx.push_line("\\end{lstlisting}");
+            } else {
+                ctx.push_line("\\begin{verbatim}");
+                ctx.push(&unescaped);
+                ctx.newline();
+                ctx.push_line("\\end{verbatim}");
+            }
+        } else {
+            ctx.push_line("\\begin{verbatim}");
+            ctx.push(&unescaped);
+            ctx.newline();
+            ctx.push_line("\\end{verbatim}");
+        }
+    } else {
+        // Inline code - use \texttt with proper escaping
+        ctx.push("\\texttt{");
+        ctx.push(&escape_latex_text(&unescaped));
+        ctx.push("}");
+    }
+}
+
+/// Unescape Typst string escape sequences
+fn unescape_typst_string(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.peek() {
+                Some('\\') => {
+                    chars.next();
+                    out.push('\\');
+                }
+                Some('"') => {
+                    chars.next();
+                    out.push('"');
+                }
+                Some('n') => {
+                    chars.next();
+                    out.push('\n');
+                }
+                Some('t') => {
+                    chars.next();
+                    out.push('\t');
+                }
+                Some('r') => {
+                    chars.next();
+                    // Ignore \r
+                }
+                _ => {
+                    out.push('\\');
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn convert_bibliography_to_latex(children: &[&SyntaxNode], ctx: &mut ConvertContext) {

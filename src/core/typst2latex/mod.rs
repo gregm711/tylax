@@ -394,6 +394,7 @@ fn wrap_in_document(content: &str, options: &T2LOptions) -> String {
     doc.push_str("\\usepackage{amssymb}\n");
     doc.push_str("\\usepackage{graphicx}\n");
     doc.push_str("\\usepackage{hyperref}\n");
+    doc.push_str("\\hypersetup{hidelinks}\n");
     doc.push_str("\\usepackage{xcolor}\n");
     doc.push_str("\\usepackage{longtable}\n"); // For tables
     doc.push_str("\\usepackage{booktabs}\n"); // For better tables

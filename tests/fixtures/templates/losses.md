@@ -1,64 +1,61 @@
 # Template Loss Report
 
+## aaai
+- No losses detected
+
+## acm
+- No losses detected
+
+## ams
+- No losses detected
+
 ## arxiv
 - No losses detected
 
-## blank
+## book
 - No losses detected
 
-## book
-- preprocess-let-codeblock: 3 (e.g., Simplified code block body for function chapter | Simplified code block body for function dropcap | Simplified code block body for function epigraph)
-- preprocess-let-raw: 2 (e.g., Stored raw value for #let accent | Stored raw value for #let primary)
+## cvpr
+- No losses detected
 
-## cheatsheet
-- preprocess-let-codeblock: 2 (e.g., Simplified code block body for function formula-box | Simplified code block body for function highlight-box)
+## elsevier
+- No losses detected
 
-## homework
+## iclr
+- No losses detected
+
+## icml
 - No losses detected
 
 ## ieee
-- preprocess-let-codeblock: 1 (e.g., Simplified code block body for function ieee)
+- No losses detected
 
-## invoice
-- preprocess-let-raw: 3 (e.g., Stored raw value for #let gray | Stored raw value for #let light-gray | Stored raw value for #let primary)
-
-## lab-report
+## jmlr
 - No losses detected
 
 ## letter
 - No losses detected
 
-## meeting
-- preprocess-let-codeblock: 5 (e.g., Simplified code block body for function action | Simplified code block body for function meeting-header | Simplified code block body for function section)
-- preprocess-let-raw: 4 (e.g., Stored raw value for #let accent | Stored raw value for #let light | Stored raw value for #let primary)
+## lncs
+- No losses detected
 
-## notes
-- preprocess-let-codeblock: 6 (e.g., Simplified code block body for function definition | Simplified code block body for function lemma | Simplified code block body for function theorem)
+## neurips
+- No losses detected
 
 ## paper
 - No losses detected
-
-## poster
-- preprocess-let-codeblock: 2 (e.g., Simplified code block body for function poster-column | Simplified code block body for function section-header)
-- preprocess-let-raw: 4 (e.g., Stored raw value for #let accent | Stored raw value for #let primary | Stored raw value for #let secondary)
 
 ## report
 - No losses detected
 
 ## resume
-- preprocess-let-codeblock: 2 (e.g., Simplified code block body for function entry | Simplified code block body for function section)
-
-## slides
-- preprocess-let-codeblock: 3 (e.g., Simplified code block body for function section-slide | Simplified code block body for function slide | Simplified code block body for function title-slide)
-
-## syllabus
-- preprocess-let-codeblock: 2 (e.g., Simplified code block body for function important | Simplified code block body for function policy)
-- preprocess-let-raw: 4 (e.g., Stored raw value for #let accent | Stored raw value for #let light | Stored raw value for #let primary)
+- No losses detected
 
 ## thesis
 - No losses detected
 
+## tmlr
+- No losses detected
+
 ## Overall
-- preprocess-let-codeblock: 26
-- preprocess-let-raw: 17
 

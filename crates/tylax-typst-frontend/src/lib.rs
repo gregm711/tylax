@@ -727,6 +727,46 @@ fn node_full_text(node: &SyntaxNode) -> String {
     node.clone().into_text().to_string()
 }
 
+/// Unescape Typst string escape sequences back to their original characters.
+/// Handles: \\ → \, \" → ", \n → newline, \t → tab
+fn unescape_typst_string(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.peek() {
+                Some('\\') => {
+                    chars.next();
+                    out.push('\\');
+                }
+                Some('"') => {
+                    chars.next();
+                    out.push('"');
+                }
+                Some('n') => {
+                    chars.next();
+                    out.push('\n');
+                }
+                Some('t') => {
+                    chars.next();
+                    out.push('\t');
+                }
+                Some('r') => {
+                    chars.next();
+                    // Ignore \r (carriage return)
+                }
+                _ => {
+                    // Unknown escape - preserve as-is
+                    out.push('\\');
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 fn count_heading_markers(node: &SyntaxNode) -> usize {
     for child in node.children() {
         if child.kind() == SyntaxKind::HeadingMarker {
@@ -1215,7 +1255,9 @@ fn maybe_code_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Block> 
         for child in args.children() {
             if child.kind() == SyntaxKind::Str || child.kind() == SyntaxKind::Text {
                 let text = child.text().to_string();
-                return Some(Block::CodeBlock(text.trim_matches('"').to_string()));
+                let unquoted = text.trim_matches('"');
+                // Unescape Typst string escapes (e.g., \\ → \, \" → ")
+                return Some(Block::CodeBlock(unescape_typst_string(unquoted)));
             }
             if child.kind() == SyntaxKind::ContentBlock {
                 let text = node_full_text(&child);
@@ -1237,7 +1279,9 @@ fn maybe_code_block(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Block> 
 fn find_first_string(node: &SyntaxNode) -> Option<String> {
     match node.kind() {
         SyntaxKind::Str | SyntaxKind::Text => {
-            return Some(node.text().trim_matches('"').to_string())
+            let unquoted = node.text().trim_matches('"');
+            // Unescape Typst string escapes (e.g., \\ → \, \" → ")
+            return Some(unescape_typst_string(unquoted));
         }
         _ => {}
     }

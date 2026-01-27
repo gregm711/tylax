@@ -1,0 +1,220 @@
+\documentclass[letterpaper,twocolumn]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{times}
+\usepackage{helvet}
+\usepackage{courier}
+\usepackage[hyphens]{url}
+\usepackage{graphicx}
+\urlstyle{rm}
+\usepackage{amsmath,amssymb}
+\usepackage{bm}
+\usepackage[table]{xcolor}
+\usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{float}
+\usepackage{hyperref}
+\providecommand{\textsubscript}[1]{$_{\text{#1}}$}
+\hypersetup{
+  pdftitle={Learning to Reason: A Self-Supervised Approach to Logical Inference in Neural Networks},
+  pdfauthor={Jennifer Liu, Andrew Kim, Rachel Chen},
+}
+\title{Learning to Reason: A Self-Supervised Approach to Logical Inference in Neural Networks}
+\author{
+Jennifer Liu \\ Stanford University \\ jliu@stanford.edu \and
+Andrew Kim \\ Google DeepMind \\ akim@deepmind.com \and
+Rachel Chen \\ MIT CSAIL \\ rchen@mit.edu}
+\begin{document}
+\maketitle
+\begin{abstract}
+ Enabling neural networks to perform logical reasoning remains a fundamental challenge in artificial intelligence. Current approaches either rely on explicit symbolic representations or struggle to generalize beyond training distributions. We propose ReasonNet, a self-supervised learning framework that teaches neural networks to reason through automatically generated logical inference tasks. Our key insight is that compositional reasoning abilities can emerge from training on diverse, procedurally generated logical puzzles without explicit supervision on the reasoning process itself. ReasonNet achieves 94.2\% accuracy on standard logical reasoning benchmarks, outperforming previous methods by 12 percentage points. Furthermore, we demonstrate strong transfer to natural language reasoning tasks, suggesting that the learned representations capture general-purpose reasoning capabilities. 
+\end{abstract}
+\section{Introduction}
+
+Logical reasoning is a cornerstone of human intelligence, enabling us to draw conclusions from premises, identify contradictions, and construct valid arguments. While large language models have demonstrated impressive capabilities across many tasks, their ability to perform systematic logical reasoning remains limited \cite{marcus2020next}. Models often rely on statistical patterns rather than true logical inference, leading to failures on out-of-distribution examples and sensitivity to superficial problem features.
+
+This paper addresses the fundamental question: \textbf{Can neural networks learn to reason in a principled way?} We present ReasonNet, a framework that approaches this challenge through self-supervised learning on procedurally generated logical tasks. Our approach is motivated by three key observations:
+
+\begin{enumerate}
+  \item \textbf{Compositionality}: Complex reasoning can be decomposed into elementary inference steps
+  \item \textbf{Transferability}: Skills learned on synthetic tasks can transfer to real-world problems
+  \item \textbf{Scalability}: Self-supervised learning can leverage unlimited synthetic data
+\end{enumerate}
+
+Our contributions are:
+
+\begin{itemize}
+  \item A novel task generation framework producing diverse logical reasoning problems
+  \item A transformer architecture with explicit reasoning modules
+  \item State-of-the-art results on multiple reasoning benchmarks
+  \item Analysis revealing emergent reasoning strategies in trained models
+\end{itemize}
+
+\section{Related Work}
+
+\subsection{Neural Logical Reasoning}
+
+Early work on neural reasoning focused on differentiable theorem provers \cite{rocktaschel2017end}. These approaches maintain explicit symbolic representations but struggle with scalability. More recent work has explored end-to-end learning of logical operations \cite{evans2018learning}.
+
+\subsection{Self-Supervised Learning for Reasoning}
+
+Self-supervised learning has achieved remarkable success in NLP \cite{devlin2019bert} and computer vision \cite{he2022masked}. Applications to reasoning have been more limited, with most approaches focusing on specific domains like mathematics \cite{lewkowycz2022solving}.
+
+\subsection{Procedural Task Generation}
+
+The use of procedurally generated environments for learning has a long history in reinforcement learning \cite{cobbe2020leveraging}. Our work extends this idea to the domain of logical reasoning, creating diverse training curricula automatically.
+
+\section{Method}
+
+\subsection{Problem Formulation}
+
+We formalize logical reasoning as a sequence-to-sequence problem. Given a set of premises $P = {p_1, \ldots, p_n}$ and a query $q$, the goal is to determine whether $q$ follows logically from $P$:
+
+\[
+f(P, q) = \begin{cases}\text{True} & \text{if} P models q \\ \text{False} & \text{if} P models not q \\ \text{Unknown} & \text{otherwise}\end{cases}
+\]
+
+\subsection{Task Generation Framework}
+
+We generate training tasks by sampling from a probabilistic grammar over logical formulas:
+
+\begin{table}[t]
+\centering
+\caption{Distribution of logical rule types in generated tasks.}
+\label{tab:rules}
+\begin{tabular}{ccc}
+\toprule
+\textbf{Rule Type} & \textbf{Example} & \textbf{Frequency} \\
+Modus Ponens & $p \to q, p \Rightarrow q$ & 30\% \\
+Transitivity & $a \to b, b \to c \Rightarrow a \to c$ & 25\% \\
+Contradiction & $p, not p \Rightarrow bot$ & 20\% \\
+Disjunction & $p or q, not p \Rightarrow q$ & 15\% \\
+Quantified & $\forall x: P(x), P(a) \Rightarrow \text{True}$ & 10\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The generation process ensures:
+
+\begin{itemize}
+  \item \textbf{Diversity}: Each batch contains examples requiring different inference chains
+  \item \textbf{Difficulty progression}: Tasks range from single-step to multi-hop reasoning
+  \item \textbf{Balanced labels}: Equal proportions of True, False, and Unknown outcomes
+\end{itemize}
+
+\subsection{Model Architecture}
+
+ReasonNet builds on the transformer architecture \cite{vaswani2017attention} with three key modifications:
+
+\textbf{Reasoning Layers.} We introduce specialized reasoning layers that perform soft unification over premise representations:
+
+\[
+\mathbf{h}_\text{unified} = \sum_{i,j} \alpha_{i j} \text{Unify}(\mathbf{h}_i, \mathbf{h}_j)
+\]
+
+where $\alpha_{i j}$ are learned attention weights and Unify computes compatible substitutions.
+
+\textbf{Chain-of-Thought Module.} An explicit module generates intermediate reasoning steps before producing the final answer:
+
+\[
+\mathbf{r}_t = \text{TransformerBlock}(\mathbf{r}_{t-1}, \mathbf{H}_\text{premises})
+\]
+
+\textbf{Consistency Checker.} A final module verifies that the predicted answer is consistent with the generated reasoning chain.
+
+\subsection{Training Objective}
+
+The model is trained with a multi-task objective:
+
+\[
+\mathcal{L} = \mathcal{L}_\text{answer} + \lambda_1 \mathcal{L}_\text{CoT} + \lambda_2 \mathcal{L}_\text{consistency}
+\]
+
+where $\mathcal{L}_\text{answer}$ is cross-entropy on the final prediction, $\mathcal{L}_\text{CoT}$ supervises intermediate steps, and $\mathcal{L}_\text{consistency}$ penalizes contradictions.
+
+\section{Experiments}
+
+\subsection{Experimental Setup}
+
+\textbf{Benchmarks.} We evaluate on:
+
+\begin{itemize}
+  \item LogiQA \cite{liu2020logiqa}: Multiple-choice logical reasoning
+  \item ReClor \cite{yu2020reclor}: Reading comprehension requiring logical reasoning
+  \item FOLIO \cite{han2022folio}: First-order logic inference
+\end{itemize}
+
+\textbf{Baselines.} We compare against:
+
+\begin{itemize}
+  \item GPT-4 with chain-of-thought prompting \cite{wei2022chain}
+  \item PaLM 2 \cite{anil2023palm}
+  \item Previous SOTA on each benchmark
+\end{itemize}
+
+\begin{table}[t]
+\centering
+\caption{Accuracy on logical reasoning benchmarks. Best results in bold.}
+\label{tab:results}
+\begin{tabular}{ccccc}
+\toprule
+\textbf{Method} & \textbf{LogiQA} & \textbf{ReClor} & \textbf{FOLIO} & \textbf{Avg} \\
+GPT-4 (CoT) & 78.3\% & 81.2\% & 72.4\% & 77.3\% \\
+PaLM 2 & 76.1\% & 79.8\% & 70.9\% & 75.6\% \\
+Previous SOTA & 82.4\% & 84.1\% & 78.6\% & 81.7\% \\
+\textbf{ReasonNet} & \textbf{94.2\%} & \textbf{92.8\%} & \textbf{91.5\%} & \textbf{92.8\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Main Results}
+
+Table~\ref{tab:results} shows that ReasonNet significantly outperforms all baselines across benchmarks. The improvements are particularly pronounced on FOLIO, which requires multi-step first-order logic reasoning—exactly the capability our training procedure targets.
+
+\subsection{Ablation Study}
+
+\begin{table}[t]
+\centering
+\caption{Ablation study results (average across benchmarks).}
+\label{tab:ablation}
+\begin{tabular}{ccc}
+\toprule
+\textbf{Variant} & \textbf{Avg Accuracy} & \textbf{$\Delta$} \\
+Full model & 92.8\% & — \\
+w/o Reasoning Layers & 85.3\% & -7.5\% \\
+w/o CoT Module & 88.1\% & -4.7\% \\
+w/o Consistency Check & 90.4\% & -2.4\% \\
+Random task order & 89.7\% & -3.1\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:ablation} reveals that all components contribute to performance, with reasoning layers being most critical.
+
+\section{Analysis}
+
+\subsection{Emergent Reasoning Strategies}
+
+Analyzing the attention patterns and intermediate representations reveals that ReasonNet develops systematic reasoning strategies:
+
+\textbf{Variable Binding.} The model learns to track variable assignments across reasoning steps, as evidenced by consistent attention patterns when the same variable appears in multiple premises.
+
+\textbf{Proof Planning.} For complex problems, the model exhibits backward-chaining behavior, first identifying what needs to be proved and then searching for supporting premises.
+
+\subsection{Failure Analysis}
+
+Despite strong overall performance, ReasonNet struggles with:
+
+\begin{itemize}
+  \item Very long inference chains (>7 steps)
+  \item Reasoning with negated quantifiers
+  \item Problems requiring common-sense background knowledge
+\end{itemize}
+
+\section{Conclusion}
+
+We presented ReasonNet, a self-supervised framework for learning logical reasoning in neural networks. Through training on procedurally generated tasks, our model achieves state-of-the-art performance on diverse reasoning benchmarks. Our analysis reveals that the model develops interpretable reasoning strategies, suggesting that principled logical inference can emerge from self-supervised learning. Future work will extend this approach to more complex reasoning domains and investigate integration with symbolic systems.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+\end{document}

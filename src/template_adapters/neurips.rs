@@ -7,9 +7,9 @@ use crate::preamble_hints::{
     render_amsthm_definitions,
 };
 use crate::template_adapters::common::{
-    escape_latex, extract_named_args, extract_option_bool, extract_string_like,
-    extract_year_from_name, find_show_rule_with_prefix, parse_authors_with_affls,
-    render_authors_simple,
+    escape_latex, extract_bibliography_path, extract_named_args, extract_option_bool,
+    extract_string_like, extract_year_from_name, find_show_rule_with_prefix,
+    parse_authors_with_affls, render_authors_simple,
 };
 
 pub fn maybe_convert_neurips(input: &str) -> Option<String> {
@@ -32,6 +32,9 @@ pub fn maybe_convert_neurips(input: &str) -> Option<String> {
         .get("accepted")
         .and_then(|node| extract_option_bool(node, &lets))
         .unwrap_or(Some(false));
+    let bibliography = args
+        .get("bibliography")
+        .and_then(|node| extract_bibliography_path(node));
 
     let year = extract_year_from_name(&name, "neurips").unwrap_or_else(|| "2025".to_string());
     let style_pkg = format!("neurips_{}", year);
@@ -126,6 +129,12 @@ pub fn maybe_convert_neurips(input: &str) -> Option<String> {
     if !body.trim().is_empty() {
         out.push_str(&body);
         out.push('\n');
+    }
+    // Add bibliography if specified
+    if let Some(bib_path) = bibliography.as_deref() {
+        let bib_name = bib_path.trim_end_matches(".bib");
+        out.push_str("\\bibliographystyle{plainnat}\n");
+        out.push_str(&format!("\\bibliography{{{}}}\n", bib_name));
     }
     out.push_str("\\end{document}\n");
     Some(out)

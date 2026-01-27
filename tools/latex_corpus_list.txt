@@ -9,3 +9,7 @@ iclr latex-corpus/iclr/main.tex
 icml latex-corpus/icml/main.tex
 neurips latex-corpus/neurips/main.tex
 aaai latex-corpus/aaai/main.tex
+jmlr latex-corpus/jmlr/main.tex
+tmlr latex-corpus/tmlr/main.tex
+rlj latex-corpus/rlj/main.tex
+arxiv-2510.27688v1 latex-corpus/arxiv-2510.27688v1/iclr2026_conference.tex
