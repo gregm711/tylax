@@ -3,7 +3,7 @@
 //! Handles mathematical expressions, formulas, and math-specific constructs.
 
 use super::context::{ConvertContext, TokenType};
-use super::utils::{get_simple_text, is_content_node, UNICODE_TO_LATEX};
+use super::utils::{escape_latex_text, get_simple_text, is_content_node, UNICODE_TO_LATEX};
 use crate::data::maps::{DELIMITER_MAP, TYPST_TO_TEX};
 use crate::data::typst_compat::{MathHandler, TYPST_MATH_HANDLERS};
 use typst_syntax::{SyntaxKind, SyntaxNode};
@@ -402,7 +402,8 @@ pub fn convert_math_node(node: &SyntaxNode, ctx: &mut ConvertContext) {
             let text_str = text.as_str();
             let inner = text_str.trim_matches('"');
             ctx.push("\\text{");
-            ctx.push(inner);
+            // Escape special LaTeX characters inside \text{}
+            ctx.push(&escape_latex_text(inner));
             ctx.push("}");
             ctx.last_token = TokenType::Command;
         }
@@ -1578,6 +1579,9 @@ fn convert_unicode_in_text(text: &str) -> String {
             if chars.peek().map(|c| c.is_alphanumeric()).unwrap_or(false) {
                 result.push(' ');
             }
+        } else if ch == '%' {
+            // Escape % in math mode (still a comment character in LaTeX math)
+            result.push_str("\\%");
         } else {
             result.push(ch);
         }
