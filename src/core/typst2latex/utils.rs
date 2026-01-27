@@ -429,6 +429,8 @@ pub fn is_content_node(node: &SyntaxNode) -> bool {
             | SyntaxKind::RightParen
             | SyntaxKind::Space
             | SyntaxKind::Semicolon
+            | SyntaxKind::Named  // Skip named arguments (styling params like stroke: 0.5pt)
+            | SyntaxKind::Hash   // Skip Typst code markers
     )
 }
 

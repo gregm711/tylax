@@ -462,6 +462,18 @@ pub fn convert_math_node(node: &SyntaxNode, ctx: &mut ConvertContext) {
             }
         }
 
+        // Skip Hash tokens - they're Typst syntax markers, not content
+        SyntaxKind::Hash => {
+            // # in Typst introduces code expressions, skip in LaTeX output
+            return;
+        }
+
+        // Skip Named arguments - they're styling parameters, not content
+        SyntaxKind::Named => {
+            // Named args like stroke: 0.5pt are Typst-specific styling
+            return;
+        }
+
         _ => {
             // Recursively process children
             let child_count = node.children().count();
@@ -1582,6 +1594,9 @@ fn convert_unicode_in_text(text: &str) -> String {
         } else if ch == '%' {
             // Escape % in math mode (still a comment character in LaTeX math)
             result.push_str("\\%");
+        } else if ch == '#' {
+            // Escape # in math mode (macro parameter character in LaTeX)
+            result.push_str("\\#");
         } else {
             result.push(ch);
         }
