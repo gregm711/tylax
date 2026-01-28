@@ -2031,6 +2031,18 @@ fn maybe_inline_func(node: &SyntaxNode, losses: &mut Vec<Loss>) -> Option<Vec<In
                 }
             }
         }
+        "strong" => {
+            let content = extract_inline_content_from_call(node, losses);
+            if !content.is_empty() {
+                return Some(vec![Inline::Strong(content)]);
+            }
+        }
+        "emph" => {
+            let content = extract_inline_content_from_call(node, losses);
+            if !content.is_empty() {
+                return Some(vec![Inline::Emph(content)]);
+            }
+        }
         "ref" => {
             let mut supplement: Option<Vec<Inline>> = None;
             if let Some(args) = node.children().find(|c| c.kind() == SyntaxKind::Args) {

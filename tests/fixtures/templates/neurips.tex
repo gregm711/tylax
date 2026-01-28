@@ -54,7 +54,7 @@ Standard self-attention computes: $\text{Attention}(Q, K, V) = \text{softmax}((Q
 
 \subsection{Sparse Attention}
 
-Sparse attention restricts the attention pattern via a binary mask $M \in {0, 1}^{n times n}$: $\text{SparseAttn}(Q, K, V) = \text{softmax}((Q K^T) / \sqrt{d_k} + M_\text{neg}) V$ where $M_\text{neg}$ sets masked positions to $-infinity$. The complexity reduces to $O(\text{nnz}(M) dot d)$.
+Sparse attention restricts the attention pattern via a binary mask $M \in {0, 1}^{n times n}$: $\text{SparseAttn}(Q, K, V) = \text{softmax}((Q K^T) / \sqrt{d_k} + M_\text{neg}) V$ where $M_\text{neg}$ sets masked positions to $-\infty$. The complexity reduces to $O(\text{nnz}(M) dot d)$.
 
 \section{Method}
 

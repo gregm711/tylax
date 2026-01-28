@@ -1710,6 +1710,7 @@ fn match_sequence_at(input: &str, idx: usize) -> Option<(&'static str, usize)> {
 
 fn match_symbol_at(input: &str, idx: usize) -> Option<(&'static str, usize)> {
     const MAP: &[(&str, &str)] = &[
+        ("infinity", "\\infty"),
         ("oo", "\\infty"),
         ("dif", "\\mathrm{d}"),
         ("varepsilon", "\\varepsilon"),
