@@ -1595,18 +1595,25 @@ fn convert_string_entries(input: &str) -> String {
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'@' {
-            let tail = &input[i..];
-            if tail.len() >= 8 && tail[..8].eq_ignore_ascii_case("@string(") {
+            // Check for @string( pattern using bytes to avoid char boundary issues
+            let remaining = bytes.len() - i;
+            if remaining >= 8
+                && bytes[i..i + 8]
+                    .iter()
+                    .zip(b"@string(")
+                    .all(|(a, b)| a.eq_ignore_ascii_case(b))
+            {
                 out.extend_from_slice(b"@string{");
                 let mut j = i + 8;
                 let mut depth = 1usize;
                 while j < bytes.len() {
-                    match bytes[j] as char {
-                        '(' => depth += 1,
-                        ')' => {
+                    match bytes[j] {
+                        b'(' => depth += 1,
+                        b')' => {
                             depth = depth.saturating_sub(1);
                             if depth == 0 {
-                                out.extend_from_slice(input[i + 8..j].as_bytes());
+                                // Use bytes directly to avoid char boundary issues
+                                out.extend_from_slice(&bytes[i + 8..j]);
                                 out.push(b'}');
                                 i = j + 1;
                                 break;
@@ -1617,7 +1624,7 @@ fn convert_string_entries(input: &str) -> String {
                     j += 1;
                 }
                 if j >= bytes.len() {
-                    out.extend_from_slice(input[i + 8..].as_bytes());
+                    out.extend_from_slice(&bytes[i + 8..]);
                     break;
                 }
                 continue;
