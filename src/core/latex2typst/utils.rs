@@ -1221,6 +1221,108 @@ pub fn sanitize_loss_comment_boundaries(input: &str) -> String {
     input.replace("*/* tylax:loss:", "* /* tylax:loss:")
 }
 
+/// Strip unexpanded LaTeX macro arguments like #1, #2, etc.
+/// These are invalid in Typst code mode and indicate incomplete macro expansion.
+/// We replace them with `none` which is a valid Typst value in most contexts.
+pub fn strip_unexpanded_macro_args(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    let mut in_string = false;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => {
+                in_string = !in_string;
+                result.push(ch);
+            }
+            '#' if !in_string => {
+                // Check if next char is a digit 1-9
+                if let Some(&next) = chars.peek() {
+                    if ('1'..='9').contains(&next) {
+                        // Replace #N with `none` - a valid placeholder in most contexts
+                        chars.next(); // consume the digit
+                        result.push_str("none");
+                        continue;
+                    }
+                }
+                result.push(ch);
+            }
+            _ => {
+                result.push(ch);
+            }
+        }
+    }
+
+    result
+}
+
+/// Escape markup characters (* and _) inside Typst function content brackets.
+/// For example, `#super[*]` becomes `#super[\*]` to prevent `*` from being
+/// interpreted as strong markup start.
+pub fn escape_markup_in_function_brackets(input: &str) -> String {
+    let mut result = String::with_capacity(input.len() + 32);
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        // Look for #funcname[ pattern
+        if chars[i] == '#' && i + 1 < chars.len() && chars[i + 1].is_ascii_alphabetic() {
+            result.push('#');
+            i += 1;
+
+            // Consume function name
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '-') {
+                result.push(chars[i]);
+                i += 1;
+            }
+
+            // Check for content bracket
+            if i < chars.len() && chars[i] == '[' {
+                result.push('[');
+                i += 1;
+
+                // Process content inside brackets, tracking nested brackets
+                let mut depth = 1;
+                while i < chars.len() && depth > 0 {
+                    match chars[i] {
+                        '[' => {
+                            depth += 1;
+                            result.push('[');
+                        }
+                        ']' => {
+                            depth -= 1;
+                            result.push(']');
+                        }
+                        '*' | '_' if depth > 0 => {
+                            // Escape markup characters only if they would start markup
+                            // (not already escaped and not preceded by backslash)
+                            let prev_char = if result.len() > 0 {
+                                result.chars().last()
+                            } else {
+                                None
+                            };
+                            if prev_char != Some('\\') {
+                                result.push('\\');
+                            }
+                            result.push(chars[i]);
+                        }
+                        _ => {
+                            result.push(chars[i]);
+                        }
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result
+}
+
 // =============================================================================
 // Math Cleanup Helpers
 // =============================================================================

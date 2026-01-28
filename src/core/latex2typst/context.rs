@@ -1011,6 +1011,8 @@ impl LatexConverter {
         let sanitized = super::utils::normalize_typst_double_dollars(&sanitized);
         let sanitized = super::utils::normalize_typst_linebreaks(&sanitized);
         let sanitized = super::utils::normalize_typst_op_brackets(&sanitized);
+        let sanitized = super::utils::strip_unexpanded_macro_args(&sanitized);
+        let sanitized = super::utils::escape_markup_in_function_brackets(&sanitized);
 
         // Restore protected commands
         restore_protected_commands(&sanitized)
@@ -2325,7 +2327,10 @@ impl LatexConverter {
             doc.push('\n');
         }
         if let Some(color) = self.state.link_color.as_deref() {
-            let _ = writeln!(doc, "#show link: set text(fill: {})", color);
+            // Skip invalid color values (like "none" from unexpanded macro args)
+            if !color.is_empty() && color != "none" && !color.contains('#') {
+                let _ = writeln!(doc, "#show link: set text(fill: {})", color);
+            }
         }
 
         if let Some(paper) = self.state.page_paper.as_deref() {

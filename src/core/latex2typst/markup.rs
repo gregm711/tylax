@@ -5160,9 +5160,8 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                             }
                         }
                     }
-                    if !has_args {
-                        let _ = write!(output, "\"{}\"", base_name);
-                    }
+                    // If no arguments, don't emit anything extra in math mode.
+                    // The loss marker already records this was a loss.
                 } else {
                     // In text mode, output name as comment to avoid garbage text
                     let _ = write!(output, "{} /* \\{} */", loss_marker, base_name);
