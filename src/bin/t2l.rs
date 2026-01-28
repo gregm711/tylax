@@ -781,7 +781,10 @@ fn inject_class_hints(input: &str, base_dir: &Path) -> io::Result<String> {
     }
 }
 
-#[cfg(feature = "cli")]
+// Embedded template assets - only available with `embedded-templates` feature
+// These require local typst-corpus directory and are not included in remote builds
+
+#[cfg(all(feature = "cli", feature = "embedded-templates"))]
 fn write_cvpr_assets(out_dir: &Path) -> io::Result<()> {
     const CVPR: &str = include_str!("../../typst-corpus/ml-templates/cvpr/cvpr.typ");
     const CVPR_2022: &str = include_str!("../../typst-corpus/ml-templates/cvpr/cvpr2022.typ");
@@ -795,7 +798,7 @@ fn write_cvpr_assets(out_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "cli")]
+#[cfg(all(feature = "cli", feature = "embedded-templates"))]
 fn write_iclr_assets(out_dir: &Path) -> io::Result<()> {
     const ICLR: &str = include_str!("../../typst-corpus/ml-templates/iclr/iclr.typ");
     const ICLR_2025: &str =
@@ -808,7 +811,7 @@ fn write_iclr_assets(out_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "cli")]
+#[cfg(all(feature = "cli", feature = "embedded-templates"))]
 fn write_icml_assets(out_dir: &Path) -> io::Result<()> {
     const ICML: &str = include_str!("../../typst-corpus/ml-templates/icml/icml.typ");
     const ICML_2024: &str =
@@ -824,7 +827,7 @@ fn write_icml_assets(out_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "cli")]
+#[cfg(all(feature = "cli", feature = "embedded-templates"))]
 fn write_neurips_assets(out_dir: &Path) -> io::Result<()> {
     const NEURIPS: &str =
         include_str!("../../typst-corpus/ml-templates/neurips/neurips.typ");
@@ -845,14 +848,14 @@ fn write_neurips_assets(out_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "cli")]
+#[cfg(all(feature = "cli", feature = "embedded-templates"))]
 fn write_jmlr_assets(out_dir: &Path) -> io::Result<()> {
     const JMLR: &str = include_str!("../../typst-corpus/ml-templates/jmlr/jmlr.typ");
     fs::write(out_dir.join("jmlr.typ"), JMLR)?;
     Ok(())
 }
 
-#[cfg(feature = "cli")]
+#[cfg(all(feature = "cli", feature = "embedded-templates"))]
 fn write_tmlr_assets(out_dir: &Path) -> io::Result<()> {
     const TMLR: &str = include_str!("../../typst-corpus/ml-templates/tmlr/tmlr.typ");
     const TMLR_CSL: &str = include_str!("../../typst-corpus/ml-templates/tmlr/tmlr.csl");
@@ -861,14 +864,14 @@ fn write_tmlr_assets(out_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "cli")]
+#[cfg(all(feature = "cli", feature = "embedded-templates"))]
 fn write_rlj_assets(out_dir: &Path) -> io::Result<()> {
     const RLJ: &str = include_str!("../../typst-corpus/ml-templates/rlj/rlj.typ");
     fs::write(out_dir.join("rlj.typ"), RLJ)?;
     Ok(())
 }
 
-#[cfg(feature = "cli")]
+#[cfg(all(feature = "cli", feature = "embedded-templates"))]
 fn write_ml_template_assets(out_dir: &Path, flags: &TemplateAssetFlags) -> io::Result<()> {
     if flags.cvpr {
         write_cvpr_assets(out_dir)?;
@@ -890,6 +893,15 @@ fn write_ml_template_assets(out_dir: &Path, flags: &TemplateAssetFlags) -> io::R
     }
     if flags.rlj {
         write_rlj_assets(out_dir)?;
+    }
+    Ok(())
+}
+
+// No-op version when embedded-templates feature is not enabled
+#[cfg(all(feature = "cli", not(feature = "embedded-templates")))]
+fn write_ml_template_assets(_out_dir: &Path, flags: &TemplateAssetFlags) -> io::Result<()> {
+    if flags.any() {
+        eprintln!("Note: ML template assets not available (built without embedded-templates feature)");
     }
     Ok(())
 }

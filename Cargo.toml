@@ -68,6 +68,7 @@ default = ["cli"]
 cli = ["dep:clap"]
 wasm = ["dep:wasm-bindgen", "dep:console_error_panic_hook", "dep:serde-wasm-bindgen"]
 data-loading = ["dep:serde_yaml", "dep:csv", "dep:toml"]
+embedded-templates = []  # Embed ML template files (requires local typst-corpus)
 
 [dev-dependencies]
 pretty_assertions = "1.4"
