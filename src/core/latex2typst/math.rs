@@ -24,6 +24,7 @@ pub fn convert_formula(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             let cleaned = conv.cleanup_math_spacing(&math_content);
             let cleaned = super::utils::strip_unescaped_dollars(&cleaned);
             let mut cleaned = cleaned.trim().to_string();
+            cleaned = conv.fix_symbol_spacing(&cleaned);
             cleaned = conv.fix_multiletter_before_attachment(&cleaned);
             if cleaned.starts_with('/') {
                 cleaned = format!("\"{}\"", cleaned.trim());

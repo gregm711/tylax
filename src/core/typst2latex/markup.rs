@@ -226,46 +226,76 @@ pub fn convert_markup_node(node: &SyntaxNode, ctx: &mut ConvertContext) {
                 let child = children[i];
                 match child.kind() {
                     SyntaxKind::ListItem => {
-                        // Start an itemize environment for consecutive list items
-                        ctx.ensure_paragraph_break();
-                        ctx.push_line("\\begin{itemize}");
-                        ctx.indent_level += 1;
-
-                        // Collect all consecutive ListItems
-                        while i < children.len()
-                            && (children[i].kind() == SyntaxKind::ListItem
-                                || children[i].kind() == SyntaxKind::Space
-                                || children[i].kind() == SyntaxKind::Parbreak)
-                        {
-                            if children[i].kind() == SyntaxKind::ListItem {
-                                convert_list_item(children[i], ctx);
+                        if ctx.in_table_cell {
+                            // Inside table cells, output list items as text with bullet prefix
+                            while i < children.len()
+                                && (children[i].kind() == SyntaxKind::ListItem
+                                    || children[i].kind() == SyntaxKind::Space
+                                    || children[i].kind() == SyntaxKind::Parbreak)
+                            {
+                                if children[i].kind() == SyntaxKind::ListItem {
+                                    ctx.push("- ");
+                                    convert_list_item_content(children[i], ctx);
+                                }
+                                i += 1;
                             }
-                            i += 1;
-                        }
+                        } else {
+                            // Start an itemize environment for consecutive list items
+                            ctx.ensure_paragraph_break();
+                            ctx.push_line("\\begin{itemize}");
+                            ctx.indent_level += 1;
 
-                        ctx.indent_level -= 1;
-                        ctx.push_line("\\end{itemize}");
+                            // Collect all consecutive ListItems
+                            while i < children.len()
+                                && (children[i].kind() == SyntaxKind::ListItem
+                                    || children[i].kind() == SyntaxKind::Space
+                                    || children[i].kind() == SyntaxKind::Parbreak)
+                            {
+                                if children[i].kind() == SyntaxKind::ListItem {
+                                    convert_list_item(children[i], ctx);
+                                }
+                                i += 1;
+                            }
+
+                            ctx.indent_level -= 1;
+                            ctx.push_line("\\end{itemize}");
+                        }
                     }
                     SyntaxKind::EnumItem => {
-                        // Start an enumerate environment for consecutive enum items
-                        ctx.ensure_paragraph_break();
-                        ctx.push_line("\\begin{enumerate}");
-                        ctx.indent_level += 1;
-
-                        // Collect all consecutive EnumItems
-                        while i < children.len()
-                            && (children[i].kind() == SyntaxKind::EnumItem
-                                || children[i].kind() == SyntaxKind::Space
-                                || children[i].kind() == SyntaxKind::Parbreak)
-                        {
-                            if children[i].kind() == SyntaxKind::EnumItem {
-                                convert_enum_item(children[i], ctx);
+                        if ctx.in_table_cell {
+                            // Inside table cells, output enum items as text with + prefix
+                            while i < children.len()
+                                && (children[i].kind() == SyntaxKind::EnumItem
+                                    || children[i].kind() == SyntaxKind::Space
+                                    || children[i].kind() == SyntaxKind::Parbreak)
+                            {
+                                if children[i].kind() == SyntaxKind::EnumItem {
+                                    ctx.push("+ ");
+                                    convert_enum_item_content(children[i], ctx);
+                                }
+                                i += 1;
                             }
-                            i += 1;
-                        }
+                        } else {
+                            // Start an enumerate environment for consecutive enum items
+                            ctx.ensure_paragraph_break();
+                            ctx.push_line("\\begin{enumerate}");
+                            ctx.indent_level += 1;
 
-                        ctx.indent_level -= 1;
-                        ctx.push_line("\\end{enumerate}");
+                            // Collect all consecutive EnumItems
+                            while i < children.len()
+                                && (children[i].kind() == SyntaxKind::EnumItem
+                                    || children[i].kind() == SyntaxKind::Space
+                                    || children[i].kind() == SyntaxKind::Parbreak)
+                            {
+                                if children[i].kind() == SyntaxKind::EnumItem {
+                                    convert_enum_item(children[i], ctx);
+                                }
+                                i += 1;
+                            }
+
+                            ctx.indent_level -= 1;
+                            ctx.push_line("\\end{enumerate}");
+                        }
                     }
                     SyntaxKind::FuncCall => {
                         // Check if this is a figure/table that has a label following it
@@ -426,13 +456,31 @@ pub fn convert_markup_node(node: &SyntaxNode, ctx: &mut ConvertContext) {
 
         // Strong (bold)
         SyntaxKind::Strong => {
-            ctx.push("\\textbf{");
-            for child in node.children() {
-                if child.kind() != SyntaxKind::Star {
-                    convert_markup_node(child, ctx);
+            // Check for malformed strong (e.g., unmatched * or \*)
+            // These show up as Strong with Error children containing just "*"
+            let children: Vec<_> = node.children().collect();
+            let has_error_star = children.iter().any(|c| {
+                c.kind() == SyntaxKind::Error && c.text().to_string().trim() == "*"
+            });
+
+            if has_error_star {
+                // This is a malformed strong - output as literal text
+                // Also check if there's a preceding backslash (escape)
+                ctx.push("*");
+                for child in &children {
+                    if child.kind() != SyntaxKind::Star && child.kind() != SyntaxKind::Error {
+                        convert_markup_node(child, ctx);
+                    }
                 }
+            } else {
+                ctx.push("\\textbf{");
+                for child in &children {
+                    if child.kind() != SyntaxKind::Star {
+                        convert_markup_node(child, ctx);
+                    }
+                }
+                ctx.push("}");
             }
-            ctx.push("}");
             ctx.last_token = TokenType::Command;
         }
 
@@ -2428,6 +2476,15 @@ fn convert_list_item(node: &SyntaxNode, ctx: &mut ConvertContext) {
     ctx.newline();
 }
 
+/// Convert a single list item content only (for table cells)
+fn convert_list_item_content(node: &SyntaxNode, ctx: &mut ConvertContext) {
+    for child in node.children() {
+        if child.kind() != SyntaxKind::ListMarker {
+            convert_markup_node(child, ctx);
+        }
+    }
+}
+
 /// Convert a single enum item (ordered)
 fn convert_enum_item(node: &SyntaxNode, ctx: &mut ConvertContext) {
     ctx.push_indent();
@@ -2438,4 +2495,13 @@ fn convert_enum_item(node: &SyntaxNode, ctx: &mut ConvertContext) {
         }
     }
     ctx.newline();
+}
+
+/// Convert a single enum item content only (for table cells)
+fn convert_enum_item_content(node: &SyntaxNode, ctx: &mut ConvertContext) {
+    for child in node.children() {
+        if child.kind() != SyntaxKind::EnumMarker {
+            convert_markup_node(child, ctx);
+        }
+    }
 }

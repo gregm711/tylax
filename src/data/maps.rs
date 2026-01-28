@@ -16,6 +16,19 @@ lazy_static! {
     /// LaTeX command specification for Mitex
     pub static ref TEX_COMMAND_SPEC: CommandSpec = {
         let mut m = FxHashMap::default();
+
+        // Override single-letter commands that would otherwise consume the next
+        // character and break multi-letter commands like \ref, \rm, etc.
+        // By defining these with no args, they won't consume following letters.
+        m.insert("r".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::None },
+            alias: None,
+        }));
+        m.insert("t".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::None },
+            alias: None,
+        }));
+
         m.insert(" ".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::None },
             alias: Some("med".to_string()),
@@ -1880,6 +1893,31 @@ lazy_static! {
             alias: None,
         }));
         m.insert("url".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        // siunitx package commands
+        m.insert("num".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("qty".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("unit".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("ang".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
+            alias: None,
+        }));
+        m.insert("SI".to_string(), CommandSpecItem::Cmd(CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 2 } },
+            alias: None,
+        }));
+        m.insert("si".to_string(), CommandSpecItem::Cmd(CmdShape {
             args: ArgShape::Right { pattern: ArgPattern::FixedLenTerm { len: 1 } },
             alias: None,
         }));

@@ -398,6 +398,7 @@ fn wrap_in_document(content: &str, options: &T2LOptions) -> String {
     doc.push_str("\\usepackage{xcolor}\n");
     doc.push_str("\\usepackage{longtable}\n"); // For tables
     doc.push_str("\\usepackage{booktabs}\n"); // For better tables
+    doc.push_str("\\usepackage{multirow}\n"); // For multirow cells
     doc.push_str("\\usepackage{geometry}\n");
     doc.push_str("\\geometry{a4paper, margin=2cm}\n");
 

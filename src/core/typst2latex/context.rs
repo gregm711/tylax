@@ -137,6 +137,8 @@ pub struct ConvertContext {
     pub pending_label: Option<String>,
     /// Pending bibliography heading to reconcile with #bibliography
     pub pending_bibliography_heading: Option<PendingHeading>,
+    /// Whether we're inside a table cell (prevents list environments)
+    pub in_table_cell: bool,
 }
 
 /// Pending heading metadata (used to suppress duplicate bibliography headings)
@@ -166,6 +168,7 @@ impl ConvertContext {
             variables: HashMap::new(),
             pending_label: None,
             pending_bibliography_heading: None,
+            in_table_cell: false,
         }
     }
 
@@ -185,6 +188,7 @@ impl ConvertContext {
             variables: HashMap::new(),
             pending_label: None,
             pending_bibliography_heading: None,
+            in_table_cell: false,
         }
     }
 

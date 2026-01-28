@@ -331,6 +331,13 @@ fn parse_color(color: &str, model: Option<&str>) -> String {
 pub fn parse_color_expression(expr: &str) -> String {
     let expr = expr.trim();
 
+    // Strip surrounding braces (from LaTeX hyperref syntax like {blue!80!black})
+    let expr = if expr.starts_with('{') && expr.ends_with('}') {
+        &expr[1..expr.len() - 1]
+    } else {
+        expr
+    };
+
     // Check for xcolor mixing syntax: color1!percent!color2
     if expr.contains('!') {
         let parts: Vec<&str> = expr.split('!').collect();

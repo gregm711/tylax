@@ -108,7 +108,8 @@ pub fn convert_command_sym(conv: &mut LatexConverter, elem: SyntaxElement, outpu
                 return;
             }
             "@" => {
-                output.push_str("\\@"); // @ is special in Typst
+                // \@ in LaTeX is a spacing control that has no Typst equivalent
+                // Just strip it - don't output \@ which is invalid in Typst
                 return;
             }
             // Characters safe to output directly
@@ -160,9 +161,26 @@ pub fn convert_command_sym(conv: &mut LatexConverter, elem: SyntaxElement, outpu
 
         // Try symbol maps
         if let Some(typst) = lookup_symbol(cmd_name) {
+            // In math mode, ensure space before alphabetic symbols if previous char was digit
+            // This prevents "3.5times" from being parsed as a single identifier
+            if matches!(conv.state.mode, ConversionMode::Math)
+                && typst.starts_with(|c: char| c.is_ascii_alphabetic())
+                && !output.is_empty()
+                && !output.ends_with(|c: char| c.is_whitespace() || c == '(' || c == '[' || c == '{')
+            {
+                output.push(' ');
+            }
             output.push_str(typst);
             output.push(' ');
         } else {
+            // In math mode, ensure space before alphabetic command names if previous char was digit
+            if matches!(conv.state.mode, ConversionMode::Math)
+                && cmd_name.starts_with(|c: char| c.is_ascii_alphabetic())
+                && !output.is_empty()
+                && !output.ends_with(|c: char| c.is_whitespace() || c == '(' || c == '[' || c == '{')
+            {
+                output.push(' ');
+            }
             // Pass through unknown symbols
             output.push_str(cmd_name);
             output.push(' ');
@@ -828,13 +846,24 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 write_math_text(conv, &cmd, output);
             } else {
                 let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
-                let _ = write!(output, "#strong[{}] ", content);
+                // Prevent trailing backslash from escaping closing bracket
+                if content.ends_with('\\') {
+                    let _ = write!(output, "#strong[{} ] ", content);
+                } else {
+                    let _ = write!(output, "#strong[{}] ", content);
+                }
             }
         }
         "caps" => {
             let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
             if !content.trim().is_empty() {
-                let _ = write!(output, "#smallcaps[{}] ", content.trim());
+                let trimmed = content.trim();
+                // Prevent trailing backslash from escaping closing bracket
+                if trimmed.ends_with('\\') {
+                    let _ = write!(output, "#smallcaps[{} ] ", trimmed);
+                } else {
+                    let _ = write!(output, "#smallcaps[{}] ", trimmed);
+                }
             }
         }
         "textit" | "it" | "emph" => {
@@ -842,7 +871,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 write_math_text(conv, &cmd, output);
             } else {
                 let content = conv.convert_required_arg(&cmd, 0).unwrap_or_default();
-                let _ = write!(output, "#emph[{}] ", content);
+                // Prevent trailing backslash from escaping closing bracket
+                if content.ends_with('\\') {
+                    let _ = write!(output, "#emph[{} ] ", content);
+                } else {
+                    let _ = write!(output, "#emph[{}] ", content);
+                }
             }
         }
         "MakeUppercase" | "makeuppercase" | "MakeTextUppercase" | "maketextuppercase" => {
@@ -3126,18 +3160,24 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         "mathbf" => {
             // \mathbf{x} -> upright(bold(x)) for proper bold upright
             if let Some(content) = conv.convert_required_arg(&cmd, 0) {
-                let _ = write!(output, "upright(bold({})) ", content);
+                // Replace commas with 'comma' symbol to avoid argument separator issues
+                let safe_content = content.replace(',', " comma ");
+                let _ = write!(output, "upright(bold({})) ", safe_content);
             }
         }
         "boldsymbol" | "bm" => {
             // \boldsymbol and \bm just use bold()
             if let Some(content) = conv.convert_required_arg(&cmd, 0) {
-                let _ = write!(output, "bold({}) ", content);
+                // Replace commas with 'comma' symbol to avoid argument separator issues
+                let safe_content = content.replace(',', " comma ");
+                let _ = write!(output, "bold({}) ", safe_content);
             }
         }
         "mathit" => {
             if let Some(content) = conv.convert_required_arg(&cmd, 0) {
-                let _ = write!(output, "italic({}) ", content);
+                // Replace commas with 'comma' symbol to avoid argument separator issues
+                let safe_content = content.replace(',', " comma ");
+                let _ = write!(output, "italic({}) ", safe_content);
             }
         }
         "mathrm" => {
@@ -3146,14 +3186,18 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 if content.trim() == "d" || content.trim() == "dif" {
                     output.push_str("dif ");
                 } else {
-                    let _ = write!(output, "upright({}) ", content);
+                    // Replace commas with 'comma' symbol to avoid argument separator issues
+                    let safe_content = content.replace(',', " comma ");
+                    let _ = write!(output, "upright({}) ", safe_content);
                 }
             }
         }
         "rm" => {
             // \rm is an old-style font switch (no braces)
             if let Some(content) = conv.get_required_arg(&cmd, 0) {
-                let _ = write!(output, "upright({}) ", content);
+                // Replace commas with 'comma' symbol to avoid argument separator issues
+                let safe_content = content.replace(',', " comma ");
+                let _ = write!(output, "upright({}) ", safe_content);
             }
             // If no argument, just skip
         }
@@ -3306,7 +3350,8 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
         }
 
         // siunitx commands
-        "SI" | "si" => {
+        "SI" => {
+            // \SI{value}{unit} - old siunitx syntax
             let value = conv.get_required_arg(&cmd, 0);
             let unit = conv.get_required_arg(&cmd, 1);
             match (value, unit) {
@@ -3314,11 +3359,17 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                     let unit_str = conv.process_si_unit(&u);
                     let _ = write!(output, "${} space {}$", v, unit_str);
                 }
-                (None, Some(u)) => {
-                    let unit_str = conv.process_si_unit(&u);
-                    let _ = write!(output, "${}$", unit_str);
+                (Some(v), None) => {
+                    let _ = write!(output, "${}$", v);
                 }
                 _ => {}
+            }
+        }
+        "si" => {
+            // \si{unit} - unit only
+            if let Some(unit) = conv.get_required_arg(&cmd, 0) {
+                let unit_str = conv.process_si_unit(&unit);
+                let _ = write!(output, "${}$", unit_str);
             }
         }
         "qty" => {
@@ -3587,7 +3638,7 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                 output.push_str("\\*");
             }
         }
-        "@" => output.push_str("\\@"),
+        "@" => {} // \@ in LaTeX is spacing control - strip it
         "{" => output.push('{'),
         "}" => output.push('}'),
 
@@ -4968,6 +5019,14 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
 
             // Try symbol lookup
             if let Some(typst) = lookup_symbol(base_name) {
+                // In math mode, ensure space before alphabetic symbols if previous char was digit
+                if matches!(conv.state.mode, ConversionMode::Math)
+                    && typst.starts_with(|c: char| c.is_ascii_alphabetic())
+                    && !output.is_empty()
+                    && !output.ends_with(|c: char| c.is_whitespace() || c == '(' || c == '[' || c == '{')
+                {
+                    output.push(' ');
+                }
                 output.push_str(typst);
                 output.push(' ');
                 return;
@@ -5006,6 +5065,12 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
                         let allow_short_rest = rest.len() == 1
                             || ((prefix == "leq" || prefix == "geq") && rest.len() <= 2);
                         if rest_is_word && allow_short_rest {
+                            // Add leading space before alphabetic symbols if needed
+                            if !output.is_empty()
+                                && !output.ends_with(|c: char| c.is_whitespace() || c == '(' || c == '[' || c == '{')
+                            {
+                                output.push(' ');
+                            }
                             if let Some(typst) = lookup_symbol(prefix) {
                                 output.push_str(typst);
                             } else {
@@ -5043,6 +5108,19 @@ pub fn convert_command(conv: &mut LatexConverter, elem: SyntaxElement, output: &
             }
 
             if try_split_merged_command(conv, base_name, output) {
+                return;
+            }
+
+            // Handle LaTeX internal commands that start with @
+            // \@ is a spacing control, \@ssec etc. should just output the part after @
+            if let Some(rest) = base_name.strip_prefix('@') {
+                if rest.is_empty() {
+                    // \@ alone - just strip it (spacing control)
+                    return;
+                }
+                // Output the rest without the @ (this handles \@ssec -> ssec, etc.)
+                output.push_str(rest);
+                output.push(' ');
                 return;
             }
 
@@ -5244,6 +5322,13 @@ fn try_split_merged_command(
 
         if is_math {
             if let Some(sym) = lookup_symbol(prefix) {
+                // Add leading space before alphabetic symbols if needed
+                if sym.starts_with(|c: char| c.is_ascii_alphabetic())
+                    && !output.is_empty()
+                    && !output.ends_with(|c: char| c.is_whitespace() || c == '(' || c == '[' || c == '{')
+                {
+                    output.push(' ');
+                }
                 output.push_str(sym);
                 output.push(' ');
                 output.push_str(suffix);

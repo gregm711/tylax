@@ -471,6 +471,41 @@ fn normalize_bibtex_regular_entry(
         }
     }
 
+    // Entry types that require a year field for Typst's BibLaTeX parser
+    let needs_year = matches!(
+        entry_type.to_lowercase().as_str(),
+        "article"
+            | "book"
+            | "booklet"
+            | "inbook"
+            | "incollection"
+            | "inproceedings"
+            | "conference"
+            | "manual"
+            | "mastersthesis"
+            | "phdthesis"
+            | "proceedings"
+            | "techreport"
+            | "unpublished"
+            | "misc"
+    );
+
+    // Check if year field exists
+    let has_year = fields
+        .iter()
+        .any(|(f, _)| f.eq_ignore_ascii_case("year"));
+
+    // Inject a placeholder year if missing and required
+    if needs_year && !has_year {
+        fields.push(("year".to_string(), "0000".to_string()));
+    }
+
+    // Filter out empty fields that cause Typst's BibLaTeX parser to fail
+    let fields: Vec<_> = fields
+        .into_iter()
+        .filter(|(_, v)| !v.trim().is_empty())
+        .collect();
+
     let mut out = String::new();
     out.push('@');
     out.push_str(entry_type);
@@ -3193,7 +3228,12 @@ pub fn convert_caption_text(text: &str) -> String {
                 "textbf" | "bf" => {
                     result.push_str("#strong[");
                     if let Some(content) = arg_content {
-                        result.push_str(&convert_caption_text(&content));
+                        let text = convert_caption_text(&content);
+                        result.push_str(&text);
+                        // Prevent trailing backslash from escaping closing bracket
+                        if text.ends_with('\\') {
+                            result.push(' ');
+                        }
                     }
                     result.push(']');
                     result.push(' ');
@@ -3201,7 +3241,12 @@ pub fn convert_caption_text(text: &str) -> String {
                 "textit" | "it" | "emph" => {
                     result.push_str("#emph[");
                     if let Some(content) = arg_content {
-                        result.push_str(&convert_caption_text(&content));
+                        let text = convert_caption_text(&content);
+                        result.push_str(&text);
+                        // Prevent trailing backslash from escaping closing bracket
+                        if text.ends_with('\\') {
+                            result.push(' ');
+                        }
                     }
                     result.push(']');
                     result.push(' ');

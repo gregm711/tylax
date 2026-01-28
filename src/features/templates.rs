@@ -635,6 +635,10 @@ fn render_linebreaks(text: &str) -> String {
             }
         }
     }
+    // Ensure output doesn't end with backslash which would escape closing bracket
+    if out.ends_with('\\') {
+        out.push(' ');
+    }
     out
 }
 

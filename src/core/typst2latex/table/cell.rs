@@ -175,6 +175,7 @@ impl LatexCell {
                             // Cell content [...]
                             let mut cell_ctx = ConvertContext::new();
                             cell_ctx.push_env(EnvironmentContext::Table);
+                            cell_ctx.in_table_cell = true;
                             convert_markup_node(arg, &mut cell_ctx);
                             content = cell_ctx.finalize();
                         }
@@ -182,6 +183,7 @@ impl LatexCell {
                             // Cell content can be a function call like text(...)[...]
                             let mut cell_ctx = ConvertContext::new();
                             cell_ctx.push_env(EnvironmentContext::Table);
+                            cell_ctx.in_table_cell = true;
                             convert_markup_node(arg, &mut cell_ctx);
                             let func_content = cell_ctx.finalize();
                             if !func_content.is_empty() {
@@ -198,6 +200,7 @@ impl LatexCell {
         if content.is_empty() {
             let mut cell_ctx = ConvertContext::new();
             cell_ctx.push_env(EnvironmentContext::Table);
+            cell_ctx.in_table_cell = true;
             for child in node.children() {
                 if child.kind() == SyntaxKind::ContentBlock {
                     convert_markup_node(child, &mut cell_ctx);

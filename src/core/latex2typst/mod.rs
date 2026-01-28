@@ -419,6 +419,27 @@ mod tests {
     }
 
     #[test]
+    fn test_times_symbol() {
+        // Test just \times
+        let output1 = latex_math_to_typst(r"\times");
+        println!("Just \\times: '{}'", output1);
+
+        // Test times with number before it
+        let output2 = latex_math_to_typst(r"3.5\times");
+        println!("3.5\\times: '{}'", output2);
+
+        // Test with explicit space
+        let output3 = latex_math_to_typst(r"3.5 \times");
+        println!("3.5 \\times: '{}'", output3);
+
+        // Should have space between number and times for valid Typst math
+        assert!(output2.contains("3.5 times"),
+            "Expected '3.5 times' but got: '{}'", output2);
+        // Should contain "times" not "imes"
+        assert!(output2.contains("times"), "Output was: {}", output2);
+    }
+
+    #[test]
     fn test_simple_document() {
         let input = r"\documentclass{article}
 \begin{document}

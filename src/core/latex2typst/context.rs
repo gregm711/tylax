@@ -1054,8 +1054,9 @@ impl LatexConverter {
         // Restore mode
         self.state.mode = old_mode;
 
-        // Light post-processing - just trim
-        output.trim().to_string()
+        // Apply symbol spacing fix and trim
+        let result = self.fix_symbol_spacing(&output);
+        result.trim().to_string()
     }
 
     /// Convert a complete LaTeX document and return a loss report
@@ -1883,7 +1884,9 @@ impl LatexConverter {
                 }
                 // Don't split if this is a known Typst symbol name
                 let is_symbol = TYPST_SYMBOLS.contains(&word.as_str());
-                if word.len() > 1 && k < chars.len() && (chars[k] == '_' || chars[k] == '^') && !is_symbol {
+                // Don't split if preceded by '.' (symbol modifier like phi.alt, epsilon.alt)
+                let is_modifier = start > 0 && chars[start - 1] == '.';
+                if word.len() > 1 && k < chars.len() && (chars[k] == '_' || chars[k] == '^') && !is_symbol && !is_modifier {
                     for (idx, letter) in word.chars().enumerate() {
                         if idx > 0 {
                             out.push(' ');
@@ -1981,6 +1984,38 @@ impl LatexConverter {
             "ldots",
             "vdots",
             "ddots",
+            // Math operators that need space before them
+            "times",
+            "div",
+            "cdot",
+            "ast",
+            "star",
+            "circ",
+            "bullet",
+            "diamond",
+            "oplus",
+            "ominus",
+            "otimes",
+            "oslash",
+            "odot",
+            "cap",
+            "cup",
+            "wedge",
+            "vee",
+            "setminus",
+            "triangle",
+            "triangledown",
+            "triangleleft",
+            "triangleright",
+            "lhd",
+            "rhd",
+            "unlhd",
+            "unrhd",
+            "bigcirc",
+            "dagger",
+            "ddagger",
+            "amalg",
+            "wr",
         ];
 
         let mut result = input.to_string();
@@ -2023,6 +2058,15 @@ impl LatexConverter {
                 }
             }
         }
+
+        // Fix leading superscript/subscript with no base (e.g., "^(star)" -> "\"\"^(star)")
+        // This handles cases like ${}^\star$ in LaTeX which produce ^(star) with no base
+        if result.starts_with("^(") || result.starts_with("_(") {
+            result = format!("\"\"{}",  result);
+        }
+        // Also fix after whitespace: " ^(" -> " \"\"^("
+        result = result.replace(" ^(", " \"\"^(");
+        result = result.replace(" _(", " \"\"_(");
 
         result
     }
@@ -2496,9 +2540,7 @@ impl LatexConverter {
         // Clean up content
         let cleaned_content = clean_whitespace(&content);
         doc.push_str(&cleaned_content);
-        if self.state.template_kind == Some(TemplateKind::Cvpr) {
-            doc.push_str("\n]\n");
-        }
+        // Note: CVPR closing bracket removed - now using inline styling
 
         // Add warnings as comments
         let warnings = dedupe_string_warnings(self.state.warnings.clone());
@@ -3489,6 +3531,9 @@ impl LatexConverter {
     ) -> String {
         let mut out = String::new();
 
+        // Enable equation numbering (fine-lncs doesn't enable by default)
+        out.push_str("#set math.equation(numbering: \"(1)\")\n\n");
+
         let blocks = self.collect_author_blocks();
         let mut institute_defs: Vec<(String, String, Option<String>, Option<String>)> = Vec::new();
         let mut institute_keys: HashMap<String, String> = HashMap::new();
@@ -3870,7 +3915,8 @@ impl LatexConverter {
         abstract_text: Option<&str>,
     ) -> String {
         let mut out = String::new();
-        out.push_str("#import \"/cvpr.typ\": cvpr\n\n");
+        // Note: CVPR template uses #show: cvpr2025.with(...) but we use inline styling
+        // out.push_str("#import \"@preview/blind-cvpr:0.7.0\": cvpr2025\n\n");
 
         let mut author_entries: Vec<String> = Vec::new();
         let mut affl_entries: Vec<String> = Vec::new();
@@ -4059,34 +4105,40 @@ impl LatexConverter {
             authors_value.push_str("), ())");
         }
 
-        out.push_str("#cvpr(\n");
+        // Generate inline content with basic styling (not using cvpr template function)
+        out.push_str("#set page(paper: \"us-letter\", columns: 2, margin: (x: 0.75in, y: 1in))\n");
+        out.push_str("#set text(size: 10pt)\n");
+        out.push_str("#set par(justify: true)\n");
+        out.push_str("#set heading(numbering: \"1.\")\n");
+        out.push_str("#set math.equation(numbering: \"(1)\")\n\n");
+
         if let Some(title) = title {
             let escaped = super::utils::escape_typst_text(title);
-            let _ = writeln!(out, "  title: [{}],", escaped);
+            let _ = writeln!(out, "#align(center)[#text(size: 14pt, weight: \"bold\")[{}]]\n", escaped);
         }
-        let accepted = if self.state.cvpr_review {
-            "false"
-        } else if self.state.cvpr_final {
-            "true"
-        } else {
-            "none"
-        };
-        let _ = writeln!(out, "  accepted: {},", accepted);
-        if let Some(id) = self.state.cvpr_paper_id.as_deref() {
-            let _ = writeln!(out, "  id: \"{}\",", id);
+
+        // Output authors in a simple format
+        if !author_entries.is_empty() {
+            out.push_str("#align(center)[\n");
+            for entry in &author_entries {
+                // entry is like: (name: "...", affl: ("affl1",), email: "...")
+                // Extract just the name for display
+                if let Some(name_start) = entry.find("name: \"") {
+                    let name_start = name_start + 7;
+                    if let Some(name_end) = entry[name_start..].find('"') {
+                        let name = &entry[name_start..name_start + name_end];
+                        let _ = writeln!(out, "  {}", name);
+                    }
+                }
+            }
+            out.push_str("]\n\n");
         }
-        if let Some(year) = self.state.cvpr_conf_year.as_deref() {
-            let _ = writeln!(out, "  aux: (conf-year: \"{}\"),", year);
-        }
-        let _ = writeln!(out, "  authors: {},", authors_value);
-        if let Some(extras) = extras_line.as_deref() {
-            let _ = writeln!(out, "  extras: [{}],", extras);
-        }
+
         if let Some(abs) = abstract_text {
             let cleaned = strip_abstract_label(abs);
-            let _ = writeln!(out, "  abstract: [{}],", cleaned.trim());
+            let _ = writeln!(out, "#block(width: 100%, inset: 1em)[#text(style: \"italic\")[*Abstract.* {}]]\n", cleaned.trim());
         }
-        out.push_str(")[\n\n");
+        out.push_str("\n");
 
         out
     }
@@ -4190,7 +4242,7 @@ impl LatexConverter {
         }
 
         let mut out = String::new();
-        out.push_str("#import \"/iclr.typ\": iclr\n\n");
+        out.push_str("#import \"@preview/clear-iclr:0.7.0\": iclr\n\n");
         out.push_str("#show: iclr.with(\n");
         if let Some(title) = title {
             let escaped = super::utils::escape_typst_text(title);
@@ -4249,7 +4301,7 @@ impl LatexConverter {
         };
 
         let mut out = String::new();
-        let _ = writeln!(out, "#import \"/{}.typ\": {}", template, template);
+        let _ = writeln!(out, "#import \"@preview/lucky-icml:0.7.0\": {}", template);
         out.push('\n');
         let _ = writeln!(out, "#show: {}.with(", template);
         if let Some(title) = title {
@@ -4303,7 +4355,7 @@ impl LatexConverter {
         };
 
         let mut out = String::new();
-        let _ = writeln!(out, "#import \"/{}.typ\": {}", template, template);
+        let _ = writeln!(out, "#import \"@preview/bloated-neurips:0.7.0\": {}", template);
         out.push('\n');
         let _ = writeln!(out, "#show: {}.with(", template);
         if let Some(title) = title {
@@ -4358,7 +4410,7 @@ impl LatexConverter {
         let authors_value = self.format_affl_tuple(&author_entries, &affl_entries);
 
         let mut out = String::new();
-        out.push_str("#import \"/jmlr.typ\": jmlr\n\n");
+        out.push_str("#import \"@preview/classic-jmlr:0.7.0\": jmlr\n\n");
         out.push_str("#show: jmlr.with(\n");
         if let Some(title) = title {
             let escaped = super::utils::escape_typst_text(title);
@@ -4404,7 +4456,7 @@ impl LatexConverter {
         let authors_value = self.format_affl_tuple(&author_entries, &affl_entries);
 
         let mut out = String::new();
-        out.push_str("#import \"/tmlr.typ\": tmlr\n\n");
+        out.push_str("#import \"@preview/smooth-tmlr:0.7.0\": tmlr\n\n");
         out.push_str("#show: tmlr.with(\n");
         if let Some(title) = title {
             let escaped = super::utils::escape_typst_text(title);
@@ -4457,7 +4509,7 @@ impl LatexConverter {
         let authors_value = self.format_affl_tuple(&author_entries, &affl_entries);
 
         let mut out = String::new();
-        out.push_str("#import \"/rlj.typ\": rlj\n\n");
+        out.push_str("#import \"@preview/pioneering-rlj:0.7.0\": rlj\n\n");
         out.push_str("#show: rlj.with(\n");
         if let Some(title) = title {
             let escaped = super::utils::escape_typst_text(title);
