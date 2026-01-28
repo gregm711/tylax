@@ -3801,6 +3801,47 @@ impl LatexConverter {
         authors_value
     }
 
+    /// Format authors as a flat array for lucky-icml package.
+    /// Each author has their affiliation info inline (not referenced).
+    fn format_icml_authors_flat(&self, blocks: &[AuthorBlock]) -> String {
+        let mut out = String::new();
+        out.push_str("(\n");
+        for block in blocks {
+            let name = block.name.as_deref().unwrap_or("").trim();
+            if name.is_empty() {
+                continue;
+            }
+            let (department, institution, mut location_parts, email, extra_parts) =
+                self.extract_author_fields(block);
+            location_parts.extend(extra_parts);
+
+            out.push_str("    (\n");
+            let escaped_name = super::utils::escape_typst_string(name);
+            let _ = writeln!(out, "      name: \"{}\",", escaped_name);
+            if let Some(dept) = department.as_deref() {
+                let escaped = super::utils::escape_typst_string(dept);
+                let _ = writeln!(out, "      department: \"{}\",", escaped);
+            }
+            if let Some(org) = institution.as_deref() {
+                let escaped = super::utils::escape_typst_string(org);
+                let _ = writeln!(out, "      organization: \"{}\",", escaped);
+            }
+            if !location_parts.is_empty() {
+                let escaped = super::utils::escape_typst_string(&location_parts.join(", "));
+                let _ = writeln!(out, "      location: \"{}\",", escaped);
+            }
+            if let Some(em) = email.as_deref() {
+                let escaped = super::utils::escape_typst_string(em.trim());
+                if !escaped.is_empty() {
+                    let _ = writeln!(out, "      email: \"{}\",", escaped);
+                }
+            }
+            out.push_str("    ),\n");
+        }
+        out.push_str("  )");
+        out
+    }
+
     fn template_year_from_package(&self) -> Option<u32> {
         let package = self.state.template_package.as_deref()?;
         let digits: String = package.chars().filter(|ch| ch.is_ascii_digit()).collect();
@@ -4289,52 +4330,56 @@ impl LatexConverter {
         title: Option<&str>,
         author: Option<&str>,
         abstract_text: Option<&str>,
-        keywords: &[String],
+        _keywords: &[String],
     ) -> String {
-        let blocks = self.collect_author_blocks_from_arg(author);
-        let (author_entries, affl_entries) = self.build_author_affl_entries(&blocks);
-        let authors_value = self.format_affl_tuple(&author_entries, &affl_entries);
-
-        let template = match self.template_year_from_package() {
-            Some(2024) => "icml2024",
-            _ => "icml2025",
-        };
-
+        // Note: lucky-icml package v0.7.0 is broken with Typst 0.14+
+        // Using inline styling as a workaround
         let mut out = String::new();
-        let _ = writeln!(out, "#import \"@preview/lucky-icml:0.7.0\": {}", template);
-        out.push('\n');
-        let _ = writeln!(out, "#show: {}.with(", template);
+
+        // ICML-style page setup (two-column, US letter)
+        out.push_str("#set page(paper: \"us-letter\", columns: 2, margin: (x: 0.75in, y: 1in))\n");
+        out.push_str("#set text(size: 10pt, font: \"Times New Roman\")\n");
+        out.push_str("#set par(justify: true)\n");
+        out.push_str("#set heading(numbering: \"1.\")\n");
+        out.push_str("#set math.equation(numbering: \"(1)\")\n\n");
+
+        // Title
         if let Some(title) = title {
             let escaped = super::utils::escape_typst_text(title);
-            let _ = writeln!(out, "  title: [{}],", escaped);
+            out.push_str("#align(center)[\n");
+            let _ = writeln!(out, "  #text(size: 14pt, weight: \"bold\")[{}]", escaped);
+            out.push_str("]\n\n");
         }
-        let _ = writeln!(out, "  authors: {},", authors_value);
-        if !keywords.is_empty() {
-            out.push_str("  keywords: (");
-            let mut first = true;
-            for kw in keywords {
-                let kw = kw.trim();
-                if kw.is_empty() {
-                    continue;
+
+        // Authors (simplified - just names)
+        if let Some(author) = author {
+            let blocks = self.collect_author_blocks_from_arg(Some(author));
+            if !blocks.is_empty() {
+                out.push_str("#align(center)[\n");
+                let names: Vec<_> = blocks
+                    .iter()
+                    .filter_map(|b| b.name.as_deref())
+                    .map(|n| n.trim())
+                    .filter(|n| !n.is_empty())
+                    .collect();
+                if !names.is_empty() {
+                    out.push_str("  #text(size: 10pt)[");
+                    out.push_str(&names.join(", "));
+                    out.push_str("]\n");
                 }
-                if !first {
-                    out.push_str(", ");
-                }
-                first = false;
-                let escaped = super::utils::escape_typst_string(kw);
-                out.push('"');
-                out.push_str(&escaped);
-                out.push('"');
+                out.push_str("]\n\n");
             }
-            out.push_str("),\n");
         }
-        let accepted = if self.state.icml_accepted { "true" } else { "false" };
-        let _ = writeln!(out, "  accepted: {},", accepted);
+
+        // Abstract
         if let Some(abs) = abstract_text {
             let cleaned = strip_abstract_label(abs);
-            let _ = writeln!(out, "  abstract: [{}],", cleaned.trim());
+            out.push_str("#align(center)[#text(weight: \"bold\")[Abstract]]\n\n");
+            out.push_str("#pad(x: 0.25in)[\n");
+            let _ = writeln!(out, "  {}", cleaned.trim());
+            out.push_str("]\n\n");
         }
-        out.push_str(")\n\n");
+
         out
     }
 
